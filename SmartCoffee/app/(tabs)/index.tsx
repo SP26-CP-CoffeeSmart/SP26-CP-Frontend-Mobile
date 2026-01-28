@@ -1,99 +1,193 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
-interface CoffeeCard {
+interface MenuItem {
   id: string;
   name: string;
+  author: string;
+  versions: number;
   image: any;
-  flavor: string;
-  time: string;
-  difficulty: string;
-  level: string;
+  isApplied?: boolean;
 }
 
-export default function AIRecommendationsScreen() {
-  const router = useRouter();
+interface BeverageItem {
+  id: string;
+  name: string;
+  flavor: string;
+  time: string;
+  image: any;
+}
 
-  const coffeeRecommendations: CoffeeCard[] = [
+export default function HomeScreen() {
+  const router = useRouter();
+  const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
+
+  const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
+
+  const menuItems: MenuItem[] = [
+    {
+      id: '1',
+      name: 'Summer Lover',
+      author: 'John Smith',
+      versions: 3,
+      image: require('@/assets/images/partial-react-logo.png'),
+      isApplied: true,
+    },
+    {
+      id: '2',
+      name: 'Relaxing',
+      author: 'John Smith',
+      versions: 2,
+      image: require('@/assets/images/partial-react-logo.png'),
+    },
+  ];
+
+  const beverages: BeverageItem[] = [
     {
       id: '1',
       name: 'Cold Brew',
-      image: require('@/assets/images/partial-react-logo.png'), // placeholder
       flavor: 'Bitter',
       time: '5 min',
-      difficulty: 'Easy',
-      level: 'High',
+      image: require('@/assets/images/partial-react-logo.png'),
     },
     {
       id: '2',
       name: 'Lemon Espresso',
-      image: require('@/assets/images/partial-react-logo.png'), // placeholder
       flavor: 'Bitter',
-      time: '10 min',
-      difficulty: 'Med',
-      level: 'Med',
-    },
-    {
-      id: '3',
-      name: 'Blended Coffee',
-      image: require('@/assets/images/partial-react-logo.png'), // placeholder
-      flavor: 'Sweet',
       time: '5 min',
-      difficulty: 'Med',
-      level: 'Med',
-    },
-    {
-      id: '4',
-      name: 'Matcha Espresso',
-      image: require('@/assets/images/partial-react-logo.png'), // placeholder
-      flavor: 'Bitter',
-      time: '15 min',
-      difficulty: 'High',
-      level: 'Low',
+      image: require('@/assets/images/partial-react-logo.png'),
     },
   ];
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#000" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI Recommendations</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <View style={styles.greetingRow}>
+              <Ionicons name="sunny-outline" size={20} color="#F59E0B" />
+              <Text style={styles.greeting}>Good Morning</Text>
+            </View>
+            <Text style={styles.userName}>John Smith</Text>
+          </View>
+          <TouchableOpacity>
+            <Ionicons name="cart-outline" size={28} color="#000" />
+          </TouchableOpacity>
+        </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Results Section */}
-        <Text style={styles.sectionTitle}>Results</Text>
+        {/* Menu List Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Menu List</Text>
+            <TouchableOpacity>
+              <Text style={styles.newMenuLink}>New Menu</Text>
+            </TouchableOpacity>
+          </View>
 
-        {/* Coffee Grid */}
-        <View style={styles.grid}>
-          {coffeeRecommendations.map((coffee) => (
-            <View key={coffee.id} style={styles.card}>
-              <Image source={coffee.image} style={styles.cardImage} />
-              <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>{coffee.name}</Text>
-                <View style={styles.cardInfo}>
-                  <View style={styles.infoRow}>
-                    <Ionicons name="cafe-outline" size={14} color="#8B7355" />
-                    <Text style={styles.infoText}>{coffee.flavor}</Text>
-                    <Ionicons name="time-outline" size={14} color="#8B7355" style={{ marginLeft: 8 }} />
-                    <Text style={styles.infoText}>{coffee.time}</Text>
+          {/* Category Tabs */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoriesContainer}
+          >
+            {categories.map((category) => (
+              <TouchableOpacity
+                key={category}
+                style={[
+                  styles.categoryTab,
+                  selectedCategory === category && styles.categoryTabActive,
+                ]}
+                onPress={() => setSelectedCategory(category)}
+              >
+                <Text
+                  style={[
+                    styles.categoryText,
+                    selectedCategory === category && styles.categoryTextActive,
+                  ]}
+                >
+                  {category}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Menu Cards */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.menuCardsContainer}
+          >
+            {menuItems.map((item) => (
+              <View key={item.id} style={styles.menuCard}>
+                <View style={styles.menuCardHeader}>
+                  <View>
+                    <Text style={styles.menuCardTitle}>{item.name}</Text>
+                    <View style={styles.authorRow}>
+                      <Ionicons name="person-circle-outline" size={16} color="#8B6835" />
+                      <Text style={styles.authorText}>{item.author}</Text>
+                    </View>
                   </View>
-                  <View style={styles.infoRow}>
-                    <Ionicons name="flame-outline" size={14} color="#D97706" />
-                    <Text style={styles.difficultyText}>{coffee.difficulty}</Text>
-                    <Ionicons name="flash-outline" size={14} color="#D97706" style={{ marginLeft: 8 }} />
-                    <Text style={styles.levelText}>{coffee.level}</Text>
+                  <Text style={styles.versionsText}>{item.versions} versions</Text>
+                </View>
+
+                <Image source={item.image} style={styles.menuCardImage} />
+
+                <View style={styles.menuCardActions}>
+                  {item.isApplied && (
+                    <View style={styles.appliedBadge}>
+                      <Ionicons name="checkmark-circle" size={14} color="#8B6835" />
+                      <Text style={styles.appliedText}>Applied</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity style={styles.actionButton}>
+                    <Ionicons name="create-outline" size={14} color="#8B6835" />
+                    <Text style={styles.actionText}>Edit</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.actionButton}>
+                    <Ionicons name="bookmark-outline" size={14} color="#8B6835" />
+                    <Text style={styles.actionText}>Rating</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Your Beverages Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Your Beverages</Text>
+            <TouchableOpacity>
+              <Text style={styles.seeAllLink}>See All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.beveragesContainer}
+          >
+            {beverages.map((item) => (
+              <View key={item.id} style={styles.beverageCard}>
+                <TouchableOpacity style={styles.editIconButton}>
+                  <Ionicons name="create-outline" size={20} color="#000" />
+                </TouchableOpacity>
+                <Image source={item.image} style={styles.beverageImage} />
+                <View style={styles.beverageInfo}>
+                  <Text style={styles.beverageName}>{item.name}</Text>
+                  <View style={styles.beverageDetails}>
+                    <Ionicons name="cafe-outline" size={12} color="#8B6835" />
+                    <Text style={styles.beverageDetailText}>{item.flavor}</Text>
+                    <Ionicons name="time-outline" size={12} color="#8B6835" style={{ marginLeft: 8 }} />
+                    <Text style={styles.beverageDetailText}>{item.time}</Text>
                   </View>
                 </View>
               </View>
-            </View>
-          ))}
+            ))}
+          </ScrollView>
         </View>
 
         {/* Suggestion Section */}
@@ -102,12 +196,22 @@ export default function AIRecommendationsScreen() {
             <Ionicons name="bulb-outline" size={20} color="#000" />
             <Text style={styles.suggestionTitle}>Suggestion:</Text>
           </View>
-          <Text style={styles.suggestionText}>Not the recipe you are looking for ?</Text>
-          <TouchableOpacity style={styles.manualButton}>
-            <Text style={styles.manualButtonText}>Create Manually Now</Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFF" />
-          </TouchableOpacity>
+          <Text style={styles.suggestionText}>
+            Create a recipe based on flavor, style, and cost preferences.
+          </Text>
+          <View style={styles.suggestionButtons}>
+            <TouchableOpacity style={styles.aiButton}>
+              <Text style={styles.aiButtonText}>Create By AI</Text>
+              <Ionicons name="chevron-forward" size={16} color="#FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.manualButton}>
+              <Text style={styles.manualButtonText}>Create Manually</Text>
+              <Ionicons name="chevron-forward" size={16} color="#6B4423" />
+            </TouchableOpacity>
+          </View>
         </View>
+
+        <View style={{ height: 20 }} />
       </ScrollView>
     </View>
   );
@@ -116,43 +220,171 @@ export default function AIRecommendationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F5F5F0',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingTop: 50,
     paddingBottom: 16,
-    backgroundColor: '#FFF',
+    backgroundColor: '#F5F5F0',
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+  greetingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  greeting: {
+    fontSize: 14,
+    color: '#666',
+  },
+  userName: {
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#000',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
+  section: {
+    marginTop: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#000',
-    marginTop: 20,
+  },
+  newMenuLink: {
+    fontSize: 14,
+    color: '#8B6835',
+    fontWeight: '500',
+  },
+  seeAllLink: {
+    fontSize: 14,
+    color: '#000',
+    fontWeight: '500',
+  },
+  categoriesContainer: {
+    paddingHorizontal: 20,
     marginBottom: 16,
   },
-  grid: {
+  categoryTab: {
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    backgroundColor: '#E5E5E5',
+    marginRight: 12,
+  },
+  categoryTabActive: {
+    backgroundColor: '#6B4423',
+  },
+  categoryText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  categoryTextActive: {
+    color: '#FFF',
+  },
+  menuCardsContainer: {
+    paddingHorizontal: 20,
+  },
+  menuCard: {
+    width: 240,
+    backgroundColor: '#FFF8E7',
+    borderRadius: 16,
+    padding: 12,
+    marginRight: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  menuCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  menuCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginBottom: 4,
+  },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  authorText: {
+    fontSize: 12,
+    color: '#8B6835',
+  },
+  versionsText: {
+    fontSize: 11,
+    color: '#666',
+  },
+  menuCardImage: {
+    width: '100%',
+    height: 100,
+    borderRadius: 12,
+    backgroundColor: '#D9D9D9',
+    marginBottom: 12,
+  },
+  menuCardActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    gap: 8,
   },
-  card: {
-    width: '48%',
-    backgroundColor: '#FFF8E7',
+  appliedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
     borderRadius: 12,
-    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#8B6835',
+  },
+  appliedText: {
+    fontSize: 11,
+    color: '#8B6835',
+    fontWeight: '500',
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FFF',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  actionText: {
+    fontSize: 11,
+    color: '#8B6835',
+    fontWeight: '500',
+  },
+  beveragesContainer: {
+    paddingHorizontal: 20,
+  },
+  beverageCard: {
+    width: 160,
+    backgroundColor: '#FFF8E7',
+    borderRadius: 16,
+    marginRight: 16,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -160,46 +392,52 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  cardImage: {
-    width: '100%',
-    height: 100,
-    backgroundColor: '#D9D9D9',
+  editIconButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    zIndex: 1,
+    backgroundColor: '#FFF',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  cardContent: {
+  beverageImage: {
+    width: '100%',
+    height: 140,
+    backgroundColor: '#2C2C2C',
+  },
+  beverageInfo: {
     padding: 12,
   },
-  cardTitle: {
+  beverageName: {
     fontSize: 14,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  cardInfo: {
-    gap: 4,
-  },
-  infoRow: {
+  beverageDetails: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
-  infoText: {
+  beverageDetailText: {
     fontSize: 11,
-    color: '#8B7355',
-  },
-  difficultyText: {
-    fontSize: 11,
-    color: '#D97706',
-  },
-  levelText: {
-    fontSize: 11,
-    color: '#D97706',
+    color: '#8B6835',
   },
   suggestionBox: {
     backgroundColor: '#FFF8E7',
     borderRadius: 12,
     padding: 16,
-    marginTop: 8,
-    marginBottom: 24,
+    marginHorizontal: 20,
+    marginTop: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -221,20 +459,44 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#666',
     marginBottom: 12,
+    lineHeight: 18,
   },
-  manualButton: {
+  suggestionButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  aiButton: {
+    flex: 1,
     backgroundColor: '#6B4423',
     borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
+  },
+  aiButtonText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  manualButton: {
+    flex: 1,
+    backgroundColor: '#FFF',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#6B4423',
   },
   manualButtonText: {
-    color: '#FFF',
-    fontSize: 14,
+    color: '#6B4423',
+    fontSize: 13,
     fontWeight: '600',
   },
 });
