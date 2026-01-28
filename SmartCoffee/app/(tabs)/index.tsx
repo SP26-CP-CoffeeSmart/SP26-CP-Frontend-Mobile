@@ -1,98 +1,240 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React from 'react';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+interface CoffeeCard {
+  id: string;
+  name: string;
+  image: any;
+  flavor: string;
+  time: string;
+  difficulty: string;
+  level: string;
+}
 
-export default function HomeScreen() {
+export default function AIRecommendationsScreen() {
+  const router = useRouter();
+
+  const coffeeRecommendations: CoffeeCard[] = [
+    {
+      id: '1',
+      name: 'Cold Brew',
+      image: require('@/assets/images/partial-react-logo.png'), // placeholder
+      flavor: 'Bitter',
+      time: '5 min',
+      difficulty: 'Easy',
+      level: 'High',
+    },
+    {
+      id: '2',
+      name: 'Lemon Espresso',
+      image: require('@/assets/images/partial-react-logo.png'), // placeholder
+      flavor: 'Bitter',
+      time: '10 min',
+      difficulty: 'Med',
+      level: 'Med',
+    },
+    {
+      id: '3',
+      name: 'Blended Coffee',
+      image: require('@/assets/images/partial-react-logo.png'), // placeholder
+      flavor: 'Sweet',
+      time: '5 min',
+      difficulty: 'Med',
+      level: 'Med',
+    },
+    {
+      id: '4',
+      name: 'Matcha Espresso',
+      image: require('@/assets/images/partial-react-logo.png'), // placeholder
+      flavor: 'Bitter',
+      time: '15 min',
+      difficulty: 'High',
+      level: 'Low',
+    },
+  ];
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>AI Recommendations</Text>
+        <View style={{ width: 24 }} />
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Results Section */}
+        <Text style={styles.sectionTitle}>Results</Text>
+
+        {/* Coffee Grid */}
+        <View style={styles.grid}>
+          {coffeeRecommendations.map((coffee) => (
+            <View key={coffee.id} style={styles.card}>
+              <Image source={coffee.image} style={styles.cardImage} />
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>{coffee.name}</Text>
+                <View style={styles.cardInfo}>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="cafe-outline" size={14} color="#8B7355" />
+                    <Text style={styles.infoText}>{coffee.flavor}</Text>
+                    <Ionicons name="time-outline" size={14} color="#8B7355" style={{ marginLeft: 8 }} />
+                    <Text style={styles.infoText}>{coffee.time}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Ionicons name="flame-outline" size={14} color="#D97706" />
+                    <Text style={styles.difficultyText}>{coffee.difficulty}</Text>
+                    <Ionicons name="flash-outline" size={14} color="#D97706" style={{ marginLeft: 8 }} />
+                    <Text style={styles.levelText}>{coffee.level}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* Suggestion Section */}
+        <View style={styles.suggestionBox}>
+          <View style={styles.suggestionHeader}>
+            <Ionicons name="bulb-outline" size={20} color="#000" />
+            <Text style={styles.suggestionTitle}>Suggestion:</Text>
+          </View>
+          <Text style={styles.suggestionText}>Not the recipe you are looking for ?</Text>
+          <TouchableOpacity style={styles.manualButton}>
+            <Text style={styles.manualButtonText}>Create Manually Now</Text>
+            <Ionicons name="chevron-forward" size={18} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+    paddingBottom: 16,
+    backgroundColor: '#FFF',
   },
-  stepContainer: {
-    gap: 8,
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#000',
+  },
+  content: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    marginTop: 20,
+    marginBottom: 16,
+  },
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  card: {
+    width: '48%',
+    backgroundColor: '#FFF8E7',
+    borderRadius: 12,
+    marginBottom: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  cardImage: {
+    width: '100%',
+    height: 100,
+    backgroundColor: '#D9D9D9',
+  },
+  cardContent: {
+    padding: 12,
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  cardInfo: {
+    gap: 4,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  infoText: {
+    fontSize: 11,
+    color: '#8B7355',
+  },
+  difficultyText: {
+    fontSize: 11,
+    color: '#D97706',
+  },
+  levelText: {
+    fontSize: 11,
+    color: '#D97706',
+  },
+  suggestionBox: {
+    backgroundColor: '#FFF8E7',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  suggestionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  suggestionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+  },
+  suggestionText: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 12,
+  },
+  manualButton: {
+    backgroundColor: '#6B4423',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  manualButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
