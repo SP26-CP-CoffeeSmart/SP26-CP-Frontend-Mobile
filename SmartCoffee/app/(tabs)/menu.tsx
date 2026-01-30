@@ -302,10 +302,21 @@ export default function MenuScreen() {
               <Text style={styles.beverageStateText}>No beverages found</Text>
             ) : (
               beverages.map((item) => (
-                <View key={item.id} style={styles.beverageCard}>
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.beverageCard}
+                  onPress={() =>
+                    router.push(`/recipe-detail/${item.id}`)
+                  }
+                >
                   <View style={styles.beverageImageWrap}>
                     <Image source={item.image} style={styles.beverageImage} />
-                    <TouchableOpacity style={styles.beverageEditButton}>
+                    <TouchableOpacity
+                      style={styles.beverageEditButton}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                      }}
+                    >
                       <Ionicons name="create-outline" size={18} color={stylesVars.espresso} />
                     </TouchableOpacity>
                   </View>
@@ -329,7 +340,7 @@ export default function MenuScreen() {
                       ) : null}
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))
             )}
           </View>
