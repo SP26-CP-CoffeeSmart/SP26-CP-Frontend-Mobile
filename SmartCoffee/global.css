@@ -1,5 +1,4 @@
-@import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/preflight.css" layer(base);
-@import "tailwindcss/utilities.css";
-
-@import "nativewind/theme";
+/* This file adds the requisite utility classes for Tailwind to work. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
