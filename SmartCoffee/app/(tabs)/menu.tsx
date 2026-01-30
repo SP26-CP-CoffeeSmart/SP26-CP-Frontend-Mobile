@@ -1,7 +1,18 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  Image,
+  Dimensions,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface MenuItem {
   id: string;
@@ -20,92 +31,205 @@ interface BeverageItem {
   image: any;
 }
 
-export default function HomeScreen() {
+type BeverageApiItem = Record<string, any>;
+
+const { width } = Dimensions.get('window');
+
+const fallbackMenuImage =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+const fallbackBeverageImage =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
+
+const getApiBaseUrl = () => {
+  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
+    return process.env.EXPO_PUBLIC_API_BASE_URL;
+  }
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.manifest?.hostUri ||
+    Constants.manifest2?.extra?.expoClient?.hostUri;
+
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    return `http://${host}:5080`;
+  }
+
+  return Platform.select({
+    android: 'http://10.0.2.2:5080',
+    ios: 'http://localhost:5080',
+    default: 'http://localhost:5080',
+  });
+};
+
+const resolveImageUrl = (baseUrl: string, image?: string) => {
+  if (!image) return null;
+  if (image.startsWith('http://') || image.startsWith('https://')) return image;
+  if (image.startsWith('/')) return `${baseUrl}${image}`;
+  return `${baseUrl}/images/${image}`;
+};
+
+export default function MenuScreen() {
   const router = useRouter();
   const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
+  const [beverages, setBeverages] = useState<BeverageItem[]>([]);
+  const [beveragesLoading, setBeveragesLoading] = useState(false);
+  const [beveragesError, setBeveragesError] = useState<string | null>(null);
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [menuError, setMenuError] = useState<string | null>(null);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
-  const menuItems: MenuItem[] = [
-    {
-      id: '1',
-      name: 'Summer Lover',
-      author: 'John Smith',
-      versions: 3,
-      image: require('@/assets/images/partial-react-logo.png'),
-      isApplied: true,
-    },
-    {
-      id: '2',
-      name: 'Relaxing',
-      author: 'John Smith',
-      versions: 2,
-      image: require('@/assets/images/partial-react-logo.png'),
-    },
-  ];
+  useEffect(() => {
+    let isMounted = true;
+    const fetchMenus = async () => {
+      setMenuLoading(true);
+      setMenuError(null);
+      try {
+        const baseUrl = getApiBaseUrl();
+        const response = await fetch(`${baseUrl}/api/Menu`);
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const result = await response.json();
+        const rawList: BeverageApiItem[] = Array.isArray(result)
+          ? result
+          : Array.isArray(result?.data)
+            ? result.data
+            : Array.isArray(result?.items)
+              ? result.items
+              : [];
 
-  const beverages: BeverageItem[] = [
-    {
-      id: '1',
-      name: 'Cold Brew',
-      flavor: 'Bitter',
-      time: '5 min',
-      image: require('@/assets/images/partial-react-logo.png'),
-    },
-    {
-      id: '2',
-      name: 'Lemon Espresso',
-      flavor: 'Bitter',
-      time: '5 min',
-      image: require('@/assets/images/partial-react-logo.png'),
-    },
-  ];
+        const mapped = rawList.map((item, index) => {
+          const imageUrl = resolveImageUrl(
+            baseUrl,
+            String(item?.image ?? item?.imageUrl ?? item?.thumbnail ?? '')
+          );
+          return {
+            id: String(item?.menuId ?? item?.id ?? index),
+            name: String(item?.name ?? item?.menuName ?? 'Unknown'),
+            author: String(item?.author ?? item?.createdBy ?? item?.ownerName ?? 'Unknown'),
+            versions: Number(item?.versions ?? item?.versionCount ?? item?.itemsCount ?? 0),
+            image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
+            isApplied: Boolean(item?.isApplied ?? item?.applied ?? false),
+          } as MenuItem;
+        });
+
+        if (isMounted) {
+          setMenuItems(mapped);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setMenuError('Failed to load menu list');
+        }
+      } finally {
+        if (isMounted) {
+          setMenuLoading(false);
+        }
+      }
+    };
+
+    fetchMenus();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchBeverages = async () => {
+      setBeveragesLoading(true);
+      setBeveragesError(null);
+      try {
+        const baseUrl = getApiBaseUrl();
+        const response = await fetch(`${baseUrl}/api/ShopBeverage`);
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const result = await response.json();
+        const rawList: BeverageApiItem[] = Array.isArray(result)
+          ? result
+          : Array.isArray(result?.data)
+            ? result.data
+            : Array.isArray(result?.items)
+              ? result.items
+              : [];
+
+        const mapped = rawList.map((item, index) => {
+          const imageUrl = resolveImageUrl(baseUrl, String(item?.image ?? item?.imageUrl ?? ''));
+          return {
+            id: String(item?.beverageId ?? item?.id ?? index),
+            name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
+            flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
+            time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
+            image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+          };
+        });
+
+        if (isMounted) {
+          setBeverages(mapped);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setBeveragesError('Failed to load beverages');
+        }
+      } finally {
+        if (isMounted) {
+          setBeveragesLoading(false);
+        }
+      }
+    };
+
+    fetchBeverages();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
-    <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <View style={styles.spacerTop} />
         <View style={styles.header}>
           <View>
             <View style={styles.greetingRow}>
-              <Ionicons name="sunny-outline" size={20} color="#F59E0B" />
-              <Text style={styles.greeting}>Good Morning</Text>
+              <Ionicons name="sunny-outline" size={18} color={stylesVars.primary} />
+              <Text style={styles.greetingText}>Good Morning</Text>
             </View>
             <Text style={styles.userName}>John Smith</Text>
           </View>
-          <TouchableOpacity>
-            <Ionicons name="cart-outline" size={28} color="#000" />
+          <TouchableOpacity style={styles.cartButton}>
+            <Ionicons name="cart-outline" size={20} color="#FFF" />
           </TouchableOpacity>
         </View>
 
-        {/* Menu List Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Menu List</Text>
             <TouchableOpacity>
-              <Text style={styles.newMenuLink}>New Menu</Text>
+              <Text style={styles.sectionActionPrimary}>New Menu</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Category Tabs */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={styles.categoriesContainer}
+            contentContainerStyle={styles.menuTabs}
           >
             {categories.map((category) => (
               <TouchableOpacity
                 key={category}
                 style={[
-                  styles.categoryTab,
-                  selectedCategory === category && styles.categoryTabActive,
+                  styles.menuChip,
+                  selectedCategory === category && styles.menuChipActive,
                 ]}
                 onPress={() => setSelectedCategory(category)}
               >
                 <Text
                   style={[
-                    styles.categoryText,
-                    selectedCategory === category && styles.categoryTextActive,
+                    styles.menuChipText,
+                    selectedCategory === category && styles.menuChipActiveText,
                   ]}
                 >
                   {category}
@@ -114,236 +238,327 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          {/* Menu Cards */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.menuCardsContainer}
-          >
-            {menuItems.map((item) => (
-              <View key={item.id} style={styles.menuCard}>
-                <View style={styles.menuCardHeader}>
-                  <View>
-                    <Text style={styles.menuCardTitle}>{item.name}</Text>
-                    <View style={styles.authorRow}>
-                      <Ionicons name="person-circle-outline" size={16} color="#8B6835" />
-                      <Text style={styles.authorText}>{item.author}</Text>
+          <View style={styles.menuList}>
+            {menuLoading ? (
+              <Text style={styles.menuStateText}>Loading...</Text>
+            ) : menuError ? (
+              <Text style={styles.menuStateText}>{menuError}</Text>
+            ) : menuItems.length === 0 ? (
+              <Text style={styles.menuStateText}>No menu found</Text>
+            ) : (
+              menuItems.map((item) => (
+                <View key={item.id} style={styles.featureCard}>
+                  <View style={styles.featureHeader}>
+                    <View>
+                      <Text style={styles.featureTitle}>{item.name}</Text>
+                      <View style={styles.featureMetaRow}>
+                        <Ionicons name="person-circle-outline" size={16} color={stylesVars.muted} />
+                        <Text style={styles.featureMetaText}>{item.author}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.versionBadge}>
+                      <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
                     </View>
                   </View>
-                  <Text style={styles.versionsText}>{item.versions} versions</Text>
+                  <View style={styles.featureImageWrapper}>
+                    <Image source={item.image} style={styles.featureImage} />
+                  </View>
+                  <View style={styles.featureActions}>
+                    {item.isApplied && (
+                      <View style={styles.appliedBadge}>
+                        <Ionicons name="checkmark-circle" size={14} color={stylesVars.primary} />
+                        <Text style={styles.appliedText}>Applied</Text>
+                      </View>
+                    )}
+                    <TouchableOpacity style={styles.featureActionButton}>
+                      <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
+                      <Text style={styles.featureActionText}>Edit</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.featureActionButton}>
+                      <Ionicons name="bookmark-outline" size={16} color={stylesVars.espresso} />
+                      <Text style={styles.featureActionText}>Rating</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
-
-                <Image source={item.image} style={styles.menuCardImage} />
-
-                <View style={styles.menuCardActions}>
-                  {item.isApplied && (
-                    <View style={styles.appliedBadge}>
-                      <Ionicons name="checkmark-circle" size={14} color="#8B6835" />
-                      <Text style={styles.appliedText}>Applied</Text>
-                    </View>
-                  )}
-                  <TouchableOpacity style={styles.actionButton}>
-                    <Ionicons name="create-outline" size={14} color="#8B6835" />
-                    <Text style={styles.actionText}>Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.actionButton}>
-                    <Ionicons name="bookmark-outline" size={14} color="#8B6835" />
-                    <Text style={styles.actionText}>Rating</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
+              ))
+            )}
+          </View>
         </View>
 
-        {/* Your Beverages Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your Beverages</Text>
             <TouchableOpacity>
-              <Text style={styles.seeAllLink}>See All</Text>
+              <Text style={styles.sectionActionMuted}>See All</Text>
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.beveragesContainer}
-          >
-            {beverages.map((item) => (
-              <View key={item.id} style={styles.beverageCard}>
-                <TouchableOpacity style={styles.editIconButton}>
-                  <Ionicons name="create-outline" size={20} color="#000" />
-                </TouchableOpacity>
-                <Image source={item.image} style={styles.beverageImage} />
-                <View style={styles.beverageInfo}>
-                  <Text style={styles.beverageName}>{item.name}</Text>
-                  <View style={styles.beverageDetails}>
-                    <Ionicons name="cafe-outline" size={12} color="#8B6835" />
-                    <Text style={styles.beverageDetailText}>{item.flavor}</Text>
-                    <Ionicons name="time-outline" size={12} color="#8B6835" style={{ marginLeft: 8 }} />
-                    <Text style={styles.beverageDetailText}>{item.time}</Text>
+          <View style={styles.beverageGrid}>
+            {beveragesLoading ? (
+              <Text style={styles.beverageStateText}>Loading...</Text>
+            ) : beveragesError ? (
+              <Text style={styles.beverageStateText}>{beveragesError}</Text>
+            ) : beverages.length === 0 ? (
+              <Text style={styles.beverageStateText}>No beverages found</Text>
+            ) : (
+              beverages.map((item) => (
+                <View key={item.id} style={styles.beverageCard}>
+                  <View style={styles.beverageImageWrap}>
+                    <Image source={item.image} style={styles.beverageImage} />
+                    <TouchableOpacity style={styles.beverageEditButton}>
+                      <Ionicons name="create-outline" size={18} color={stylesVars.espresso} />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.beverageContent}>
+                    <Text style={styles.beverageTitle}>{item.name}</Text>
+                    <View style={styles.beverageMetaRow}>
+                      <Ionicons name="cafe-outline" size={12} color={stylesVars.primary} />
+                      <Text style={styles.beverageMetaText}>{item.flavor}</Text>
+                      {item.time ? (
+                        <>
+                          <Ionicons
+                            name="time-outline"
+                            size={12}
+                            color={stylesVars.primary}
+                            style={{ marginLeft: 8 }}
+                          />
+                          <Text style={styles.beverageMetaText}>
+                            {item.time}{String(item.time).includes('min') ? '' : ' min'}
+                          </Text>
+                        </>
+                      ) : null}
+                    </View>
                   </View>
                 </View>
-              </View>
-            ))}
-          </ScrollView>
+              ))
+            )}
+          </View>
         </View>
 
-        {/* Suggestion Section */}
-        <View style={styles.suggestionBox}>
-          <View style={styles.suggestionHeader}>
-            <Ionicons name="bulb-outline" size={20} color="#000" />
-            <Text style={styles.suggestionTitle}>Suggestion:</Text>
-          </View>
-          <Text style={styles.suggestionText}>
-            Create a recipe based on flavor, style, and cost preferences.
-          </Text>
-          <View style={styles.suggestionButtons}>
-            <TouchableOpacity style={styles.aiButton} onPress={() => router.push('/ai-create')}>
-              <Text style={styles.aiButtonText}>Create By AI</Text>
-              <Ionicons name="chevron-forward" size={16} color="#FFF" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.manualButton}>
-              <Text style={styles.manualButtonText}>Create Manually</Text>
-              <Ionicons name="chevron-forward" size={16} color="#6B4423" />
-            </TouchableOpacity>
+        <View style={styles.suggestionCard}>
+          <View style={styles.suggestionGlow} />
+          <View style={styles.suggestionContent}>
+            <View style={styles.suggestionHeader}>
+              <View style={styles.suggestionIconWrap}>
+                <Ionicons name="bulb-outline" size={18} color={stylesVars.primary} />
+              </View>
+              <Text style={styles.suggestionTitle}>Suggestion:</Text>
+            </View>
+            <Text style={styles.suggestionText}>
+              Create a recipe based on flavor, style, and cost preferences.
+            </Text>
+            <View style={styles.suggestionButtons}>
+              <TouchableOpacity style={styles.aiButton} onPress={() => router.push('/ai-create')}>
+                <Text style={styles.aiButtonText}>Create By AI</Text>
+                <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.manualButton}>
+                <Text style={styles.manualButtonText}>Create Manually</Text>
+                <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
         <View style={{ height: 20 }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
+const stylesVars = {
+  primary: '#D9A05B',
+  espresso: '#3E2723',
+  background: '#FDFBF7',
+  muted: '#9C9388',
+};
+
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    backgroundColor: '#F5F5F0',
+    backgroundColor: stylesVars.background,
+  },
+  container: {
+    paddingHorizontal: 24,
+    paddingBottom: 120,
+    backgroundColor: stylesVars.background,
+  },
+  spacerTop: {
+    height: 12,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 16,
-    backgroundColor: '#F5F5F0',
+    alignItems: 'flex-start',
+    marginBottom: 24,
   },
   greetingRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 4,
+    marginBottom: 6,
   },
-  greeting: {
-    fontSize: 14,
-    color: '#666',
+  greetingText: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: stylesVars.primary,
   },
   userName: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
+    fontSize: 30,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  cartButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: stylesVars.espresso,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
   },
   section: {
-    marginTop: 20,
+    marginBottom: 28,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+    alignItems: 'flex-end',
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
+    fontSize: 22,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
-  newMenuLink: {
-    fontSize: 14,
-    color: '#8B6835',
-    fontWeight: '500',
+  sectionActionPrimary: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.primary,
   },
-  seeAllLink: {
-    fontSize: 14,
-    color: '#000',
-    fontWeight: '500',
+  sectionActionMuted: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#A8A29E',
   },
-  categoriesContainer: {
+  menuTabs: {
+    gap: 12,
+    paddingRight: 12,
+  },
+  menuChip: {
     paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  categoryTab: {
     paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 20,
-    backgroundColor: '#E5E5E5',
-    marginRight: 12,
+    borderRadius: 30,
+    backgroundColor: '#ECECEC',
   },
-  categoryTabActive: {
-    backgroundColor: '#6B4423',
+  menuChipActive: {
+    backgroundColor: stylesVars.espresso,
   },
-  categoryText: {
+  menuChipText: {
     fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
+    fontWeight: '600',
+    color: '#8A8A8A',
   },
-  categoryTextActive: {
-    color: '#FFF',
+  menuChipActiveText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FDFBF7',
   },
-  menuCardsContainer: {
-    paddingHorizontal: 20,
+  menuList: {
+    marginTop: 20,
+    gap: 16,
   },
-  menuCard: {
-    width: 240,
-    backgroundColor: '#FFF8E7',
-    borderRadius: 16,
-    padding: 12,
-    marginRight: 16,
+  menuStateText: {
+    fontSize: 13,
+    color: '#8B7355',
+    paddingHorizontal: 4,
+  },
+  featureCard: {
+    padding: 20,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(217, 160, 91, 0.25)',
+    backgroundColor: '#FFF9F0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 15,
     elevation: 3,
   },
-  menuCardHeader: {
+  featureHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  menuCardTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 4,
+  featureTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
-  authorRow: {
+  featureMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    marginTop: 6,
   },
-  authorText: {
+  featureMetaText: {
     fontSize: 12,
-    color: '#8B6835',
+    color: stylesVars.muted,
   },
-  versionsText: {
-    fontSize: 11,
-    color: '#666',
-  },
-  menuCardImage: {
-    width: '100%',
-    height: 100,
+  versionBadge: {
+    backgroundColor: 'rgba(217,160,91,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 12,
-    backgroundColor: '#D9D9D9',
-    marginBottom: 12,
   },
-  menuCardActions: {
+  versionBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: stylesVars.primary,
+  },
+  featureImageWrapper: {
+    width: '100%',
+    height: width * 0.45,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(62,39,35,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(62,39,35,0.06)',
+    marginBottom: 16,
+  },
+  featureImage: {
+    width: '100%',
+    height: '100%',
+  },
+  featureActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  featureActionButton: {
+    flex: 1,
+    minWidth: 120,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    backgroundColor: '#FFF',
+  },
+  featureActionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.espresso,
   },
   appliedBadge: {
     flexDirection: 'row',
@@ -354,112 +569,123 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#8B6835',
+    borderColor: stylesVars.primary,
   },
   appliedText: {
     fontSize: 11,
-    color: '#8B6835',
-    fontWeight: '500',
+    color: stylesVars.primary,
+    fontWeight: '600',
   },
-  actionButton: {
+  beverageStateText: {
+    fontSize: 13,
+    color: '#8B7355',
+    paddingHorizontal: 4,
+  },
+  beverageGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#FFF',
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
-  },
-  actionText: {
-    fontSize: 11,
-    color: '#8B6835',
-    fontWeight: '500',
-  },
-  beveragesContainer: {
-    paddingHorizontal: 20,
+    flexWrap: 'wrap',
+    gap: 16,
   },
   beverageCard: {
-    width: 160,
-    backgroundColor: '#FFF8E7',
-    borderRadius: 16,
-    marginRight: 16,
+    width: (width - 24 * 2 - 16) / 2,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#F1F1F1',
+    backgroundColor: '#FFF',
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  editIconButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 1,
-    backgroundColor: '#FFF',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
     elevation: 2,
+  },
+  beverageImageWrap: {
+    position: 'relative',
+    width: '100%',
+    height: width * 0.35,
   },
   beverageImage: {
     width: '100%',
-    height: 140,
-    backgroundColor: '#2C2C2C',
+    height: '100%',
   },
-  beverageInfo: {
-    padding: 12,
+  beverageEditButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  beverageName: {
+  beverageContent: {
+    padding: 14,
+    gap: 6,
+  },
+  beverageTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#000',
-    marginBottom: 6,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
-  beverageDetails: {
+  beverageMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
   },
-  beverageDetailText: {
-    fontSize: 11,
-    color: '#8B6835',
+  beverageMetaText: {
+    fontSize: 12,
+    color: stylesVars.primary,
+    fontWeight: '600',
   },
-  suggestionBox: {
-    backgroundColor: '#FFF8E7',
-    borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 20,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  suggestionCard: {
+    position: 'relative',
+    padding: 24,
+    borderRadius: 32,
+    backgroundColor: stylesVars.espresso,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  suggestionGlow: {
+    position: 'absolute',
+    right: -20,
+    top: -20,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(217,160,91,0.2)',
+  },
+  suggestionContent: {
+    position: 'relative',
+    gap: 14,
   },
   suggestionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
+    gap: 10,
+  },
+  suggestionIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(217,160,91,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   suggestionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFF',
   },
   suggestionText: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 12,
-    lineHeight: 18,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    lineHeight: 20,
   },
   suggestionButtons: {
     flexDirection: 'row',
@@ -467,36 +693,36 @@ const styles = StyleSheet.create({
   },
   aiButton: {
     flex: 1,
-    backgroundColor: '#6B4423',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    backgroundColor: stylesVars.primary,
+    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   aiButtonText: {
-    color: '#FFF',
+    color: stylesVars.espresso,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   manualButton: {
     flex: 1,
     backgroundColor: '#FFF',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: '#6B4423',
+    borderColor: stylesVars.primary,
   },
   manualButtonText: {
-    color: '#6B4423',
+    color: stylesVars.espresso,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

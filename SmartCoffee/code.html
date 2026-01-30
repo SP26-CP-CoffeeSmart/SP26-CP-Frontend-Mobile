@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>Coffee Shop Home - High Contrast</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&amp;family=Playfair+Display:wght@700&amp;display=swap"
+        rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#D9A05B", // Golden Honey
+                        "espresso": "#3E2723", // Deep Espresso Brown
+                        "cream": "#FDFBF7", // Warm Cream
+                        "background-light": "#FDFBF7",
+                        "background-dark": "#1A1614",
+                    },
+                    fontFamily: {
+                        display: ["Playfair Display", "serif"],
+                        sans: ["Outfit", "sans-serif"],
+                    },
+                    borderRadius: {
+                        DEFAULT: "1.25rem",
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        .suggestion-glow {
+            box-shadow: 0 0 20px rgba(217, 160, 91, 0.15);
+        }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+    <style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+
+<body class="bg-background-light dark:bg-background-dark text-espresso dark:text-cream min-h-screen font-sans">
+    <div class="h-12 w-full"></div>
+    <main class="px-6 pb-32">
+        <header class="flex justify-between items-start mb-8">
+            <div>
+                <div class="flex items-center gap-2 text-primary mb-1">
+                    <span class="material-icons-outlined text-xl">light_mode</span>
+                    <span class="text-sm font-medium uppercase tracking-wider">Good Morning</span>
+                </div>
+                <h1 class="text-4xl font-display font-bold text-espresso dark:text-white">John Smith</h1>
+            </div>
+            <button
+                class="bg-espresso dark:bg-primary text-white p-3 rounded-full shadow-lg flex items-center justify-center">
+                <span class="material-icons-outlined">shopping_cart</span>
+            </button>
+        </header>
+        <section class="mb-10">
+            <div class="flex justify-between items-end mb-5">
+                <h2 class="text-2xl font-display font-semibold">Menu List</h2>
+                <button class="text-primary font-semibold text-sm hover:underline">New Menu</button>
+            </div>
+            <div class="flex gap-3 overflow-x-auto hide-scrollbar -mx-6 px-6">
+                <button
+                    class="bg-espresso text-cream px-6 py-3 rounded-full whitespace-nowrap font-medium transition-transform active:scale-95 shadow-md">
+                    Summer Refresh
+                </button>
+                <button
+                    class="bg-gray-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-6 py-3 rounded-full whitespace-nowrap font-medium">
+                    Winter Warmers
+                </button>
+                <button
+                    class="bg-gray-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 px-6 py-3 rounded-full whitespace-nowrap font-medium">
+                    New Arrivals
+                </button>
+            </div>
+            <div
+                class="mt-6 bg-[#FFF9F0] dark:bg-zinc-900 border border-primary/20 p-5 rounded-[2rem] shadow-sm relative overflow-hidden group">
+                <div class="flex justify-between items-start mb-4">
+                    <div>
+                        <h3 class="text-xl font-bold mb-1">Iced Caramel Bliss</h3>
+                        <div class="flex items-center gap-2 text-zinc-500 dark:text-zinc-400 text-sm">
+                            <span class="material-icons-outlined text-base">account_circle</span>
+                            <span>Shared by Curator</span>
+                        </div>
+                    </div>
+                    <span class="text-xs font-medium bg-primary/10 text-primary px-3 py-1 rounded-full">12
+                        versions</span>
+                </div>
+                <div
+                    class="aspect-[16/9] w-full rounded-2xl overflow-hidden mb-5 bg-espresso/5 flex items-center justify-center border border-espresso/5">
+                    <img alt="Iced Coffee with Caramel"
+                        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        src="https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU" />
+                </div>
+                <div class="flex gap-3">
+                    <button
+                        class="flex-1 flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl font-semibold text-sm">
+                        <span class="material-icons-outlined text-lg">edit</span>
+                        Edit
+                    </button>
+                    <button
+                        class="flex-1 flex items-center justify-center gap-2 py-3 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl font-semibold text-sm">
+                        <span class="material-icons-outlined text-lg">star_outline</span>
+                        Rating
+                    </button>
+                </div>
+            </div>
+        </section>
+        <section class="mb-10">
+            <div class="flex justify-between items-end mb-5">
+                <h2 class="text-2xl font-display font-semibold">Your Beverages</h2>
+                <button class="text-zinc-400 font-semibold text-sm hover:underline">See All</button>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div
+                    class="bg-white dark:bg-zinc-900 rounded-[2rem] overflow-hidden shadow-sm border border-zinc-100 dark:border-zinc-800">
+                    <div class="relative aspect-square">
+                        <img alt="Traditional Coffee" class="w-full h-full object-cover"
+                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s" />
+                        <button
+                            class="absolute top-3 right-3 bg-white/90 dark:bg-black/50 backdrop-blur-sm p-2 rounded-xl shadow-lg">
+                            <span class="material-icons-outlined text-lg">edit</span>
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <p class="font-bold text-espresso dark:text-cream">Nâu Đá (Sữa đá)</p>
+                        <p class="text-xs text-primary mt-1 font-medium">Cà phê truyền thống</p>
+                    </div>
+                </div>
+                <div
+                    class="bg-white dark:bg-zinc-900 rounded-[2rem] overflow-hidden shadow-sm border border-zinc-100 dark:border-zinc-800 opacity-60">
+                    <div class="relative aspect-square">
+                        <img alt="Matcha Latte" class="w-full h-full object-cover"
+                            src="https://lh3.googleusercontent.com/aida-public/AB6AXuD97rlkcaxdoIVoQUR7U6zsRUgvOmuAi7-cvaXQIdK_9LGYqDYmPWcBIC97WHXNGKVOy5NTVblwdh8Zi0Gphw0YXBg-MUoZzK6Fii6OVdJHENMQTxX-0adbaokHlgdIYJBr6sjGXwynbu8QWnP3Ty6GuCJ55VqwYCG9Vvc5FRuDx-W3MNLAELvy1-p4rUIC5yaUnAKK56h58fHZzZxs180zOX_9NrXns2-weTt-EsS6PDf9woo784UiA5HRLfGFB8o4hcT3AfUaESU" />
+                        <button
+                            class="absolute top-3 right-3 bg-white/90 dark:bg-black/50 backdrop-blur-sm p-2 rounded-xl shadow-lg">
+                            <span class="material-icons-outlined text-lg">edit</span>
+                        </button>
+                    </div>
+                    <div class="p-4">
+                        <p class="font-bold text-espresso dark:text-cream">Matcha Latte</p>
+                        <p class="text-xs text-primary mt-1 font-medium">Premium Green Tea</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section
+            class="suggestion-glow bg-espresso dark:bg-zinc-900 rounded-[2.5rem] p-8 text-cream relative overflow-hidden">
+            <div class="absolute -right-8 -top-8 w-32 h-32 bg-primary/20 rounded-full blur-3xl"></div>
+            <div class="relative z-10">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center">
+                        <span class="material-icons-outlined text-primary">auto_awesome</span>
+                    </div>
+                    <h3 class="text-xl font-bold">AI Suggestion</h3>
+                </div>
+                <p class="text-cream/80 leading-relaxed mb-6">Create a unique recipe based on flavor profiles, brewing
+                    style, and target cost metrics.</p>
+                <button
+                    class="w-full bg-primary text-espresso font-bold py-4 rounded-2xl shadow-xl active:scale-95 transition-transform">
+                    Generate New Recipe
+                </button>
+            </div>
+        </section>
+    </main>
+    <nav
+        class="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-xl border-t border-zinc-100 dark:border-zinc-800 px-6 py-4 pb-8 z-50">
+        <div class="flex justify-between items-center max-w-md mx-auto">
+            <a class="flex flex-col items-center gap-1 text-primary" href="#">
+                <span class="material-icons-outlined">home</span>
+                <span class="text-[10px] font-bold uppercase tracking-tight">Home</span>
+            </a>
+            <a class="flex flex-col items-center gap-1 text-zinc-400" href="#">
+                <span class="material-icons-outlined">receipt_long</span>
+                <span class="text-[10px] font-bold uppercase tracking-tight">Order</span>
+            </a>
+            <div class="relative -top-8">
+                <button
+                    class="w-16 h-16 bg-espresso dark:bg-primary rounded-full flex items-center justify-center text-white shadow-2xl border-4 border-white dark:border-zinc-950">
+                    <span class="material-icons-outlined text-3xl">menu_book</span>
+                </button>
+            </div>
+            <a class="flex flex-col items-center gap-1 text-zinc-400" href="#">
+                <span class="material-icons-outlined">inventory_2</span>
+                <span class="text-[10px] font-bold uppercase tracking-tight">Inventory</span>
+            </a>
+            <a class="flex flex-col items-center gap-1 text-zinc-400" href="#">
+                <span class="material-icons-outlined">person_outline</span>
+                <span class="text-[10px] font-bold uppercase tracking-tight">Profile</span>
+            </a>
+        </div>
+    </nav>
+
+</body>
+
+</html>
