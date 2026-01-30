@@ -187,7 +187,7 @@ export default function AiCreateScreen() {
       }
       const data = await response.json();
       router.replace({
-        pathname: '/ai-result',
+        pathname: '/ai-recommendations',
         params: { data: JSON.stringify(data) },
       });
     } catch (error) {
