@@ -200,7 +200,7 @@ export default function HomeScreen() {
             Create a recipe based on flavor, style, and cost preferences.
           </Text>
           <View style={styles.suggestionButtons}>
-            <TouchableOpacity style={styles.aiButton}>
+            <TouchableOpacity style={styles.aiButton} onPress={() => router.push('/ai-create')}>
               <Text style={styles.aiButtonText}>Create By AI</Text>
               <Ionicons name="chevron-forward" size={16} color="#FFF" />
             </TouchableOpacity>
