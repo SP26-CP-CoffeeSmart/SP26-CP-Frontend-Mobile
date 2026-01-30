@@ -1,10 +1,12 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -123,9 +125,20 @@ export default function AiCreateScreen() {
   const [sizeOption, setSizeOption] = useState('S');
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
-  const [costPerCup, setCostPerCup] = useState('');
   const [margin, setMargin] = useState(35);
   const [isLoading, setIsLoading] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        router.replace('/(tabs)/menu');
+        return true;
+      };
+
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [router])
+  );
 
   const handleSubmit = async () => {
     if (isLoading) return;
@@ -167,10 +180,6 @@ export default function AiCreateScreen() {
         selectedSizeIds: [sizeOption],
         selectedColorStyleId: colorStyle,
         selectedCategoryId: category,
-      },
-      pricing: {
-        costPerCup: Number.parseInt(costPerCup || '0', 10),
-        marginPercent: margin,
       },
     };
 
@@ -225,7 +234,9 @@ export default function AiCreateScreen() {
             />
             <View style={styles.heroOverlay} />
             <View style={styles.heroContent}>
-              <ThemedText style={styles.backArrow}>←</ThemedText>
+              <Pressable onPress={() => router.replace('/(tabs)/menu')} style={styles.backButton}>
+                <ThemedText style={styles.backArrow}>←</ThemedText>
+              </Pressable>
               <ThemedText style={styles.heroTitle}>AI Recipe Suggestions</ThemedText>
             </View>
           </View>
@@ -691,18 +702,6 @@ export default function AiCreateScreen() {
 
           <View style={styles.sectionSpacing} />
 
-          <ThemedText style={styles.subSectionTitle}>Cost per Cup</ThemedText>
-          <TextInput
-            placeholder="e.g 15000, 20000 VND..."
-            placeholderTextColor="#B8B8B8"
-            keyboardType="numeric"
-            value={costPerCup}
-            onChangeText={setCostPerCup}
-            style={styles.input}
-          />
-
-          <View style={styles.sectionSpacing} />
-
           <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
           <View style={styles.groupHeader}>
             <ThemedText style={styles.groupTitle}>Margin</ThemedText>
@@ -760,6 +759,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  backButton: {
+    paddingVertical: 6,
+    paddingRight: 12,
   },
   backArrow: {
     fontSize: 20,

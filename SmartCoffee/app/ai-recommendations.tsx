@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,68 +6,81 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 interface CoffeeCard {
   id: string;
   name: string;
-  image: any;
+  image: string;
   flavor: string;
   time: string;
   difficulty: string;
   level: string;
+  raw: Record<string, unknown>;
 }
 
 export default function AIRecommendationsScreen() {
   const router = useRouter();
   const { data } = useLocalSearchParams<{ data?: string }>();
+  const fallbackImage =
+    'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
-  const coffeeRecommendations: CoffeeCard[] = [
-    {
-      id: '1',
-      name: 'Cold Brew',
-      image: require('@/assets/images/partial-react-logo.png'),
-      flavor: 'Bitter',
-      time: '5 min',
-      difficulty: 'Easy',
-      level: 'High',
-    },
-    {
-      id: '2',
-      name: 'Lemon Espresso',
-      image: require('@/assets/images/partial-react-logo.png'),
-      flavor: 'Bitter',
-      time: '10 min',
-      difficulty: 'Med',
-      level: 'Med',
-    },
-    {
-      id: '3',
-      name: 'Blended Coffee',
-      image: require('@/assets/images/partial-react-logo.png'),
-      flavor: 'Sweet',
-      time: '5 min',
-      difficulty: 'Med',
-      level: 'Med',
-    },
-    {
-      id: '4',
-      name: 'Matcha Espresso',
-      image: require('@/assets/images/partial-react-logo.png'),
-      flavor: 'Bitter',
-      time: '15 min',
-      difficulty: 'High',
-      level: 'Low',
-    },
-  ];
+  const pick = (...values: Array<unknown>) =>
+    values.find((value) => value !== undefined && value !== null && value !== '') ?? null;
 
-  const buildPayload = (coffee: CoffeeCard) => {
-    if (data) return data;
-    return JSON.stringify({
-      data: {
-        recipeName: coffee.name,
-        flavorNote: coffee.flavor,
-        prepTimeRange: coffee.time,
-        difficultyLevel: coffee.difficulty,
-        createdSource: 'AI Recommendation',
-      },
-    });
+  const toText = (value: unknown): string => {
+    if (value === null || value === undefined || value === '') return '';
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === 'string' || typeof item === 'number' ? item : ''))
+        .filter(Boolean)
+        .join(' · ');
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value as Record<string, unknown>)
+        .map(([key, val]) => `${key}: ${toText(val)}`)
+        .filter((item) => item.endsWith(': ') === false)
+        .join(' · ');
+    }
+    return String(value);
   };
+
+  const recipes = useMemo(() => {
+    if (!data) return [] as CoffeeCard[];
+    try {
+      const parsed = JSON.parse(String(data));
+      const raw = parsed?.data ?? parsed?.result ?? parsed;
+      const list =
+        (Array.isArray(raw) && raw) ||
+        (Array.isArray(raw?.recipes) && raw.recipes) ||
+        (Array.isArray(raw?.items) && raw.items) ||
+        (Array.isArray(raw?.data) && raw.data) ||
+        [];
+
+      return list.slice(0, 3).map((item: Record<string, unknown>, index: number) => {
+        const image =
+          toText(
+            pick(
+              item?.image,
+              item?.imageUrl,
+              item?.imageURL,
+              item?.thumbnail,
+              item?.thumbnailUrl
+            )
+          ) || fallbackImage;
+        return {
+          id: String(item?.id ?? item?.recipeId ?? item?.menuId ?? index + 1),
+          name: toText(
+            pick(item?.recipeName, item?.name, item?.title, item?.beverageName)
+          ) || 'AI Recipe',
+          image,
+          flavor: toText(pick(item?.flavorNote, item?.flavor, item?.taste, item?.notes)) || '-',
+          time: toText(pick(item?.prepTimeRange, item?.prepTime, item?.time)) || '-',
+          difficulty:
+            toText(pick(item?.difficultyLevel, item?.brewing?.selectedDifficultyId)) || '-',
+          level: toText(pick(item?.brewing?.selectedHeatLevelId, item?.level)) || '-',
+          raw: item,
+        } as CoffeeCard;
+      });
+    } catch {
+      return [] as CoffeeCard[];
+    }
+  }, [data]);
 
   return (
     <View style={styles.container}>
@@ -83,17 +96,17 @@ export default function AIRecommendationsScreen() {
         <Text style={styles.sectionTitle}>Results</Text>
 
         <View style={styles.grid}>
-          {coffeeRecommendations.map((coffee) => (
+          {recipes.map((coffee) => (
             <View key={coffee.id} style={styles.card}>
               <Pressable
                 onPress={() =>
                   router.push({
                     pathname: '/ai-result',
-                    params: { data: buildPayload(coffee) },
+                    params: { data: JSON.stringify({ data: coffee.raw }) },
                   })
                 }
               >
-                <Image source={coffee.image} style={styles.cardImage} />
+                <Image source={{ uri: coffee.image }} style={styles.cardImage} />
               </Pressable>
               <View style={styles.cardContent}>
                 <Text style={styles.cardTitle}>{coffee.name}</Text>
