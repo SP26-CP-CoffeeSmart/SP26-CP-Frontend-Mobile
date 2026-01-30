@@ -1,18 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-
-interface CoffeeCard {
-  id: string;
-  name: string;
-  image: string;
-  flavor: string;
-  time: string;
-  difficulty: string;
-  level: string;
-  raw: Record<string, unknown>;
-}
 
 export default function AIRecommendationsScreen() {
   const router = useRouter();
@@ -20,67 +9,36 @@ export default function AIRecommendationsScreen() {
   const fallbackImage =
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
-  const pick = (...values: Array<unknown>) =>
-    values.find((value) => value !== undefined && value !== null && value !== '') ?? null;
+  const normalizeImageUrl = (url: unknown): string => {
+    if (!url || typeof url !== 'string') return fallbackImage;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return fallbackImage;
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return fallbackImage;
 
-  const toText = (value: unknown): string => {
-    if (value === null || value === undefined || value === '') return '';
-    if (Array.isArray(value)) {
-      return value
-        .map((item) => (typeof item === 'string' || typeof item === 'number' ? item : ''))
-        .filter(Boolean)
-        .join(' · ');
+    // Re-encode Firebase URLs: convert / back to %2F in the path
+    if (trimmed.includes('firebasestorage.googleapis.com')) {
+      // Find the 'o/' part and encode everything after it
+      const oIndex = trimmed.indexOf('/o/');
+      if (oIndex !== -1) {
+        const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
+        const path = trimmed.substring(oIndex + 3);
+        const encodedPath = path.replace(/\//g, '%2F');
+        return baseUrl + encodedPath;
+      }
     }
-    if (typeof value === 'object') {
-      return Object.entries(value as Record<string, unknown>)
-        .map(([key, val]) => `${key}: ${toText(val)}`)
-        .filter((item) => item.endsWith(': ') === false)
-        .join(' · ');
-    }
-    return String(value);
+
+    return trimmed;
   };
 
-  const recipes = useMemo(() => {
-    if (!data) return [] as CoffeeCard[];
+  let recipes: any[] = [];
+  if (data) {
     try {
       const parsed = JSON.parse(String(data));
-      const raw = parsed?.data ?? parsed?.result ?? parsed;
-      const list =
-        (Array.isArray(raw) && raw) ||
-        (Array.isArray(raw?.recipes) && raw.recipes) ||
-        (Array.isArray(raw?.items) && raw.items) ||
-        (Array.isArray(raw?.data) && raw.data) ||
-        [];
-
-      return list.slice(0, 3).map((item: Record<string, unknown>, index: number) => {
-        const image =
-          toText(
-            pick(
-              item?.image,
-              item?.imageUrl,
-              item?.imageURL,
-              item?.thumbnail,
-              item?.thumbnailUrl
-            )
-          ) || fallbackImage;
-        return {
-          id: String(item?.id ?? item?.recipeId ?? item?.menuId ?? index + 1),
-          name: toText(
-            pick(item?.recipeName, item?.name, item?.title, item?.beverageName)
-          ) || 'AI Recipe',
-          image,
-          flavor: toText(pick(item?.flavorNote, item?.flavor, item?.taste, item?.notes)) || '-',
-          time: toText(pick(item?.prepTimeRange, item?.prepTime, item?.time)) || '-',
-          difficulty:
-            toText(pick(item?.difficultyLevel, item?.brewing?.selectedDifficultyId)) || '-',
-          level: toText(pick(item?.brewing?.selectedHeatLevelId, item?.level)) || '-',
-          raw: item,
-        } as CoffeeCard;
-      });
+      recipes = parsed?.recipes ?? [];
     } catch {
-      return [] as CoffeeCard[];
+      recipes = [];
     }
-  }, [data]);
+  }
 
   return (
     <View style={styles.container}>
@@ -96,42 +54,35 @@ export default function AIRecommendationsScreen() {
         <Text style={styles.sectionTitle}>Results</Text>
 
         <View style={styles.grid}>
-          {recipes.map((coffee) => (
-            <View key={coffee.id} style={styles.card}>
+          {recipes.slice(0, 3).map((item, index) => (
+            <View key={item?.recipe?.recipeId ?? index} style={styles.card}>
               <Pressable
                 onPress={() =>
                   router.push({
                     pathname: '/ai-result',
-                    params: { data: JSON.stringify({ data: coffee.raw }) },
+                    params: { data: JSON.stringify(item.recipe) },
                   })
                 }
               >
-                <Image source={{ uri: coffee.image }} style={styles.cardImage} />
+                <Image source={{ uri: normalizeImageUrl(item?.recipe?.image) }} style={styles.cardImage} />
               </Pressable>
               <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>{coffee.name}</Text>
+                <Text style={styles.cardTitle}>{item?.recipe?.recipeName || 'AI Recipe'}</Text>
                 <View style={styles.cardInfo}>
                   <View style={styles.infoRow}>
                     <Ionicons name="cafe-outline" size={14} color="#8B7355" />
-                    <Text style={styles.infoText}>{coffee.flavor}</Text>
+                    <Text style={styles.infoText}>{item?.recipe?.flavorNote || '-'}</Text>
                     <Ionicons
                       name="time-outline"
                       size={14}
                       color="#8B7355"
                       style={{ marginLeft: 8 }}
                     />
-                    <Text style={styles.infoText}>{coffee.time}</Text>
+                    <Text style={styles.infoText}>{item?.recipe?.prepTimeRange || '-'}</Text>
                   </View>
                   <View style={styles.infoRow}>
                     <Ionicons name="flame-outline" size={14} color="#D97706" />
-                    <Text style={styles.difficultyText}>{coffee.difficulty}</Text>
-                    <Ionicons
-                      name="flash-outline"
-                      size={14}
-                      color="#D97706"
-                      style={{ marginLeft: 8 }}
-                    />
-                    <Text style={styles.levelText}>{coffee.level}</Text>
+                    <Text style={styles.difficultyText}>{item?.recipe?.difficultyLevel || '-'}</Text>
                   </View>
                 </View>
               </View>

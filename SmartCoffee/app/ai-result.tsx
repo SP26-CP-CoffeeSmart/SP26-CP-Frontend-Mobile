@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -8,6 +8,30 @@ import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
+interface Recipe {
+  recipeName: string;
+  image: string;
+  createdSource: string;
+  category: string;
+  flavorStylePrimary: string;
+  flavorStyleSecondary: string;
+  brewingMethod: string;
+  difficultyLevel: string;
+  prepTimeRange: string;
+  flavorNote: string;
+  brewingSteps: string | string[];
+  brewingVariablesData: string | Record<string, any>;
+  presentationData: string;
+  isHot: boolean;
+  isCold: boolean;
+  hasIce: boolean;
+  caffeineStrength: number;
+  proposedSellingPrice: number;
+  profitMarginPercent: number;
+  status: string;
+  [key: string]: any;
+}
+
 export default function AiResultScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -16,256 +40,82 @@ export default function AiResultScreen() {
   const fallbackImage =
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
-  const pick = (...values: Array<unknown>) =>
-    values.find((value) => value !== undefined && value !== null && value !== '') ?? null;
+  const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
 
-  const parseMaybeJson = (value: unknown) => {
-    if (typeof value !== 'string') return value;
-    const trimmed = value.trim();
-    if (
-      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-      (trimmed.startsWith('[') && trimmed.endsWith(']'))
-    ) {
-      try {
-        return JSON.parse(trimmed);
-      } catch {
-        return value;
+  const parseJsonString = (value: unknown): any => {
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if ((trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+        (trimmed.startsWith('{') && trimmed.endsWith('}'))) {
+        try {
+          return JSON.parse(trimmed);
+        } catch {
+          return value;
+        }
       }
     }
     return value;
   };
 
-  const toText = (value: unknown): string => {
-    if (value === null || value === undefined || value === '') return '';
-    const normalized = parseMaybeJson(value);
-    if (normalized !== value) return toText(normalized);
-    if (Array.isArray(value)) {
-      return value
-        .map((item) => (typeof item === 'string' || typeof item === 'number' ? item : ''))
-        .filter(Boolean)
-        .join(' · ');
+  const formatBrewingVariables = (value: unknown): string => {
+    const parsed = parseJsonString(value);
+    if (typeof parsed === 'string') {
+      return parsed || '-';
     }
-    if (typeof value === 'object') {
-      return Object.entries(value as Record<string, unknown>)
-        .map(([key, val]) => `${key}: ${toText(val)}`)
-        .filter((item) => item.endsWith(': ') === false)
-        .join(' · ');
+    if (typeof parsed === 'object' && parsed !== null) {
+      return Object.entries(parsed)
+        .map(([key, val]) => `${key}: ${val}`)
+        .join('\n') || '-';
     }
-    return String(value);
+    return '-';
   };
 
-  const normalizeImageUrl = (value: unknown) => {
-    const text = toText(value).trim();
-    if (!text || ['null', 'undefined', '-', 'n/a'].includes(text.toLowerCase())) {
-      return fallbackImage;
+  const normalizeImageUrl = (url: unknown): string => {
+    if (!url || typeof url !== 'string') return fallbackImage;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return fallbackImage;
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return fallbackImage;
+
+    // Re-encode Firebase URLs: convert / back to %2F in the path
+    if (trimmed.includes('firebasestorage.googleapis.com')) {
+      // Find the 'o/' part and encode everything after it
+      const oIndex = trimmed.indexOf('/o/');
+      if (oIndex !== -1) {
+        const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
+        const path = trimmed.substring(oIndex + 3);
+        const encodedPath = path.replace(/\//g, '%2F');
+        return baseUrl + encodedPath;
+      }
     }
-    if (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:')) {
-      return text;
-    }
-    return fallbackImage;
+
+    return trimmed;
   };
 
   const toList = (value: unknown): string[] => {
     if (value === null || value === undefined || value === '') return [];
-    const normalized = parseMaybeJson(value);
-    if (Array.isArray(normalized)) {
-      return normalized
-        .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item) : ''))
-        .filter(Boolean);
+    if (Array.isArray(value)) {
+      return value.map((item) => String(item)).filter(Boolean);
     }
-    if (typeof normalized === 'object') {
-      return Object.values(normalized as Record<string, unknown>)
-        .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item) : ''))
-        .filter(Boolean);
-    }
-    if (typeof normalized === 'string') {
-      const trimmed = normalized.trim();
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
       if (!trimmed) return [];
       const splitByStep = trimmed.split(/(?=Bước\s*\d+:)/g).map((item) => item.trim());
       if (splitByStep.length > 1) return splitByStep.filter(Boolean);
       return trimmed.split(/\n|•/g).map((item) => item.trim()).filter(Boolean);
     }
-    return [String(normalized)];
+    return [];
   };
 
-  const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
-  const toNumber = (value: unknown) => {
-    const num = Number(value);
-    return Number.isFinite(num) ? num : null;
-  };
-
-  const recipe = useMemo(() => {
-    if (!data) return null;
+  let recipe: Recipe | null = null;
+  if (data) {
     try {
       const parsed = JSON.parse(String(data));
       console.log('AI Recipe Result raw payload:', parsed);
-      const raw = parsed?.data ?? parsed?.result ?? parsed;
-      const content = raw?.recipe ?? raw?.aiRecipe ?? raw?.recipeResult ?? raw;
-
-      return {
-        image: pick(
-          content?.image,
-          content?.imageUrl,
-          content?.imageURL,
-          content?.thumbnail,
-          content?.thumbnailUrl,
-          raw?.image,
-          raw?.imageUrl,
-          raw?.imageURL
-        ),
-        recipeName: pick(
-          content?.recipeName,
-          content?.name,
-          content?.title,
-          content?.beverageName,
-          content?.basicInfo?.beverageName,
-          raw?.recipeName,
-          raw?.name,
-          raw?.title,
-          raw?.beverageName
-        ),
-        createdSource: pick(
-          content?.createdSource,
-          content?.source,
-          content?.creator,
-          raw?.createdSource,
-          raw?.source,
-          raw?.creator
-        ),
-        category: pick(
-          content?.category,
-          content?.categoryName,
-          content?.Category,
-          content?.category_name,
-          content?.presentation?.selectedCategoryId,
-          raw?.category,
-          raw?.categoryName,
-          raw?.Category
-        ),
-        flavorStylePrimary: pick(
-          content?.flavorStylePrimary,
-          content?.flavorStyle,
-          content?.flavorStyle?.primary,
-          content?.FlavorStyle,
-          content?.flavor_style,
-          content?.basicInfo?.selectedFlavorStyleId,
-          content?.basicInfo?.flavorStyle,
-          raw?.flavorStylePrimary,
-          raw?.flavorStyle
-        ),
-        flavorStyleSecondary: pick(
-          content?.flavorStyleSecondary,
-          content?.flavorStyle?.secondary,
-          raw?.flavorStyleSecondary
-        ),
-        brewingMethod: pick(
-          content?.brewingMethod,
-          content?.BrewingMethod,
-          content?.brewing_method,
-          content?.brewing?.selectedMethodId,
-          content?.brewing?.method,
-          raw?.brewingMethod
-        ),
-        difficultyLevel: pick(
-          content?.difficultyLevel,
-          content?.Difficulty,
-          content?.difficulty,
-          content?.brewing?.selectedDifficultyId,
-          content?.brewing?.difficulty,
-          raw?.difficultyLevel
-        ),
-        prepTimeRange: pick(
-          content?.prepTimeRange,
-          content?.prepTime,
-          content?.PrepTime,
-          content?.prep_time,
-          content?.brewing?.brewingTimeMinutes,
-          content?.brewing?.prepTimeMinutes,
-          raw?.prepTimeRange
-        ),
-        flavorNote: pick(
-          content?.flavorNote,
-          content?.FlavorNote,
-          content?.notes,
-          content?.flavor_note,
-          raw?.flavorNote
-        ),
-        brewingSteps: pick(
-          content?.brewingSteps,
-          content?.BrewingSteps,
-          content?.steps,
-          content?.steps,
-          content?.instructions,
-          raw?.brewingSteps
-        ),
-        brewingVariablesData: pick(
-          content?.brewingVariablesData,
-          content?.brewingVariables,
-          content?.variables,
-          raw?.brewingVariablesData
-        ),
-        presentationData: pick(
-          content?.presentationData,
-          content?.presentation,
-          raw?.presentationData
-        ),
-        isHot: pick(content?.isHot, content?.hot, raw?.isHot),
-        isCold: pick(content?.isCold, content?.cold, raw?.isCold),
-        hasIce: pick(content?.hasIce, content?.ice, raw?.hasIce),
-        caffeineStrength: pick(
-          content?.caffeineStrength,
-          content?.caffeine,
-          content?.caffeineLevel,
-          content?.CaffeineStrength,
-          raw?.caffeineStrength
-        ),
-        proposedSellingPrice: pick(
-          content?.proposedSellingPrice,
-          content?.price,
-          content?.pricing?.proposedSellingPrice,
-          content?.pricing?.price,
-          raw?.proposedSellingPrice
-        ),
-        profitMarginPercent: pick(
-          content?.profitMarginPercent,
-          content?.margin,
-          content?.pricing?.marginPercent,
-          raw?.profitMarginPercent
-        ),
-        status: pick(content?.status, raw?.status, parsed?.status),
-      };
+      recipe = parsed?.recipe ?? parsed;
     } catch {
-      return null;
+      recipe = null;
     }
-  }, [data]);
-
-  const display = useMemo(() => {
-    if (!recipe) return null;
-    return {
-      ...recipe,
-      image: normalizeImageUrl(recipe.image),
-      recipeName: toText(recipe.recipeName),
-      createdSource: toText(recipe.createdSource),
-      category: toText(recipe.category),
-      flavorStylePrimary: toText(recipe.flavorStylePrimary),
-      flavorStyleSecondary: toText(recipe.flavorStyleSecondary),
-      brewingMethod: toText(recipe.brewingMethod),
-      difficultyLevel: toText(recipe.difficultyLevel),
-      prepTimeRange: toText(recipe.prepTimeRange),
-      flavorNote: toText(recipe.flavorNote),
-      brewingSteps: toText(recipe.brewingSteps),
-      brewingStepsList: toList(recipe.brewingSteps),
-      brewingVariablesData: toText(recipe.brewingVariablesData),
-      presentationData: toText(recipe.presentationData),
-      caffeineStrength: toNumber(recipe.caffeineStrength),
-      proposedSellingPrice: toNumber(recipe.proposedSellingPrice),
-      profitMarginPercent: toNumber(recipe.profitMarginPercent),
-      isHot: recipe.isHot,
-      isCold: recipe.isCold,
-      hasIce: recipe.hasIce,
-      status: toText(recipe.status),
-    };
-  }, [recipe]);
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -273,7 +123,7 @@ export default function AiResultScreen() {
         <View style={styles.hero}>
           <Image
             source={{
-              uri: display?.image || fallbackImage,
+              uri: normalizeImageUrl(recipe?.image),
             }}
             style={styles.heroImage}
           />
@@ -287,7 +137,7 @@ export default function AiResultScreen() {
         </View>
 
         <View style={styles.card}>
-          {display?.status === 'Error' ? (
+          {recipe?.status === 'Error' ? (
             <View style={styles.alertBox}>
               <MaterialIcons name="error-outline" size={18} color="#B45309" />
               <ThemedText style={styles.alertText}>
@@ -297,23 +147,23 @@ export default function AiResultScreen() {
           ) : null}
           <Image
             source={{
-              uri: display?.image || fallbackImage,
+              uri: normalizeImageUrl(recipe?.image),
             }}
             style={styles.resultBanner}
           />
           <View style={styles.titleRow}>
             <Image
               source={{
-                uri: display?.image || fallbackImage,
+                uri: normalizeImageUrl(recipe?.image),
               }}
               style={styles.thumbnail}
             />
             <View style={styles.titleStack}>
               <ThemedText style={styles.recipeTitle}>
-                {display?.recipeName || 'Recipe Result'}
+                {recipe?.recipeName || 'Recipe Result'}
               </ThemedText>
               <ThemedText style={styles.recipeSubtitle}>
-                {display?.createdSource || 'AI Recommendation'}
+                {recipe?.createdSource || 'AI Recommendation'}
               </ThemedText>
             </View>
           </View>
@@ -327,33 +177,31 @@ export default function AiResultScreen() {
           <View style={styles.factsGrid}>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Category</ThemedText>
-              <ThemedText style={styles.factValue}>{display?.category || '-'}</ThemedText>
+              <ThemedText style={styles.factValue}>{recipe?.category || '-'}</ThemedText>
             </View>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Flavor Style</ThemedText>
               <ThemedText style={styles.factValue}>
-                {display?.flavorStylePrimary || '-'}
-                {display?.flavorStyleSecondary ? ` · ${display.flavorStyleSecondary}` : ''}
+                {recipe?.flavorStylePrimary || '-'}
+                {recipe?.flavorStyleSecondary ? ` · ${recipe.flavorStyleSecondary}` : ''}
               </ThemedText>
             </View>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Brewing Method</ThemedText>
-              <ThemedText style={styles.factValue}>{display?.brewingMethod || '-'}</ThemedText>
+              <ThemedText style={styles.factValue}>{recipe?.brewingMethod || '-'}</ThemedText>
             </View>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Difficulty</ThemedText>
-              <ThemedText style={styles.factValue}>{display?.difficultyLevel || '-'}</ThemedText>
+              <ThemedText style={styles.factValue}>{recipe?.difficultyLevel || '-'}</ThemedText>
             </View>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Prep Time</ThemedText>
-              <ThemedText style={styles.factValue}>{display?.prepTimeRange || '-'}</ThemedText>
+              <ThemedText style={styles.factValue}>{recipe?.prepTimeRange || '-'}</ThemedText>
             </View>
             <View style={styles.factCard}>
               <ThemedText style={styles.factLabel}>Caffeine Strength</ThemedText>
               <ThemedText style={styles.factValue}>
-                {typeof display?.caffeineStrength === 'number'
-                  ? display.caffeineStrength
-                  : display?.caffeineStrength || '-'}
+                {recipe?.caffeineStrength || '-'}
               </ThemedText>
             </View>
           </View>
@@ -365,7 +213,7 @@ export default function AiResultScreen() {
               <MaterialIcons name="category" size={16} color="#8B5E3C" />
               <ThemedText style={styles.label}>Category</ThemedText>
             </View>
-            <ThemedText style={styles.value}>{display?.category || '-'}</ThemedText>
+            <ThemedText style={styles.value}>{recipe?.category || '-'}</ThemedText>
           </View>
           <View style={styles.row}>
             <View style={styles.labelRow}>
@@ -373,8 +221,8 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Flavor Style</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {display?.flavorStylePrimary || '-'}
-              {display?.flavorStyleSecondary ? ` · ${display.flavorStyleSecondary}` : ''}
+              {recipe?.flavorStylePrimary || '-'}
+              {recipe?.flavorStyleSecondary ? ` · ${recipe.flavorStyleSecondary}` : ''}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -382,21 +230,21 @@ export default function AiResultScreen() {
               <MaterialIcons name="coffee-maker" size={16} color="#8B5E3C" />
               <ThemedText style={styles.label}>Brewing Method</ThemedText>
             </View>
-            <ThemedText style={styles.value}>{display?.brewingMethod || '-'}</ThemedText>
+            <ThemedText style={styles.value}>{recipe?.brewingMethod || '-'}</ThemedText>
           </View>
           <View style={styles.row}>
             <View style={styles.labelRow}>
               <MaterialIcons name="speed" size={16} color="#8B5E3C" />
               <ThemedText style={styles.label}>Difficulty</ThemedText>
             </View>
-            <ThemedText style={styles.value}>{display?.difficultyLevel || '-'}</ThemedText>
+            <ThemedText style={styles.value}>{recipe?.difficultyLevel || '-'}</ThemedText>
           </View>
           <View style={styles.row}>
             <View style={styles.labelRow}>
               <MaterialIcons name="schedule" size={16} color="#8B5E3C" />
               <ThemedText style={styles.label}>Prep Time</ThemedText>
             </View>
-            <ThemedText style={styles.value}>{display?.prepTimeRange || '-'}</ThemedText>
+            <ThemedText style={styles.value}>{recipe?.prepTimeRange || '-'}</ThemedText>
           </View>
 
           <View style={styles.sectionSpacing} />
@@ -405,7 +253,7 @@ export default function AiResultScreen() {
             <MaterialIcons name="auto-awesome" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Flavor Note</ThemedText>
           </View>
-          <ThemedText style={styles.bodyText}>{display?.flavorNote || '-'}</ThemedText>
+          <ThemedText style={styles.bodyText}>{recipe?.flavorNote || '-'}</ThemedText>
 
           <View style={styles.sectionSpacing} />
 
@@ -413,9 +261,9 @@ export default function AiResultScreen() {
             <MaterialIcons name="format-list-bulleted" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Brewing Steps</ThemedText>
           </View>
-          {display?.brewingStepsList?.length ? (
+          {toList(parseJsonString(recipe?.brewingSteps))?.length ? (
             <View style={styles.stepsList}>
-              {display.brewingStepsList.map((step, index) => (
+              {toList(parseJsonString(recipe?.brewingSteps)).map((step, index) => (
                 <View key={`${step}-${index}`} style={styles.stepItem}>
                   <View style={styles.stepBullet} />
                   <ThemedText style={styles.stepText}>{step}</ThemedText>
@@ -423,7 +271,7 @@ export default function AiResultScreen() {
               ))}
             </View>
           ) : (
-            <ThemedText style={styles.bodyText}>{display?.brewingSteps || '-'}</ThemedText>
+            <ThemedText style={styles.bodyText}>{recipe?.brewingSteps || '-'}</ThemedText>
           )}
 
           <View style={styles.sectionSpacing} />
@@ -432,7 +280,9 @@ export default function AiResultScreen() {
             <MaterialIcons name="tune" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Brewing Variables</ThemedText>
           </View>
-          <ThemedText style={styles.bodyText}>{display?.brewingVariablesData || '-'}</ThemedText>
+          <ThemedText style={styles.bodyText}>
+            {formatBrewingVariables(recipe?.brewingVariablesData)}
+          </ThemedText>
 
           <View style={styles.sectionSpacing} />
 
@@ -440,7 +290,7 @@ export default function AiResultScreen() {
             <MaterialIcons name="style" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Presentation</ThemedText>
           </View>
-          <ThemedText style={styles.bodyText}>{display?.presentationData || '-'}</ThemedText>
+          <ThemedText style={styles.bodyText}>{recipe?.presentationData || '-'}</ThemedText>
 
           <View style={styles.sectionSpacing} />
 
@@ -448,9 +298,9 @@ export default function AiResultScreen() {
             <View style={styles.pill}>
               <MaterialIcons name="whatshot" size={14} color="#B45309" />
               <ThemedText style={styles.pillText}>
-                {display?.isHot === null || display?.isHot === undefined
+                {recipe?.isHot === null || recipe?.isHot === undefined
                   ? 'Unknown'
-                  : toBool(display?.isHot)
+                  : toBool(recipe?.isHot)
                     ? 'Hot'
                     : 'Not Hot'}
               </ThemedText>
@@ -458,9 +308,9 @@ export default function AiResultScreen() {
             <View style={styles.pill}>
               <MaterialIcons name="ac-unit" size={14} color="#2563EB" />
               <ThemedText style={styles.pillText}>
-                {display?.isCold === null || display?.isCold === undefined
+                {recipe?.isCold === null || recipe?.isCold === undefined
                   ? 'Unknown'
-                  : toBool(display?.isCold)
+                  : toBool(recipe?.isCold)
                     ? 'Cold'
                     : 'Not Cold'}
               </ThemedText>
@@ -468,9 +318,9 @@ export default function AiResultScreen() {
             <View style={styles.pill}>
               <MaterialIcons name="icecream" size={14} color="#0EA5E9" />
               <ThemedText style={styles.pillText}>
-                {display?.hasIce === null || display?.hasIce === undefined
+                {recipe?.hasIce === null || recipe?.hasIce === undefined
                   ? 'Unknown'
-                  : toBool(display?.hasIce)
+                  : toBool(recipe?.hasIce)
                     ? 'Has Ice'
                     : 'No Ice'}
               </ThemedText>
@@ -482,7 +332,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Caffeine Strength</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {typeof display?.caffeineStrength === 'number' ? display.caffeineStrength : '-'}
+              {recipe?.caffeineStrength || '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -491,9 +341,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Proposed Price</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {typeof display?.proposedSellingPrice === 'number'
-                ? display.proposedSellingPrice.toFixed(2)
-                : '-'}
+              {recipe?.proposedSellingPrice || '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -502,9 +350,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Profit Margin</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {typeof display?.profitMarginPercent === 'number'
-                ? `${display.profitMarginPercent}%`
-                : '-'}
+              {recipe?.profitMarginPercent ? `${recipe.profitMarginPercent}%` : '-'}
             </ThemedText>
           </View>
         </View>
