@@ -2,6 +2,7 @@ import { Tabs } from 'expo-router';
 import React from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { Colors } from '@/constants/theme';
@@ -34,6 +35,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
+          href: null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
           ),
@@ -43,6 +45,7 @@ export default function TabLayout() {
         name="order"
         options={{
           title: 'Order',
+          href: null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={24} color={color} />
           ),
@@ -52,6 +55,7 @@ export default function TabLayout() {
         name="book"
         options={{
           title: '',
+          href: null,
           tabBarIcon: ({ focused }) => (
             <View style={styles.centerButton}>
               <Ionicons name="book" size={28} color="#FFF" />
@@ -64,6 +68,7 @@ export default function TabLayout() {
         name="inventory"
         options={{
           title: 'Inventory',
+          href: null,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'cube' : 'cube-outline'} size={24} color={color} />
           ),
@@ -72,9 +77,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Profile',
+          title: 'Explore',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'compass' : 'compass-outline'} size={24} color={color} />
           ),
         }}
       />
@@ -89,7 +94,17 @@ export default function TabLayout() {
         name="recipe-detail"
         options={{
           title: 'Recipe',
+          href: null,
           tabBarIcon: ({ color }) => <IconSymbol size={28} name="book.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="ai-result"
+        options={{
+          title: 'AI Result',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'bulb' : 'bulb-outline'} size={24} color={color} />
+          ),
         }}
       />
     </Tabs>
