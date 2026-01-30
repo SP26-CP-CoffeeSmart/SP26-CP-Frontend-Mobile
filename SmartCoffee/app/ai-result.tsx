@@ -19,8 +19,26 @@ export default function AiResultScreen() {
   const pick = (...values: Array<unknown>) =>
     values.find((value) => value !== undefined && value !== null && value !== '') ?? null;
 
+  const parseMaybeJson = (value: unknown) => {
+    if (typeof value !== 'string') return value;
+    const trimmed = value.trim();
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))
+    ) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  };
+
   const toText = (value: unknown): string => {
     if (value === null || value === undefined || value === '') return '';
+    const normalized = parseMaybeJson(value);
+    if (normalized !== value) return toText(normalized);
     if (Array.isArray(value)) {
       return value
         .map((item) => (typeof item === 'string' || typeof item === 'number' ? item : ''))
@@ -34,6 +52,40 @@ export default function AiResultScreen() {
         .join(' · ');
     }
     return String(value);
+  };
+
+  const normalizeImageUrl = (value: unknown) => {
+    const text = toText(value).trim();
+    if (!text || ['null', 'undefined', '-', 'n/a'].includes(text.toLowerCase())) {
+      return fallbackImage;
+    }
+    if (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('data:')) {
+      return text;
+    }
+    return fallbackImage;
+  };
+
+  const toList = (value: unknown): string[] => {
+    if (value === null || value === undefined || value === '') return [];
+    const normalized = parseMaybeJson(value);
+    if (Array.isArray(normalized)) {
+      return normalized
+        .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item) : ''))
+        .filter(Boolean);
+    }
+    if (typeof normalized === 'object') {
+      return Object.values(normalized as Record<string, unknown>)
+        .map((item) => (typeof item === 'string' || typeof item === 'number' ? String(item) : ''))
+        .filter(Boolean);
+    }
+    if (typeof normalized === 'string') {
+      const trimmed = normalized.trim();
+      if (!trimmed) return [];
+      const splitByStep = trimmed.split(/(?=Bước\s*\d+:)/g).map((item) => item.trim());
+      if (splitByStep.length > 1) return splitByStep.filter(Boolean);
+      return trimmed.split(/\n|•/g).map((item) => item.trim()).filter(Boolean);
+    }
+    return [String(normalized)];
   };
 
   const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
@@ -55,6 +107,8 @@ export default function AiResultScreen() {
           content?.image,
           content?.imageUrl,
           content?.imageURL,
+          content?.thumbnail,
+          content?.thumbnailUrl,
           raw?.image,
           raw?.imageUrl,
           raw?.imageURL
@@ -64,6 +118,7 @@ export default function AiResultScreen() {
           content?.name,
           content?.title,
           content?.beverageName,
+          content?.basicInfo?.beverageName,
           raw?.recipeName,
           raw?.name,
           raw?.title,
@@ -80,15 +135,21 @@ export default function AiResultScreen() {
         category: pick(
           content?.category,
           content?.categoryName,
+          content?.Category,
+          content?.category_name,
           content?.presentation?.selectedCategoryId,
           raw?.category,
-          raw?.categoryName
+          raw?.categoryName,
+          raw?.Category
         ),
         flavorStylePrimary: pick(
           content?.flavorStylePrimary,
           content?.flavorStyle,
           content?.flavorStyle?.primary,
+          content?.FlavorStyle,
+          content?.flavor_style,
           content?.basicInfo?.selectedFlavorStyleId,
+          content?.basicInfo?.flavorStyle,
           raw?.flavorStylePrimary,
           raw?.flavorStyle
         ),
@@ -99,22 +160,40 @@ export default function AiResultScreen() {
         ),
         brewingMethod: pick(
           content?.brewingMethod,
+          content?.BrewingMethod,
+          content?.brewing_method,
           content?.brewing?.selectedMethodId,
+          content?.brewing?.method,
           raw?.brewingMethod
         ),
         difficultyLevel: pick(
           content?.difficultyLevel,
+          content?.Difficulty,
+          content?.difficulty,
           content?.brewing?.selectedDifficultyId,
+          content?.brewing?.difficulty,
           raw?.difficultyLevel
         ),
         prepTimeRange: pick(
           content?.prepTimeRange,
           content?.prepTime,
+          content?.PrepTime,
+          content?.prep_time,
+          content?.brewing?.brewingTimeMinutes,
+          content?.brewing?.prepTimeMinutes,
           raw?.prepTimeRange
         ),
-        flavorNote: pick(content?.flavorNote, content?.notes, raw?.flavorNote),
+        flavorNote: pick(
+          content?.flavorNote,
+          content?.FlavorNote,
+          content?.notes,
+          content?.flavor_note,
+          raw?.flavorNote
+        ),
         brewingSteps: pick(
           content?.brewingSteps,
+          content?.BrewingSteps,
+          content?.steps,
           content?.steps,
           content?.instructions,
           raw?.brewingSteps
@@ -136,6 +215,8 @@ export default function AiResultScreen() {
         caffeineStrength: pick(
           content?.caffeineStrength,
           content?.caffeine,
+          content?.caffeineLevel,
+          content?.CaffeineStrength,
           raw?.caffeineStrength
         ),
         proposedSellingPrice: pick(
@@ -162,7 +243,7 @@ export default function AiResultScreen() {
     if (!recipe) return null;
     return {
       ...recipe,
-      image: toText(recipe.image),
+      image: normalizeImageUrl(recipe.image),
       recipeName: toText(recipe.recipeName),
       createdSource: toText(recipe.createdSource),
       category: toText(recipe.category),
@@ -173,6 +254,7 @@ export default function AiResultScreen() {
       prepTimeRange: toText(recipe.prepTimeRange),
       flavorNote: toText(recipe.flavorNote),
       brewingSteps: toText(recipe.brewingSteps),
+      brewingStepsList: toList(recipe.brewingSteps),
       brewingVariablesData: toText(recipe.brewingVariablesData),
       presentationData: toText(recipe.presentationData),
       caffeineStrength: toNumber(recipe.caffeineStrength),
@@ -238,6 +320,46 @@ export default function AiResultScreen() {
 
           <View style={styles.sectionSpacing} />
 
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="info-outline" size={16} color="#8B5E3C" />
+            <ThemedText style={styles.sectionTitle}>Quick Facts</ThemedText>
+          </View>
+          <View style={styles.factsGrid}>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Category</ThemedText>
+              <ThemedText style={styles.factValue}>{display?.category || '-'}</ThemedText>
+            </View>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Flavor Style</ThemedText>
+              <ThemedText style={styles.factValue}>
+                {display?.flavorStylePrimary || '-'}
+                {display?.flavorStyleSecondary ? ` · ${display.flavorStyleSecondary}` : ''}
+              </ThemedText>
+            </View>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Brewing Method</ThemedText>
+              <ThemedText style={styles.factValue}>{display?.brewingMethod || '-'}</ThemedText>
+            </View>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Difficulty</ThemedText>
+              <ThemedText style={styles.factValue}>{display?.difficultyLevel || '-'}</ThemedText>
+            </View>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Prep Time</ThemedText>
+              <ThemedText style={styles.factValue}>{display?.prepTimeRange || '-'}</ThemedText>
+            </View>
+            <View style={styles.factCard}>
+              <ThemedText style={styles.factLabel}>Caffeine Strength</ThemedText>
+              <ThemedText style={styles.factValue}>
+                {typeof display?.caffeineStrength === 'number'
+                  ? display.caffeineStrength
+                  : display?.caffeineStrength || '-'}
+              </ThemedText>
+            </View>
+          </View>
+
+          <View style={styles.sectionSpacing} />
+
           <View style={styles.row}>
             <View style={styles.labelRow}>
               <MaterialIcons name="category" size={16} color="#8B5E3C" />
@@ -291,7 +413,18 @@ export default function AiResultScreen() {
             <MaterialIcons name="format-list-bulleted" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Brewing Steps</ThemedText>
           </View>
-          <ThemedText style={styles.bodyText}>{display?.brewingSteps || '-'}</ThemedText>
+          {display?.brewingStepsList?.length ? (
+            <View style={styles.stepsList}>
+              {display.brewingStepsList.map((step, index) => (
+                <View key={`${step}-${index}`} style={styles.stepItem}>
+                  <View style={styles.stepBullet} />
+                  <ThemedText style={styles.stepText}>{step}</ThemedText>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <ThemedText style={styles.bodyText}>{display?.brewingSteps || '-'}</ThemedText>
+          )}
 
           <View style={styles.sectionSpacing} />
 
@@ -386,7 +519,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingBottom: 40,
-    backgroundColor: '#F9F5F2',
+    backgroundColor: '#F6F1EA',
   },
   hero: {
     height: 210,
@@ -425,9 +558,9 @@ const styles = StyleSheet.create({
     marginTop: -36,
     backgroundColor: '#FFFFFF',
     borderRadius: 28,
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 28,
+    paddingHorizontal: 22,
+    paddingTop: 22,
+    paddingBottom: 30,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -494,7 +627,52 @@ const styles = StyleSheet.create({
   sectionSpacing: {
     height: 12,
   },
+  factsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  factCard: {
+    width: '48%',
+    backgroundColor: '#FAF6F0',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#F0E5D8',
+  },
+  factLabel: {
+    fontSize: 11,
+    color: '#9C8A7A',
+    marginBottom: 4,
+  },
+  factValue: {
+    fontSize: 12,
+    color: '#1F2937',
+    fontFamily: Fonts.rounded,
+  },
   bodyText: {
+    fontSize: 12,
+    color: '#4B5563',
+    lineHeight: 18,
+  },
+  stepsList: {
+    gap: 10,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  stepBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#8B5E3C',
+    marginTop: 6,
+  },
+  stepText: {
+    flex: 1,
     fontSize: 12,
     color: '#4B5563',
     lineHeight: 18,
@@ -503,7 +681,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 6,
+    marginBottom: 10,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3EDE5',
     gap: 10,
   },
   labelRow: {
