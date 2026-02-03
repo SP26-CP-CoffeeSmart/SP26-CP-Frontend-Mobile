@@ -2,50 +2,80 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
-  ScrollView,
   TextInput,
+  FlatList,
   TouchableOpacity,
-  Image,
-  StatusBar,
-  SafeAreaView,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import shopRecipeIngredientsService, { ShopRecipeIngredient } from '../../services/shopRecipeIngredientsService';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
+import axios from 'axios';
 
-// Color theme
-const COLORS = {
-  primaryBrown: '#4A3428',
-  primaryGold: '#C5A059',
-  accentGold: '#D4AF37',
-  bgWarm: '#F9F7F2',
-  cardBg: '#FFFFFF',
-  white: '#FFFFFF',
-  error: '#E74C3C',
+interface Ingredient {
+  ingredientId: number;
+  name: string;
+  image: string;
+  category: string;
+  createDate: string;
+  endDate: string;
+}
+
+interface ShopRecipeIngredient {
+  id: number;
+  quantity: number;
+  cost: number;
+  ingredient: Ingredient;
+}
+
+const getApiBaseUrl = () => {
+  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
+    return process.env.EXPO_PUBLIC_API_BASE_URL;
+  }
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.manifest?.hostUri ||
+    Constants.manifest2?.extra?.expoClient?.hostUri;
+
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    return `http://${host}:5080`;
+  }
+
+  return Platform.select({
+    android: 'http://10.0.2.2:5080',
+    ios: 'http://localhost:5080',
+    default: 'http://localhost:5080',
+  });
 };
 
 export default function InventoryScreen() {
+  const colorScheme = useColorScheme() ?? 'light';
+  const isDark = colorScheme === 'dark';
+
+  const [searchQuery, setSearchQuery] = useState('');
   const [ingredients, setIngredients] = useState<ShopRecipeIngredient[]>([]);
   const [filteredIngredients, setFilteredIngredients] = useState<ShopRecipeIngredient[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const router = useRouter();
 
-  // Fetch data từ API
   const fetchIngredients = async () => {
     try {
+      setLoading(true);
       setError(null);
-      const data = await shopRecipeIngredientsService.getAll();
-      setIngredients(data);
-      setFilteredIngredients(data);
+      const baseUrl = getApiBaseUrl();
+      const response = await axios.get(`${baseUrl}/api/ShopRecipeIngredients`);
+      
+      if (Array.isArray(response.data)) {
+        setIngredients(response.data);
+        setFilteredIngredients(response.data);
+      }
     } catch (err) {
-      setError('Không thể tải dữ liệu. Vui lòng kiểm tra kết nối API.');
-      console.error(err);
+      console.error('Error fetching ingredients:', err);
+      setError('Failed to load ingredients. Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -56,436 +86,148 @@ export default function InventoryScreen() {
     fetchIngredients();
   }, []);
 
-  // Handle refresh
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredIngredients(ingredients);
+    } else {
+      const filtered = ingredients.filter((item) =>
+        item.ingredient.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredIngredients(filtered);
+    }
+  }, [searchQuery, ingredients]);
+
   const onRefresh = () => {
     setRefreshing(true);
     fetchIngredients();
   };
 
-  // Handle search
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (query.trim() === '') {
-      setFilteredIngredients(ingredients);
-    } else {
-      const filtered = ingredients.filter((item) =>
-        item.ingredient.name.toLowerCase().includes(query.toLowerCase())
-      );
-      setFilteredIngredients(filtered);
-    }
+  const getStatusColor = (cost: number) => {
+    if (cost > 50000) return 'bg-red-500';
+    if (cost > 20000) return 'bg-yellow-500';
+    return 'bg-green-500';
   };
 
-  const getStatusStyle = (cost: number) => {
-    if (cost > 50000) {
-      return { bg: '#FEE2E2', text: '#DC2626', label: 'High Cost' };
-    } else if (cost > 20000) {
-      return { bg: '#FEF3C7', text: '#D97706', label: 'Medium Cost' };
-    } else {
-      return { bg: '#D1FAE5', text: '#059669', label: 'Low Cost' };
-    }
+  const getStatusText = (cost: number) => {
+    if (cost > 50000) return 'High';
+    if (cost > 20000) return 'Medium';
+    return 'Low';
   };
 
-  const renderInventoryItem = (item: ShopRecipeIngredient) => {
-    const statusStyle = getStatusStyle(item.cost);
-
-    return (
-      <View key={item.id} style={styles.card}>
-        <View style={styles.cardContent}>
-          <View style={styles.imageContainer}>
-            <View style={styles.iconPlaceholder}>
-              <Ionicons name="nutrition" size={32} color={COLORS.primaryGold} />
-            </View>
-          </View>
-          
-          <View style={styles.itemDetails}>
-            <View style={styles.itemHeader}>
-              <View style={styles.itemTitleContainer}>
-                <Text style={styles.itemName}>{item.ingredient.name}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-                <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                  {statusStyle.label}
-                </Text>
-              </View>
-            </View>
-            
-            <Text style={styles.itemSubtitle}>{item.ingredient.category}</Text>
-            
-            <View style={styles.stockInfo}>
-              <View style={styles.stockInfoRow}>
-                <Ionicons name="scale-outline" size={16} color={COLORS.primaryBrown} />
-                <Text style={styles.stockLabel}>Quantity:</Text>
-                <Text style={styles.stockValue}>{item.quantity}</Text>
-              </View>
-              <View style={styles.stockInfoRow}>
-                <Ionicons name="cash-outline" size={16} color={COLORS.primaryBrown} />
-                <Text style={styles.stockLabel}>Cost:</Text>
-                <Text style={styles.stockValue}>{item.cost.toLocaleString('en-US')} USD</Text>
-              </View>
-            </View>
-          </View>
+  const renderItem = ({ item }: { item: ShopRecipeIngredient }) => (
+    <View
+      className={`mx-4 mb-3 p-4 rounded-2xl border ${
+        isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-gray-200'
+      }`}>
+      <View className="flex-row justify-between items-start mb-2">
+        <View className="flex-1">
+          <Text className={`text-lg font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+            {item.ingredient.name}
+          </Text>
+          <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            {item.ingredient.category}
+          </Text>
+        </View>
+        <View className={`px-3 py-1 rounded-full ${getStatusColor(item.cost)}`}>
+          <Text className="text-white text-xs font-semibold">{getStatusText(item.cost)}</Text>
         </View>
       </View>
-    );
-  };
 
-  // Loading state
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.primaryGold} />
-          <Text style={styles.loadingText}>Loading data...</Text>
+      <View className="flex-row justify-between items-center mt-2">
+        <View>
+          <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Quantity</Text>
+          <Text className={`text-base font-semibold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+            {item.quantity} kg
+          </Text>
         </View>
-      </SafeAreaView>
+        <View>
+          <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Cost</Text>
+          <Text className="text-base font-semibold text-primary">
+            {item.cost.toLocaleString()} VNĐ
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+
+  if (loading && !refreshing) {
+    return (
+      <View className={`flex-1 items-center justify-center ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
+        <ActivityIndicator size="large" color="#D9A05B" />
+      </View>
     );
   }
 
-  // Error state
   if (error) {
     return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.centerContainer}>
-          <Ionicons name="alert-circle-outline" size={64} color={COLORS.error} />
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchIngredients}>
-            <Text style={styles.retryButtonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <View className={`flex-1 items-center justify-center px-6 ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
+        <Text className={`text-center mb-4 ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+          {error}
+        </Text>
+        <TouchableOpacity
+          className="bg-primary px-6 py-3 rounded-full"
+          onPress={fetchIngredients}>
+          <Text className="text-white font-semibold">Try Again</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.bgWarm} />
-      
-      <ScrollView 
-        style={styles.container} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[COLORS.primaryGold]}
-            tintColor={COLORS.primaryGold}
+    <View className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
+      {/* Header */}
+      <View className={`mt-8 px-6 py-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+        <View className="flex-row justify-between items-center mb-4">
+          <Text className="text-3xl font-bold italic text-primary">Inventory</Text>
+          <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            {filteredIngredients.length} items
+          </Text>
+        </View>
+
+        {/* Search */}
+        <View
+          className={`flex-row items-center px-4 py-3 rounded-2xl border ${
+            isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-gray-200'
+          }`}>
+          <Text className="text-xl mr-2">🔍</Text>
+          <TextInput
+            className={`flex-1 text-base ${isDark ? 'text-text-dark' : 'text-text-light'}`}
+            placeholder="Search ingredients..."
+            placeholderTextColor={isDark ? '#9CA3AF' : '#6B7280'}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
           />
-        }
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.headerLabel}>Inventory Management</Text>
-            <Text style={styles.headerTitle}>Inventory</Text>
-            <Text style={styles.headerSubtitle}>{filteredIngredients.length} Ingredient</Text>
-          </View>
-        </View>
-
-        {/* Search and Filter */}
-        <View style={styles.searchContainer}>
-          <View style={styles.searchInputWrapper}>
-            <Ionicons
-              name="search-outline"
-              size={20}
-              color={`${COLORS.primaryBrown}66`}
-              style={styles.searchIcon}
-            />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Find Ingredients..."
-              placeholderTextColor={`${COLORS.primaryBrown}4D`}
-              value={searchQuery}
-              onChangeText={handleSearch}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => handleSearch('')}>
-                <Ionicons name="close-circle" size={20} color={COLORS.primaryBrown} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* Inventory List */}
-        <View style={styles.inventoryList}>
-          {filteredIngredients.length > 0 ? (
-            filteredIngredients.map((item) => renderInventoryItem(item))
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="basket-outline" size={64} color={COLORS.primaryBrown} style={{ opacity: 0.3 }} />
-              <Text style={styles.emptyText}>No ingredients found</Text>
-            </View>
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Text className="text-gray-400 text-lg">✕</Text>
+            </TouchableOpacity>
           )}
         </View>
+      </View>
 
-        {/* Bottom Spacing */}
-        <View style={{ height: 20 }} />
-      </ScrollView>
-
-      {/* Floating Action Button */}
-      <TouchableOpacity style={styles.fab}>
-        <Ionicons name="add" size={28} color={COLORS.primaryGold} />
-      </TouchableOpacity>
-    </SafeAreaView>
+      {/* List */}
+      {filteredIngredients.length === 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <Text className={`text-center ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            No ingredients found
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredIngredients}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 32 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#D9A05B']}
+              tintColor="#D9A05B"
+            />
+          }
+        />
+      )}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: COLORS.bgWarm,
-  },
-  container: {
-    flex: 1,
-    marginTop: 40,
-    backgroundColor: COLORS.bgWarm,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: COLORS.primaryBrown,
-  },
-  errorText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: COLORS.error,
-    textAlign: 'center',
-  },
-  retryButton: {
-    marginTop: 20,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: COLORS.primaryGold,
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  recipeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.primaryGold,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    gap: 6,
-  },
-  recipeButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  headerLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.primaryGold,
-    letterSpacing: 2,
-    marginBottom: 4,
-  },
-  headerTitle: {
-    fontSize: 30,
-    fontWeight: '800',
-    color: COLORS.primaryBrown,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: `${COLORS.primaryBrown}99`,
-    marginTop: 4,
-  },
-  profileContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: `${COLORS.primaryGold}33`,
-    padding: 2,
-  },
-  profileImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 18,
-  },
-  searchContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 24,
-    marginTop: 24,
-    gap: 12,
-  },
-  searchInputWrapper: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.primaryBrown,
-    paddingVertical: 14,
-  },
-  inventoryList: {
-    paddingHorizontal: 24,
-    marginTop: 24,
-    gap: 16,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: `${COLORS.primaryBrown}99`,
-  },
-  card: {
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: COLORS.primaryBrown,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 20,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: `${COLORS.primaryGold}0D`,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    padding: 16,
-  },
-  imageContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 12,
-    backgroundColor: COLORS.bgWarm,
-    overflow: 'hidden',
-  },
-  iconPlaceholder: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  itemImage: {
-    width: '100%',
-    height: '100%',
-  },
-  itemDetails: {
-    flex: 1,
-    marginLeft: 16,
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  itemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  itemTitleContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  itemName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.primaryBrown,
-    lineHeight: 22,
-  },
-  premiumBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  premiumText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.primaryGold,
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  itemSubtitle: {
-    fontSize: 12,
-    color: `${COLORS.primaryBrown}99`,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  stockInfo: {
-    gap: 4,
-  },
-  stockInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  stockLabel: {
-    fontSize: 12,
-    color: `${COLORS.primaryBrown}99`,
-    flex: 1,
-  },
-  stockValue: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.primaryBrown,
-  },
-  stockText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: `${COLORS.primaryBrown}66`,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  percentageText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 20,
-    right: 24,
-    width: 56,
-    height: 56,
-    backgroundColor: COLORS.primaryBrown,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-});
