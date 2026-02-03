@@ -310,10 +310,41 @@ export default function AiResultScreen() {
           </View>
 
           <View style={styles.sectionSpacing} />
-
+          <View style={styles.pillRow}>
+            <View style={styles.pill}>
+              <MaterialIcons name="whatshot" size={14} color="#B45309" />
+              <ThemedText style={styles.pillText}>
+                {recipe?.isHot === null || recipe?.isHot === undefined
+                  ? 'Unknown'
+                  : toBool(recipe?.isHot)
+                    ? 'Hot'
+                    : 'Not Hot'}
+              </ThemedText>
+            </View>
+            <View style={styles.pill}>
+              <MaterialIcons name="ac-unit" size={14} color="#2563EB" />
+              <ThemedText style={styles.pillText}>
+                {recipe?.isCold === null || recipe?.isCold === undefined
+                  ? 'Unknown'
+                  : toBool(recipe?.isCold)
+                    ? 'Cold'
+                    : 'Not Cold'}
+              </ThemedText>
+            </View>
+            <View style={styles.pill}>
+              <MaterialIcons name="icecream" size={14} color="#0EA5E9" />
+              <ThemedText style={styles.pillText}>
+                {recipe?.hasIce === null || recipe?.hasIce === undefined
+                  ? 'Unknown'
+                  : toBool(recipe?.hasIce)
+                    ? 'Has Ice'
+                    : 'No Ice'}
+              </ThemedText>
+            </View>
+          </View>
           <View style={styles.sectionHeader}>
             <MaterialIcons name="info-outline" size={16} color="#8B5E3C" />
-            <ThemedText style={styles.sectionTitle}>Quick Facts</ThemedText>
+            <ThemedText style={styles.sectionTitle}>Detail</ThemedText>
           </View>
           <View style={styles.factsGrid}>
             <View style={styles.factCard}>
@@ -460,38 +491,7 @@ export default function AiResultScreen() {
 
           <View style={styles.sectionSpacing} />
 
-          <View style={styles.pillRow}>
-            <View style={styles.pill}>
-              <MaterialIcons name="whatshot" size={14} color="#B45309" />
-              <ThemedText style={styles.pillText}>
-                {recipe?.isHot === null || recipe?.isHot === undefined
-                  ? 'Unknown'
-                  : toBool(recipe?.isHot)
-                    ? 'Hot'
-                    : 'Not Hot'}
-              </ThemedText>
-            </View>
-            <View style={styles.pill}>
-              <MaterialIcons name="ac-unit" size={14} color="#2563EB" />
-              <ThemedText style={styles.pillText}>
-                {recipe?.isCold === null || recipe?.isCold === undefined
-                  ? 'Unknown'
-                  : toBool(recipe?.isCold)
-                    ? 'Cold'
-                    : 'Not Cold'}
-              </ThemedText>
-            </View>
-            <View style={styles.pill}>
-              <MaterialIcons name="icecream" size={14} color="#0EA5E9" />
-              <ThemedText style={styles.pillText}>
-                {recipe?.hasIce === null || recipe?.hasIce === undefined
-                  ? 'Unknown'
-                  : toBool(recipe?.hasIce)
-                    ? 'Has Ice'
-                    : 'No Ice'}
-              </ThemedText>
-            </View>
-          </View>
+
           <View style={styles.row}>
             <View style={styles.labelRow}>
               <MaterialIcons name="bolt" size={16} color="#8B5E3C" />
