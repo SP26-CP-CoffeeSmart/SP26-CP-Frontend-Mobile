@@ -312,6 +312,23 @@ export default function RecipeDetailScreen() {
                     className="px-6"
                     contentContainerStyle={{ paddingBottom: 200 }}>
                     {/* Variant Selector - Only show if multiple recipes and user pressed Change Recipe */}
+
+                    {/* Recipe Image */}
+                    <View className="items-center mt-8 mb-4">
+                        <Image
+                            source={{
+                                uri: getRecipeImage(),
+                            }}
+                            className={`w-32 h-44 rounded-2xl border-2 ${isDark ? 'border-gray-700' : 'border-secondary'}`}
+                        />
+
+                    </View>
+
+                    {/* Title & Description */}
+                    <Text className={`text-2xl font-semibold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.name || ''}</Text>
+                    <Text className={`text-sm text-center mb-6 leading-5 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                        {variant.flavor || ''}
+                    </Text>
                     {recipes.length > 1 && showChipsSelector && (
                         <ScrollView
                             horizontal
@@ -339,23 +356,6 @@ export default function RecipeDetailScreen() {
                             ))}
                         </ScrollView>
                     )}
-
-                    {/* Recipe Image */}
-                    <View className="items-center mt-8 mb-4">
-                        <Image
-                            source={{
-                                uri: getRecipeImage(),
-                            }}
-                            className={`w-32 h-44 rounded-2xl border-2 ${isDark ? 'border-gray-700' : 'border-secondary'}`}
-                        />
-
-                    </View>
-
-                    {/* Title & Description */}
-                    <Text className={`text-2xl font-semibold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.name || ''}</Text>
-                    <Text className={`text-sm text-center mb-6 leading-5 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                        {variant.flavor || ''}
-                    </Text>
 
                     {/* Recipe Content Card */}
                     <View className="relative mb-10">
@@ -393,12 +393,16 @@ export default function RecipeDetailScreen() {
                                 <Text className="text-xl font-bold italic text-primary mb-4">Flavor Profile</Text>
                                 <View className="flex-row justify-between py-2">
                                     <Text className={`text-sm font-medium ${isDark ? 'text-text-dark' : 'text-text-light'}`}>Description</Text>
-                                    <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{variant.flavor || ''}</Text>
+                                    <Text className={`flex-1 shrink text-right text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                        {variant.flavor || ''}
+                                    </Text>
                                 </View>
                                 <View className={`h-px ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`} />
                                 <View className="flex-row justify-between py-2">
                                     <Text className={`text-sm font-medium ${isDark ? 'text-text-dark' : 'text-text-light'}`}>Type</Text>
-                                    <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{variant.milkIce || ''}</Text>
+                                    <Text className={`flex-1 shrink text-right text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                        {variant.milkIce || ''}
+                                    </Text>
                                 </View>
                             </View>
 
@@ -422,14 +426,28 @@ export default function RecipeDetailScreen() {
                                 <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Steps</Text>
                                     <View className="gap-4">
-                                        {getBrewingSteps().map((step: any, index: number) => (
-                                            <View key={index} className="flex-row gap-3 items-center">
-                                                <View className="w-8 h-8 rounded-full bg-primary items-center justify-center flex-shrink-0">
-                                                    <Text className="text-white font-bold">{step.step || index + 1}</Text>
+                                        {getBrewingSteps().map((step: any, index: number) => {
+                                            const stepNumber =
+                                                typeof step === 'object' && step !== null && step.step
+                                                    ? step.step
+                                                    : index + 1;
+
+                                            const stepText =
+                                                typeof step === 'string'
+                                                    ? step
+                                                    : step.title || step.desc || '';
+
+                                            return (
+                                                <View key={index} className="flex-row gap-3 items-center">
+                                                    <View className="w-8 h-8 rounded-full bg-primary items-center justify-center flex-shrink-0">
+                                                        <Text className="text-white font-bold">{stepNumber}</Text>
+                                                    </View>
+                                                    <Text className={`flex-1 shrink text-sm font-semibold text-left ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+                                                        {stepText || ''}
+                                                    </Text>
                                                 </View>
-                                                <Text className={`text-sm font-semibold text-center ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{step.title || step.desc || ''}</Text>
-                                            </View>
-                                        ))}
+                                            );
+                                        })}
                                     </View>
                                 </View>
                             )}
