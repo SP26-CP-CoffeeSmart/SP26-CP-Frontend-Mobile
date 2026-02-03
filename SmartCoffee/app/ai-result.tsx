@@ -143,6 +143,25 @@ export default function AiResultScreen() {
     return [];
   };
 
+  const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
+    if (!url || typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+
+    // Encode Firebase URLs: convert / to %2F in the path after '/o/'
+    if (trimmed.includes('firebasestorage.googleapis.com')) {
+      const oIndex = trimmed.indexOf('/o/');
+      if (oIndex !== -1) {
+        const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
+        const path = trimmed.substring(oIndex + 3);
+        const encodedPath = path.replace(/\//g, '%2F');
+        return baseUrl + encodedPath;
+      }
+    }
+
+    return trimmed;
+  };
+
   const handleSaveRecipe = async () => {
     if (!recipe) {
       Alert.alert('Error', 'No recipe data to save');
@@ -157,9 +176,26 @@ export default function AiResultScreen() {
       const { imageGeneration: imageGenFromRecipe, ...cleanRecipe } = recipe as any;
       const finalImageGeneration = imageGeneration || imageGenFromRecipe;
 
+      // Encode both image URLs
+      const encodedRecipeImage = encodeFirebaseImageUrl(cleanRecipe.image);
+      const encodedFirebaseUrl = finalImageGeneration?.firebaseUrl ? encodeFirebaseImageUrl(finalImageGeneration.firebaseUrl) : null;
+
+      // Use firebaseUrl if available, otherwise use recipe image
+      const finalImageUrl = encodedFirebaseUrl || encodedRecipeImage;
+      const recipeWithFinalImage = {
+        ...cleanRecipe,
+        ...(finalImageUrl && { image: finalImageUrl })
+      };
+
+      // Update imageGeneration with encoded URL if it exists
+      const imageGenWithEncodedUrl = finalImageGeneration ? {
+        ...finalImageGeneration,
+        ...(encodedFirebaseUrl && { firebaseUrl: encodedFirebaseUrl })
+      } : null;
+
       const requestBody = {
-        recipe: cleanRecipe,
-        ...(finalImageGeneration && { imageGeneration: finalImageGeneration })
+        recipe: recipeWithFinalImage,
+        ...(imageGenWithEncodedUrl && { imageGeneration: imageGenWithEncodedUrl })
       };
 
       console.log('========== SAVE RECIPE REQUEST ==========');
