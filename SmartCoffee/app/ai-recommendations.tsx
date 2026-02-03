@@ -60,7 +60,12 @@ export default function AIRecommendationsScreen() {
                 onPress={() =>
                   router.push({
                     pathname: '/ai-result',
-                    params: { data: JSON.stringify(item.recipe) },
+                    params: {
+                      data: JSON.stringify({
+                        recipe: item.recipe,
+                        imageGeneration: item.imageGeneration
+                      })
+                    },
                   })
                 }
               >

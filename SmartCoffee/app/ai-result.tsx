@@ -1,12 +1,35 @@
-import React from 'react';
+import React, { useState } from 'react';
+import Constants from 'expo-constants';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+
+const getApiBaseUrl = () => {
+  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
+    return process.env.EXPO_PUBLIC_API_BASE_URL;
+  }
+
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.manifest?.hostUri ||
+    Constants.manifest2?.extra?.expoClient?.hostUri;
+
+  if (hostUri) {
+    const host = hostUri.split(':')[0];
+    return `http://${host}:5080`;
+  }
+
+  return Platform.select({
+    android: 'http://10.0.2.2:5080',
+    ios: 'http://localhost:5080',
+    default: 'http://localhost:5080',
+  });
+};
 
 interface Recipe {
   recipeName: string;
@@ -29,10 +52,24 @@ interface Recipe {
   proposedSellingPrice: number;
   profitMarginPercent: number;
   status: string;
+  shopRecipeIngredients?: Array<{
+    id: number;
+    quantity: number;
+    cost: number;
+    ingredient: {
+      ingredientId: number;
+      name: string;
+      image: string;
+      category: string;
+      createDate: string;
+      endDate: string;
+    };
+  }>;
   [key: string]: any;
 }
 
 export default function AiResultScreen() {
+  const [isLoading, setIsLoading] = useState(false);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
@@ -106,14 +143,118 @@ export default function AiResultScreen() {
     return [];
   };
 
+  const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
+    if (!url || typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+
+    // Encode Firebase URLs: convert / to %2F in the path after '/o/'
+    if (trimmed.includes('firebasestorage.googleapis.com')) {
+      const oIndex = trimmed.indexOf('/o/');
+      if (oIndex !== -1) {
+        const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
+        const path = trimmed.substring(oIndex + 3);
+        const encodedPath = path.replace(/\//g, '%2F');
+        return baseUrl + encodedPath;
+      }
+    }
+
+    return trimmed;
+  };
+
+  const handleSaveRecipe = async () => {
+    if (!recipe) {
+      Alert.alert('Error', 'No recipe data to save');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const apiUrl = getApiBaseUrl();
+
+      // Remove imageGeneration from recipe if it exists, send it separately
+      const { imageGeneration: imageGenFromRecipe, ...cleanRecipe } = recipe as any;
+      const finalImageGeneration = imageGeneration || imageGenFromRecipe;
+
+      // Encode both image URLs
+      const encodedRecipeImage = encodeFirebaseImageUrl(cleanRecipe.image);
+      const encodedFirebaseUrl = finalImageGeneration?.firebaseUrl ? encodeFirebaseImageUrl(finalImageGeneration.firebaseUrl) : null;
+
+      // Use firebaseUrl if available, otherwise use recipe image
+      const finalImageUrl = encodedFirebaseUrl || encodedRecipeImage;
+      const recipeWithFinalImage = {
+        ...cleanRecipe,
+        ...(finalImageUrl && { image: finalImageUrl })
+      };
+
+      // Update imageGeneration with encoded URL if it exists
+      const imageGenWithEncodedUrl = finalImageGeneration ? {
+        ...finalImageGeneration,
+        ...(encodedFirebaseUrl && { firebaseUrl: encodedFirebaseUrl })
+      } : null;
+
+      const requestBody = {
+        recipe: recipeWithFinalImage,
+        ...(imageGenWithEncodedUrl && { imageGeneration: imageGenWithEncodedUrl })
+      };
+
+      console.log('========== SAVE RECIPE REQUEST ==========');
+      console.log('API URL:', `${apiUrl}/api/ShopRecipe/save-ai-recipe`);
+      console.log('Request Body:');
+      console.log(JSON.stringify(requestBody, null, 2));
+      console.log('========================================');
+
+      const response = await fetch(`${apiUrl}/api/ShopRecipe/save-ai-recipe`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      console.log('Response status:', response.status);
+      const responseText = await response.text();
+      console.log('Response body:', responseText);
+
+      if (!response.ok) {
+        try {
+          const errorData = JSON.parse(responseText);
+          throw new Error(errorData?.message || `HTTP ${response.status}`);
+        } catch {
+          throw new Error(`HTTP ${response.status}: ${responseText}`);
+        }
+      }
+
+      const result = JSON.parse(responseText);
+      console.log('Recipe saved successfully:', result);
+      Alert.alert('Success', 'Recipe saved successfully!', [
+        {
+          text: 'OK',
+          onPress: () => router.back(),
+        },
+      ]);
+    } catch (error) {
+      console.error('Error saving recipe:', error);
+      Alert.alert(
+        'Error',
+        error instanceof Error ? error.message : 'Failed to save recipe. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   let recipe: Recipe | null = null;
+  let imageGeneration: any = null;
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
       console.log('AI Recipe Result raw payload:', parsed);
       recipe = parsed?.recipe ?? parsed;
+      imageGeneration = parsed?.imageGeneration ?? null;
     } catch {
       recipe = null;
+      imageGeneration = null;
     }
   }
 
@@ -294,6 +435,31 @@ export default function AiResultScreen() {
 
           <View style={styles.sectionSpacing} />
 
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="shopping-bag" size={16} color="#8B5E3C" />
+            <ThemedText style={styles.sectionTitle}>Ingredients</ThemedText>
+          </View>
+          {recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0 ? (
+            <View style={styles.ingredientsList}>
+              {recipe.shopRecipeIngredients.map((item, index) => (
+                <View key={item.id ?? index} style={styles.ingredientRow}>
+                  <View style={styles.ingredientInfo}>
+                    <ThemedText style={styles.ingredientName}>
+                      {item.ingredient?.name || 'Unknown Ingredient'}
+                    </ThemedText>
+                    <ThemedText style={styles.ingredientDetail}>
+                      {item.quantity}{item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage' ? 'ml' : 'g'} •{item.cost?.toLocaleString() || '0'} ₫
+                    </ThemedText>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <ThemedText style={styles.bodyText}>-</ThemedText>
+          )}
+
+          <View style={styles.sectionSpacing} />
+
           <View style={styles.pillRow}>
             <View style={styles.pill}>
               <MaterialIcons name="whatshot" size={14} color="#B45309" />
@@ -353,6 +519,23 @@ export default function AiResultScreen() {
               {recipe?.profitMarginPercent ? `${recipe.profitMarginPercent}%` : '-'}
             </ThemedText>
           </View>
+
+          <View style={styles.sectionSpacing} />
+
+          <Pressable
+            style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+            onPress={handleSaveRecipe}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <>
+                <MaterialIcons name="save" size={18} color="#FFFFFF" />
+                <ThemedText style={styles.saveButtonText}>Save Recipe</ThemedText>
+              </>
+            )}
+          </Pressable>
         </View>
       </ScrollView>
     </View>
@@ -566,5 +749,51 @@ const styles = StyleSheet.create({
   pillText: {
     fontSize: 11,
     color: '#1F2937',
+  },
+  ingredientsList: {
+    gap: 10,
+  },
+  ingredientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#FAF6F0',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#F0E5D8',
+  },
+  ingredientInfo: {
+    flex: 1,
+  },
+  ingredientName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  ingredientDetail: {
+    fontSize: 11,
+    color: '#7C7C7C',
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    backgroundColor: '#8B5E3C',
+    marginTop: 8,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    fontSize: 14,
+    fontFamily: Fonts.rounded,
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
