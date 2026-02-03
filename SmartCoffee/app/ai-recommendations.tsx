@@ -31,10 +31,15 @@ export default function AIRecommendationsScreen() {
   };
 
   let recipes: any[] = [];
+  let beverageName = 'AI Recommendations';
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
       recipes = parsed?.recipes ?? [];
+      // Get beverage name from first recipe
+      if (recipes.length > 0 && recipes[0]?.recipe?.beverage?.name) {
+        beverageName = `Recipes of ${recipes[0].recipe.beverage.name}`;
+      }
     } catch {
       recipes = [];
     }
@@ -46,7 +51,7 @@ export default function AIRecommendationsScreen() {
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#000" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI Recommendations</Text>
+        <Text style={styles.headerTitle}>Recipe {beverageName}</Text>
         <View style={{ width: 24 }} />
       </View>
 

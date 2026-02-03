@@ -169,6 +169,7 @@ export default function MenuScreen() {
 
         if (isMounted) {
           setBeverages(mapped);
+          console.log('Fetched Beverages:', mapped);
         }
       } catch (error) {
         if (isMounted) {
