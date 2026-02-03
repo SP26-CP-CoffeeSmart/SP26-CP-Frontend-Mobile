@@ -77,11 +77,11 @@ export default function InventoryScreen() {
 
   const getStatusStyle = (cost: number) => {
     if (cost > 50000) {
-      return { bg: '#FEE2E2', text: '#DC2626', label: 'CHI PHÍ CAO' };
+      return { bg: '#FEE2E2', text: '#DC2626', label: 'High Cost' };
     } else if (cost > 20000) {
-      return { bg: '#FEF3C7', text: '#D97706', label: 'TRUNG BÌNH' };
+      return { bg: '#FEF3C7', text: '#D97706', label: 'Medium Cost' };
     } else {
-      return { bg: '#D1FAE5', text: '#059669', label: 'THẤP' };
+      return { bg: '#D1FAE5', text: '#059669', label: 'Low Cost' };
     }
   };
 
@@ -114,13 +114,13 @@ export default function InventoryScreen() {
             <View style={styles.stockInfo}>
               <View style={styles.stockInfoRow}>
                 <Ionicons name="scale-outline" size={16} color={COLORS.primaryBrown} />
-                <Text style={styles.stockLabel}>Số lượng:</Text>
+                <Text style={styles.stockLabel}>Quantity:</Text>
                 <Text style={styles.stockValue}>{item.quantity}</Text>
               </View>
               <View style={styles.stockInfoRow}>
                 <Ionicons name="cash-outline" size={16} color={COLORS.primaryBrown} />
-                <Text style={styles.stockLabel}>Chi phí:</Text>
-                <Text style={styles.stockValue}>{item.cost.toLocaleString('vi-VN')} VNĐ</Text>
+                <Text style={styles.stockLabel}>Cost:</Text>
+                <Text style={styles.stockValue}>{item.cost.toLocaleString('en-US')} USD</Text>
               </View>
             </View>
           </View>
@@ -135,7 +135,7 @@ export default function InventoryScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={COLORS.primaryGold} />
-          <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
+          <Text style={styles.loadingText}>Loading data...</Text>
         </View>
       </SafeAreaView>
     );
@@ -149,7 +149,7 @@ export default function InventoryScreen() {
           <Ionicons name="alert-circle-outline" size={64} color={COLORS.error} />
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity style={styles.retryButton} onPress={fetchIngredients}>
-            <Text style={styles.retryButtonText}>Thử lại</Text>
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -175,9 +175,9 @@ export default function InventoryScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerLabel}>NGUYÊN LIỆU CÔNG THỨC</Text>
+            <Text style={styles.headerLabel}>Inventory Management</Text>
             <Text style={styles.headerTitle}>Inventory</Text>
-            <Text style={styles.headerSubtitle}>{filteredIngredients.length} nguyên liệu</Text>
+            <Text style={styles.headerSubtitle}>{filteredIngredients.length} Ingredient</Text>
           </View>
         </View>
 
@@ -192,7 +192,7 @@ export default function InventoryScreen() {
             />
             <TextInput
               style={styles.searchInput}
-              placeholder="Tìm kiếm nguyên liệu..."
+              placeholder="Find Ingredients..."
               placeholderTextColor={`${COLORS.primaryBrown}4D`}
               value={searchQuery}
               onChangeText={handleSearch}
@@ -212,7 +212,7 @@ export default function InventoryScreen() {
           ) : (
             <View style={styles.emptyContainer}>
               <Ionicons name="basket-outline" size={64} color={COLORS.primaryBrown} style={{ opacity: 0.3 }} />
-              <Text style={styles.emptyText}>Không tìm thấy nguyên liệu</Text>
+              <Text style={styles.emptyText}>No ingredients found</Text>
             </View>
           )}
         </View>
@@ -236,6 +236,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
+    marginTop: 40,
     backgroundColor: COLORS.bgWarm,
   },
   centerContainer: {
