@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,12 @@ import {
   Image,
   StatusBar,
   SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import shopRecipeIngredientsService, { ShopRecipeIngredient } from '../../services/shopRecipeIngredientsService';
 
 // Color theme
 const COLORS = {
@@ -20,156 +24,104 @@ const COLORS = {
   bgWarm: '#F9F7F2',
   cardBg: '#FFFFFF',
   white: '#FFFFFF',
+  error: '#E74C3C',
 };
 
-interface InventoryItem {
-  id: string;
-  name: string;
-  subtitle: string;
-  image: string;
-  current: number;
-  total: number;
-  unit: string;
-  percentage: number;
-  status: 'premium' | 'critical' | 'low' | 'good';
-  category: string;
-}
-
-const INVENTORY_DATA: InventoryItem[] = [
-  {
-    id: '1',
-    name: 'Arabica Roast',
-    subtitle: 'Single Origin • Ethiopia',
-    image: 'https://images.unsplash.com/photo-1559056199-641a0ac8b55e?w=400',
-    current: 5.2,
-    total: 20,
-    unit: 'kg',
-    percentage: 26,
-    status: 'low',
-    category: 'Coffee Beans',
-  },
-  {
-    id: '2',
-    name: 'Oat Milk',
-    subtitle: 'Barista Edition • 1L',
-    image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=400',
-    current: 2,
-    total: 24,
-    unit: 'units',
-    percentage: 8,
-    status: 'critical',
-    category: 'Dairy',
-  },
-  {
-    id: '3',
-    name: 'Vanilla Syrup',
-    subtitle: 'Organic Madagascar',
-    image: 'https://images.unsplash.com/photo-1481391243133-f96216dcb5d2?w=400',
-    current: 12,
-    total: 15,
-    unit: 'bottles',
-    percentage: 80,
-    status: 'good',
-    category: 'Syrups',
-  },
-  {
-    id: '4',
-    name: 'Arabica Coffee Beans',
-    subtitle: 'Premium Blend • Colombia',
-    image: 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQM43Cz-hVdZsVfpjBTca1YD5Awy1noAFGtdw&s',
-    current: 350,
-    total: 500,
-    unit: 'kg',
-    percentage: 70,
-    status: 'good',
-    category: 'Coffee Beans',
-  },
-];
-
-const CATEGORIES = ['All', 'Coffee Beans', 'Dairy', 'Syrups', 'Supplies'];
-
 export default function InventoryScreen() {
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [ingredients, setIngredients] = useState<ShopRecipeIngredient[]>([]);
+  const [filteredIngredients, setFilteredIngredients] = useState<ShopRecipeIngredient[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const router = useRouter();
 
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case 'premium':
-        return { bg: '#FEF3C7', text: '#D97706', label: 'PREMIUM' };
-      case 'critical':
-        return { bg: '#FEE2E2', text: '#DC2626', label: 'CRITICAL' };
-      case 'low':
-        return { bg: '#FEF3C7', text: '#D97706', label: 'LOW STOCK' };
-      case 'good':
-        return { bg: '#D1FAE5', text: '#059669', label: 'IN STOCK' };
-      default:
-        return { bg: '#D1FAE5', text: '#059669', label: 'GOOD' };
+  // Fetch data từ API
+  const fetchIngredients = async () => {
+    try {
+      setError(null);
+      const data = await shopRecipeIngredientsService.getAll();
+      setIngredients(data);
+      setFilteredIngredients(data);
+    } catch (err) {
+      setError('Không thể tải dữ liệu. Vui lòng kiểm tra kết nối API.');
+      console.error(err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
   };
 
-  const getProgressColor = (percentage: number) => {
-    if (percentage <= 15) return '#F87171';
-    if (percentage <= 30) return '#FB923C';
-    return '#10B981';
+  useEffect(() => {
+    fetchIngredients();
+  }, []);
+
+  // Handle refresh
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchIngredients();
   };
 
-  const renderInventoryItem = (item: InventoryItem) => {
-    const statusStyle = getStatusStyle(item.status);
-    const progressColor = getProgressColor(item.percentage);
+  // Handle search
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (query.trim() === '') {
+      setFilteredIngredients(ingredients);
+    } else {
+      const filtered = ingredients.filter((item) =>
+        item.ingredient.name.toLowerCase().includes(query.toLowerCase())
+      );
+      setFilteredIngredients(filtered);
+    }
+  };
+
+  const getStatusStyle = (cost: number) => {
+    if (cost > 50000) {
+      return { bg: '#FEE2E2', text: '#DC2626', label: 'CHI PHÍ CAO' };
+    } else if (cost > 20000) {
+      return { bg: '#FEF3C7', text: '#D97706', label: 'TRUNG BÌNH' };
+    } else {
+      return { bg: '#D1FAE5', text: '#059669', label: 'THẤP' };
+    }
+  };
+
+  const renderInventoryItem = (item: ShopRecipeIngredient) => {
+    const statusStyle = getStatusStyle(item.cost);
 
     return (
       <View key={item.id} style={styles.card}>
         <View style={styles.cardContent}>
           <View style={styles.imageContainer}>
-            <Image
-              source={{ uri: item.image }}
-              style={styles.itemImage}
-              resizeMode="cover"
-            />
+            <View style={styles.iconPlaceholder}>
+              <Ionicons name="nutrition" size={32} color={COLORS.primaryGold} />
+            </View>
           </View>
           
           <View style={styles.itemDetails}>
             <View style={styles.itemHeader}>
               <View style={styles.itemTitleContainer}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                {item.status === 'premium' && (
-                  <View style={styles.premiumBadge}>
-                    <Ionicons name="star" size={12} color={COLORS.primaryGold} />
-                    <Text style={styles.premiumText}>Premium</Text>
-                  </View>
-                )}
+                <Text style={styles.itemName}>{item.ingredient.name}</Text>
               </View>
-              {item.status !== 'premium' && (
-                <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
-                  <Text style={[styles.statusText, { color: statusStyle.text }]}>
-                    {statusStyle.label}
-                  </Text>
-                </View>
-              )}
+              <View style={[styles.statusBadge, { backgroundColor: statusStyle.bg }]}>
+                <Text style={[styles.statusText, { color: statusStyle.text }]}>
+                  {statusStyle.label}
+                </Text>
+              </View>
             </View>
             
-            <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
+            <Text style={styles.itemSubtitle}>{item.ingredient.category}</Text>
             
             <View style={styles.stockInfo}>
-              <Text style={styles.stockText}>
-                {item.current}{item.unit === 'kg' ? 'kg' : ''} / {item.total}
-                {item.unit === 'kg' ? 'kg' : ` ${item.unit}`}
-              </Text>
-              <Text style={[styles.percentageText, { color: progressColor }]}>
-                {item.percentage}%
-              </Text>
-            </View>
-            
-            <View style={styles.progressBarContainer}>
-              <View
-                style={[
-                  styles.progressBar,
-                  {
-                    width: `${item.percentage}%`,
-                    backgroundColor: progressColor,
-                  },
-                ]}
-              />
+              <View style={styles.stockInfoRow}>
+                <Ionicons name="scale-outline" size={16} color={COLORS.primaryBrown} />
+                <Text style={styles.stockLabel}>Số lượng:</Text>
+                <Text style={styles.stockValue}>{item.quantity}</Text>
+              </View>
+              <View style={styles.stockInfoRow}>
+                <Ionicons name="cash-outline" size={16} color={COLORS.primaryBrown} />
+                <Text style={styles.stockLabel}>Chi phí:</Text>
+                <Text style={styles.stockValue}>{item.cost.toLocaleString('vi-VN')} VNĐ</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -177,16 +129,55 @@ export default function InventoryScreen() {
     );
   };
 
+  // Loading state
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={COLORS.primaryGold} />
+          <Text style={styles.loadingText}>Đang tải dữ liệu...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.centerContainer}>
+          <Ionicons name="alert-circle-outline" size={64} color={COLORS.error} />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchIngredients}>
+            <Text style={styles.retryButtonText}>Thử lại</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.bgWarm} />
       
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.container} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[COLORS.primaryGold]}
+            tintColor={COLORS.primaryGold}
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerLabel}>MANAGEMENT</Text>
+            <Text style={styles.headerLabel}>NGUYÊN LIỆU CÔNG THỨC</Text>
             <Text style={styles.headerTitle}>Inventory</Text>
+            <Text style={styles.headerSubtitle}>{filteredIngredients.length} nguyên liệu</Text>
           </View>
         </View>
 
@@ -201,48 +192,29 @@ export default function InventoryScreen() {
             />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search stock items..."
+              placeholder="Tìm kiếm nguyên liệu..."
               placeholderTextColor={`${COLORS.primaryBrown}4D`}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearch}
             />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => handleSearch('')}>
+                <Ionicons name="close-circle" size={20} color={COLORS.primaryBrown} />
+              </TouchableOpacity>
+            )}
           </View>
-          <TouchableOpacity style={styles.filterButton}>
-            <Ionicons name="options-outline" size={22} color={COLORS.primaryBrown} />
-          </TouchableOpacity>
         </View>
-
-        {/* Category Filters */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesContainer}
-          contentContainerStyle={styles.categoriesContent}
-        >
-          {CATEGORIES.map((category) => (
-            <TouchableOpacity
-              key={category}
-              style={[
-                styles.categoryChip,
-                selectedCategory === category && styles.categoryChipActive,
-              ]}
-              onPress={() => setSelectedCategory(category)}
-            >
-              <Text
-                style={[
-                  styles.categoryText,
-                  selectedCategory === category && styles.categoryTextActive,
-                ]}
-              >
-                {category}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
 
         {/* Inventory List */}
         <View style={styles.inventoryList}>
-          {INVENTORY_DATA.map((item) => renderInventoryItem(item))}
+          {filteredIngredients.length > 0 ? (
+            filteredIngredients.map((item) => renderInventoryItem(item))
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="basket-outline" size={64} color={COLORS.primaryBrown} style={{ opacity: 0.3 }} />
+              <Text style={styles.emptyText}>Không tìm thấy nguyên liệu</Text>
+            </View>
+          )}
         </View>
 
         {/* Bottom Spacing */}
@@ -266,6 +238,35 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.bgWarm,
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: COLORS.primaryBrown,
+  },
+  errorText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: COLORS.error,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: COLORS.primaryGold,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -273,6 +274,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 16,
     paddingBottom: 8,
+  },
+  recipeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primaryGold,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    gap: 6,
+  },
+  recipeButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.white,
   },
   headerLabel: {
     fontSize: 10,
@@ -285,6 +300,11 @@ const styles = StyleSheet.create({
     fontSize: 30,
     fontWeight: '800',
     color: COLORS.primaryBrown,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: `${COLORS.primaryBrown}99`,
+    marginTop: 4,
   },
   profileContainer: {
     width: 40,
@@ -327,58 +347,19 @@ const styles = StyleSheet.create({
     color: COLORS.primaryBrown,
     paddingVertical: 14,
   },
-  filterButton: {
-    width: 56,
-    height: 56,
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.white,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  categoriesContainer: {
-    marginTop: 24,
-  },
-  categoriesContent: {
-    paddingHorizontal: 24,
-    gap: 12,
-  },
-  categoryChip: {
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: `${COLORS.primaryGold}1A`,
-  },
-  categoryChipActive: {
-    backgroundColor: COLORS.primaryBrown,
-    borderColor: COLORS.primaryBrown,
-    shadowColor: COLORS.primaryBrown,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  categoryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.primaryBrown,
-  },
-  categoryTextActive: {
-    color: COLORS.white,
-    fontWeight: '700',
-  },
   inventoryList: {
     paddingHorizontal: 24,
     marginTop: 24,
     gap: 16,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: `${COLORS.primaryBrown}99`,
   },
   card: {
     backgroundColor: COLORS.white,
@@ -402,6 +383,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: COLORS.bgWarm,
     overflow: 'hidden',
+  },
+  iconPlaceholder: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   itemImage: {
     width: '100%',
@@ -456,10 +443,22 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   stockInfo: {
+    gap: 4,
+  },
+  stockInfoRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginBottom: 6,
+    alignItems: 'center',
+    gap: 6,
+  },
+  stockLabel: {
+    fontSize: 12,
+    color: `${COLORS.primaryBrown}99`,
+    flex: 1,
+  },
+  stockValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.primaryBrown,
   },
   stockText: {
     fontSize: 11,
@@ -471,17 +470,6 @@ const styles = StyleSheet.create({
   percentageText: {
     fontSize: 11,
     fontWeight: '700',
-  },
-  progressBarContainer: {
-    width: '100%',
-    height: 8,
-    backgroundColor: COLORS.bgWarm,
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-    borderRadius: 4,
   },
   fab: {
     position: 'absolute',
