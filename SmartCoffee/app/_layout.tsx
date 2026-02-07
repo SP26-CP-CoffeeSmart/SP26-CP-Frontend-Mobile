@@ -17,6 +17,7 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="ingredient-detail" options={{ headerShown: false }} />
         <Stack.Screen name="coffee-detail" options={{ headerShown: false }} />
         <Stack.Screen name="inventory" options={{ headerShown: false }} />
         <Stack.Screen name="ai-loading" options={{ headerShown: false }} />
