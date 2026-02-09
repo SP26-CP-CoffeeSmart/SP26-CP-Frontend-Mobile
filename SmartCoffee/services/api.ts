@@ -35,4 +35,8 @@ export const API_ENDPOINTS = {
     getById: (id: number) => `${API_BASE_URL}/ShopRecipeIngredients/${id}`,
     getByRecipeId: (recipeId: number) => `${API_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeId}`,
   },
+  beverageSize: {
+    getAll: () => `${API_BASE_URL}/BeverageSize`,
+    create: () => `${API_BASE_URL}/BeverageSize`,
+  },
 };
