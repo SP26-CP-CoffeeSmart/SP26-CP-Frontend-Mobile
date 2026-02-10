@@ -420,7 +420,10 @@ export default function MenuScreen() {
                 <Text style={styles.aiButtonText}>Create By AI</Text>
                 <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.manualButton}>
+              <TouchableOpacity
+                style={styles.manualButton}
+                onPress={() => router.push('/create-recipe')}
+              >
                 <Text style={styles.manualButtonText}>Create Manually</Text>
                 <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
               </TouchableOpacity>

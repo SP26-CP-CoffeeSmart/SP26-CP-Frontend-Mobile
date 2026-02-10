@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Modal,
   TextInput,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,15 @@ export default function ProfileScreen() {
   const [newSizeVolume, setNewSizeVolume] = useState('');
   const [addSizeError, setAddSizeError] = useState<string | null>(null);
   const [addSizeSubmitting, setAddSizeSubmitting] = useState(false);
+  const [editingSizeId, setEditingSizeId] = useState<number | null>(null);
+  const [editingSize, setEditingSize] = useState<BeverageSize | null>(null);
+  const [editSizeName, setEditSizeName] = useState('');
+  const [editSizeVolume, setEditSizeVolume] = useState('');
+  const [editSizeActive, setEditSizeActive] = useState(true);
+  const [editSizeError, setEditSizeError] = useState<string | null>(null);
+  const [editSizeSubmitting, setEditSizeSubmitting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -60,6 +70,13 @@ export default function ProfileScreen() {
   const getSizeName = (size: BeverageSize, index: number) =>
     String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
 
+  const getSizeId = (size: BeverageSize) =>
+    typeof size.id === 'number'
+      ? size.id
+      : typeof size.beverageSizeId === 'number'
+      ? size.beverageSizeId
+      : null;
+
   const getSizeVolume = (size: BeverageSize) => {
     const raw = size.volume ?? size.capacity ?? size.size ?? size.ml;
     if (raw === null || raw === undefined) {
@@ -80,6 +97,44 @@ export default function ProfileScreen() {
     }
 
     return `Volume: ${text}`;
+  };
+
+  const getSizeVolumeValue = (size: BeverageSize) => {
+    const raw = size.volume ?? size.capacity ?? size.size ?? size.ml;
+    if (raw === null || raw === undefined) {
+      return '';
+    }
+
+    if (typeof raw === 'number') {
+      return String(raw);
+    }
+
+    const match = String(raw).match(/\d+(?:\.\d+)?/);
+    return match ? match[0] : String(raw);
+  };
+
+  const getCoffeeShopId = (size: BeverageSize) => {
+    const direct = size.coffeeShopId ?? (size as any).shopId ?? (size as any).coffeeShopID;
+    if (typeof direct === 'number') {
+      return direct;
+    }
+
+    const nested = (size as any).coffeeShop?.coffeeShopId;
+    if (typeof nested === 'number') {
+      return nested;
+    }
+
+    return 1;
+  };
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2000);
   };
 
   const getSizeStatus = (size: BeverageSize) => {
@@ -145,6 +200,103 @@ export default function ProfileScreen() {
       setAddSizeSubmitting(false);
     }
   };
+
+  const startEditSize = (size: BeverageSize, index: number) => {
+    const sizeId = getSizeId(size);
+    if (sizeId === null) {
+      setEditSizeError('Missing size id.');
+      return;
+    }
+
+    setEditingSizeId(sizeId);
+    setEditingSize(size);
+    setEditSizeName(getSizeName(size, index));
+    setEditSizeVolume(getSizeVolumeValue(size));
+    setEditSizeActive(isSizeActive(size));
+    setEditSizeError(null);
+  };
+
+  const cancelEditSize = () => {
+    setEditingSizeId(null);
+    setEditingSize(null);
+    setEditSizeError(null);
+    setEditSizeSubmitting(false);
+  };
+
+  const handleUpdateSize = async () => {
+    if (editingSizeId === null || editSizeSubmitting) {
+      return;
+    }
+
+    if (!editingSize) {
+      setEditSizeError('Missing size data.');
+      return;
+    }
+
+    const trimmedName = editSizeName.trim();
+    const parsedVolume = Number(editSizeVolume);
+    const coffeeShopId = getCoffeeShopId(editingSize);
+
+    if (!trimmedName) {
+      setEditSizeError('Please enter a size name.');
+      return;
+    }
+
+    if (!Number.isFinite(parsedVolume) || parsedVolume <= 0) {
+      setEditSizeError('Please enter a valid volume.');
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setEditSizeError('Missing coffee shop id.');
+      return;
+    }
+
+    try {
+      setEditSizeSubmitting(true);
+      const updated = await beverageSizeService.update(editingSizeId, {
+        beverageSizeId: editingSizeId,
+        sizeName: trimmedName,
+        volume: parsedVolume,
+        isActive: editSizeActive,
+        coffeeShop: {
+          coffeeShopId,
+        },
+      });
+
+      setBeverageSizes((prev) =>
+        prev.map((size) => {
+          const sizeId = getSizeId(size);
+          if (sizeId !== editingSizeId) {
+            return size;
+          }
+          return {
+            ...size,
+            ...updated,
+            sizeName: updated.sizeName ?? trimmedName,
+            volume: updated.volume ?? parsedVolume,
+            isActive: updated.isActive ?? editSizeActive,
+          };
+        })
+      );
+      setEditingSizeId(null);
+      setEditingSize(null);
+      setEditSizeError(null);
+      showToast('Updated beverage size successfully.');
+    } catch (error) {
+      setEditSizeError('Unable to update beverage size.');
+    } finally {
+      setEditSizeSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -212,9 +364,7 @@ export default function ProfileScreen() {
         <View style={styles.beverageCard}>
           <View style={styles.beverageHeader}>
             <Text style={styles.beverageTitle}>Beverage Size Setup</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.manageText}>Manage</Text>
-            </TouchableOpacity>
+            <Text style={styles.manageHint}>Hold 1s to edit</Text>
           </View>
           <View style={styles.beverageList}>
             {beverageSizesLoading ? (
@@ -226,26 +376,101 @@ export default function ProfileScreen() {
             ) : (
               beverageSizes.map((size, index) => {
                 const active = isSizeActive(size);
+                const sizeId = getSizeId(size);
+                const isEditing = sizeId !== null && sizeId === editingSizeId;
 
                 return (
-                  <View key={`${getSizeName(size, index)}-${index}`} style={styles.sizeItem}>
-                    <View style={styles.sizeLeft}>
-                      <View style={styles.sizeIconWrap}>
-                        <Ionicons name="cafe-outline" size={18} color="#8B5E3C" />
+                  <TouchableOpacity
+                    key={`${getSizeName(size, index)}-${index}`}
+                    style={[styles.sizeItem, isEditing && styles.sizeItemEditing]}
+                    activeOpacity={0.9}
+                    onLongPress={() => startEditSize(size, index)}
+                    delayLongPress={1000}
+                  >
+                    {isEditing ? (
+                      <View style={styles.sizeEditContent}>
+                        <View style={styles.sizeEditHeader}>
+                          <Text style={styles.sizeEditTitle}>Edit size</Text>
+                        </View>
+                        <TextInput
+                          style={styles.sizeEditInput}
+                          value={editSizeName}
+                          onChangeText={setEditSizeName}
+                          placeholder="Size name"
+                        />
+                        <View style={styles.sizeEditVolumeRow}>
+                          <TextInput
+                            style={[styles.sizeEditInput, styles.sizeEditVolumeInput]}
+                            value={editSizeVolume}
+                            onChangeText={setEditSizeVolume}
+                            placeholder="Volume"
+                            keyboardType="numeric"
+                          />
+                          <Text style={styles.sizeEditVolumeSuffix}>ml</Text>
+                        </View>
+                        <View style={styles.sizeEditToggleRow}>
+                          <Text style={styles.sizeEditToggleLabel}>Active</Text>
+                          <Switch
+                            value={editSizeActive}
+                            onValueChange={setEditSizeActive}
+                            trackColor={{ false: '#E1D6CB', true: '#7CBF8A' }}
+                            thumbColor="#FFFFFF"
+                          />
+                        </View>
+                        {editSizeError ? (
+                          <Text style={styles.sizeEditError}>{editSizeError}</Text>
+                        ) : null}
+                        <View style={styles.sizeEditActions}>
+                          <TouchableOpacity
+                            style={styles.sizeEditCancel}
+                            onPress={cancelEditSize}
+                            activeOpacity={0.8}
+                          >
+                            <Text style={styles.sizeEditCancelText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[
+                              styles.sizeEditSave,
+                              editSizeSubmitting && styles.sizeEditSaveDisabled,
+                            ]}
+                            onPress={handleUpdateSize}
+                            activeOpacity={0.85}
+                            disabled={editSizeSubmitting}
+                          >
+                            <Text style={styles.sizeEditSaveText}>
+                              {editSizeSubmitting ? 'Saving...' : 'Save'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                      <View>
-                        <Text style={styles.sizeName}>{getSizeName(size, index)}</Text>
-                        <Text style={styles.sizeVolume}>{getSizeVolume(size)}</Text>
-                      </View>
-                    </View>
-                    <View
-                      style={[styles.sizeStatus, active ? styles.sizeStatusActive : styles.sizeStatusInactive]}>
-                      <Text
-                        style={active ? styles.sizeStatusTextActive : styles.sizeStatusTextInactive}>
-                        {getSizeStatus(size)}
-                      </Text>
-                    </View>
-                  </View>
+                    ) : (
+                      <>
+                        <View style={styles.sizeLeft}>
+                          <View style={styles.sizeIconWrap}>
+                            <Ionicons name="cafe-outline" size={18} color="#8B5E3C" />
+                          </View>
+                          <View>
+                            <Text style={styles.sizeName}>{getSizeName(size, index)}</Text>
+                            <Text style={styles.sizeVolume}>{getSizeVolume(size)}</Text>
+                          </View>
+                        </View>
+                        <View
+                          style={[
+                            styles.sizeStatus,
+                            active ? styles.sizeStatusActive : styles.sizeStatusInactive,
+                          ]}
+                        >
+                          <Text
+                            style={
+                              active ? styles.sizeStatusTextActive : styles.sizeStatusTextInactive
+                            }
+                          >
+                            {getSizeStatus(size)}
+                          </Text>
+                        </View>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 );
               })
             )}
@@ -362,6 +587,13 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
       </ScrollView>
+      {toastMessage ? (
+        <View style={styles.toastContainer}>
+          <View style={styles.toastCard}>
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -617,8 +849,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4A331F',
   },
-  manageText: {
-    fontSize: 12,
+  manageHint: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#C0832C',
   },
@@ -639,6 +871,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  sizeItemEditing: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 10,
   },
   sizeLeft: {
     flexDirection: 'row',
@@ -683,6 +920,85 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#9A9A9A',
+  },
+  sizeEditContent: {
+    gap: 8,
+  },
+  sizeEditHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sizeEditTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4A331F',
+  },
+  sizeEditInput: {
+    borderWidth: 1,
+    borderColor: '#E7D6C3',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: '#4A331F',
+    backgroundColor: '#FFF9F2',
+  },
+  sizeEditVolumeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sizeEditVolumeInput: {
+    flex: 1,
+  },
+  sizeEditVolumeSuffix: {
+    fontSize: 12,
+    color: '#8B6B4D',
+  },
+  sizeEditToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sizeEditToggleLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4A331F',
+  },
+  sizeEditError: {
+    fontSize: 11,
+    color: '#B0412C',
+  },
+  sizeEditActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  sizeEditCancel: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F2E6D7',
+  },
+  sizeEditCancelText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#7B5B3C',
+  },
+  sizeEditSave: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#D38B2A',
+  },
+  sizeEditSaveDisabled: {
+    opacity: 0.7,
+  },
+  sizeEditSaveText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFF',
   },
   addSizeButton: {
     borderWidth: 1,
@@ -787,5 +1103,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#FFF',
+  },
+  toastContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 24,
+    alignItems: 'center',
+  },
+  toastCard: {
+    backgroundColor: '#2C2017',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  toastText: {
+    color: '#FFF8F1',
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

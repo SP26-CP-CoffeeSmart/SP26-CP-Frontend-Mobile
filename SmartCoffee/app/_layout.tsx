@@ -23,6 +23,7 @@ export default function RootLayout() {
         <Stack.Screen name="ai-loading" options={{ headerShown: false }} />
         <Stack.Screen name="ai-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="ai-result" options={{ headerShown: false }} />
+        <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
       <StatusBar style="auto" />
