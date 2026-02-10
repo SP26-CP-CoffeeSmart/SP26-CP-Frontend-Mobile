@@ -1,13 +1,26 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
 export default function AIRecommendationsScreen() {
   const router = useRouter();
-  const { data } = useLocalSearchParams<{ data?: string }>();
+  const { data, beverageId, beverage } = useLocalSearchParams<{
+    data?: string;
+    beverageId?: string;
+    beverage?: string;
+  }>();
   const fallbackImage =
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
+
+  useEffect(() => {
+    return () => {
+      AsyncStorage.removeItem(SAVED_RECIPES_KEY).catch(() => undefined);
+    };
+  }, []);
 
   const normalizeImageUrl = (url: unknown): string => {
     if (!url || typeof url !== 'string') return fallbackImage;
@@ -55,7 +68,7 @@ export default function AIRecommendationsScreen() {
           <Text style={styles.headerTitle}>Recipes of </Text>
           <Text style={styles.beverageNameTitle}>{beverageName.replace('Recipes of ', '')}</Text>
         </View>
-        <View style={{ width: 24 }} />
+        <View style={styles.headerActionSpacer} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -72,7 +85,9 @@ export default function AIRecommendationsScreen() {
                       data: JSON.stringify({
                         recipe: item.recipe,
                         imageGeneration: item.imageGeneration
-                      })
+                      }),
+                      beverageId,
+                      beverage,
                     },
                   })
                 }
@@ -115,6 +130,13 @@ export default function AIRecommendationsScreen() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          style={[styles.manualButton, styles.goBackButton]}
+          onPress={() => router.replace('/(tabs)/menu')}>
+          <Text style={styles.manualButtonText}>Go back</Text>
+          <Ionicons name="chevron-forward" size={18} color="#FFF" />
+        </TouchableOpacity>
+
         <View style={{ height: 20 }} />
       </ScrollView>
     </View>
@@ -143,6 +165,23 @@ const styles = StyleSheet.create({
   headerTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  headerAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#F3E8DD',
+  },
+  headerActionText: {
+    fontSize: 12,
+    color: '#8B5E3C',
+    fontWeight: '600',
+  },
+  headerActionSpacer: {
+    width: 48,
   },
   beverageNameTitle: {
     fontSize: 20,
@@ -248,6 +287,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+  },
+  goBackButton: {
+    marginBottom: 24,
   },
   manualButtonText: {
     color: '#FFF',
