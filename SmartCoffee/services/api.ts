@@ -38,5 +38,6 @@ export const API_ENDPOINTS = {
   beverageSize: {
     getAll: () => `${API_BASE_URL}/BeverageSize`,
     create: () => `${API_BASE_URL}/BeverageSize`,
+    update: (id: number) => `${API_BASE_URL}/BeverageSize/${id}`,
   },
 };

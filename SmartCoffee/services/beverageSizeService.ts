@@ -2,6 +2,7 @@ import { API_ENDPOINTS } from './api';
 
 export interface BeverageSize {
   id?: number;
+  beverageSizeId?: number;
   name?: string;
   sizeName?: string;
   volume?: number | string;
@@ -18,6 +19,16 @@ export interface CreateBeverageSizePayload {
   sizeName: string;
   volume: number;
   isActive: boolean;
+}
+
+export interface UpdateBeverageSizePayload {
+  beverageSizeId: number;
+  sizeName: string;
+  volume: number;
+  isActive: boolean;
+  coffeeShop: {
+    coffeeShopId: number;
+  };
 }
 
 class BeverageSizeService {
@@ -53,6 +64,49 @@ class BeverageSizeService {
       return await response.json();
     } catch (error) {
       console.error('Error creating beverage size:', error);
+      throw error;
+    }
+  }
+
+  async update(id: number, payload: UpdateBeverageSizePayload): Promise<BeverageSize> {
+    try {
+      const response = await fetch(API_ENDPOINTS.beverageSize.update(id), {
+        method: 'PUT',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const text = await response.text();
+      if (!text) {
+        return {
+          beverageSizeId: payload.beverageSizeId,
+          sizeName: payload.sizeName,
+          volume: payload.volume,
+          isActive: payload.isActive,
+          coffeeShop: payload.coffeeShop,
+        } as BeverageSize;
+      }
+
+      try {
+        return JSON.parse(text);
+      } catch {
+        return {
+          beverageSizeId: payload.beverageSizeId,
+          sizeName: payload.sizeName,
+          volume: payload.volume,
+          isActive: payload.isActive,
+          coffeeShop: payload.coffeeShop,
+        } as BeverageSize;
+      }
+    } catch (error) {
+      console.error('Error updating beverage size:', error);
       throw error;
     }
   }
