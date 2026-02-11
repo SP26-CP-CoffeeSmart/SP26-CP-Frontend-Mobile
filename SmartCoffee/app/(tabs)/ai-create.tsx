@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -12,7 +12,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
 
@@ -57,7 +56,6 @@ const CUP_TYPES = [
   { label: 'Plastic', icon: 'local-drink' },
   { label: 'Glass', icon: 'wine-bar' },
 ];
-const SIZE_OPTIONS = ['S', 'M', 'L', 'No-size'];
 const COLOR_STYLES = ['Black', 'White', 'Iced-crystal', 'Brown', 'Creamy'];
 const CATEGORIES = ['Seasonal', 'Signature', 'Special', 'Budget', 'Premium', 'Latte Art', 'Dirty Coffee'];
 
@@ -104,7 +102,13 @@ export default function AiCreateScreen() {
     Body: 3,
     Acidity: 2,
   });
-  const [beverageName, setBeverageName] = useState('');
+  const coffeeShopId = 1;
+  const [beverages, setBeverages] = useState<Array<{ id: string; name: string; raw: Record<string, any> }>>([]);
+  const [beveragesLoading, setBeveragesLoading] = useState(false);
+  const [beveragesError, setBeveragesError] = useState<string | null>(null);
+  const [selectedBeverageId, setSelectedBeverageId] = useState<string | null>(null);
+  const [selectedBeverage, setSelectedBeverage] = useState<Record<string, any> | null>(null);
+  const [beverageSelectionError, setBeverageSelectionError] = useState<string | null>(null);
   const [selectedStyle, setSelectedStyle] = useState('Bold');
   const [coffeeType, setCoffeeType] = useState('Robusta');
   const [roastLevel, setRoastLevel] = useState('Light');
@@ -122,11 +126,61 @@ export default function AiCreateScreen() {
   const [difficulty, setDifficulty] = useState('Easy');
   const [equipment, setEquipment] = useState('Espresso Machine');
   const [cupType, setCupType] = useState('Plastic');
-  const [sizeOption, setSizeOption] = useState('S');
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
   const [margin, setMargin] = useState(35);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchBeverages = async () => {
+      setBeveragesLoading(true);
+      setBeveragesError(null);
+      try {
+        const response = await fetch(`${getApiBaseUrl()}/api/ShopBeverage/shop/${coffeeShopId}`);
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const result = await response.json();
+        const rawList: Record<string, any>[] = Array.isArray(result)
+          ? result
+          : Array.isArray(result?.data)
+            ? result.data
+            : Array.isArray(result?.items)
+              ? result.items
+              : [];
+
+        const mapped = rawList.map((item, index) => ({
+          id: String(item?.beverageId ?? item?.id ?? index),
+          name: String(item?.beverageName ?? item?.name ?? 'Unknown'),
+          raw: item ?? {},
+        }));
+
+        if (isMounted) {
+          setBeverages(mapped);
+          if (!selectedBeverageId && mapped.length > 0) {
+            setSelectedBeverageId(mapped[0].id);
+            setSelectedBeverage(mapped[0].raw ?? null);
+          }
+        }
+      } catch (error) {
+        if (isMounted) {
+          setBeveragesError('Failed to load beverages.');
+        }
+      } finally {
+        if (isMounted) {
+          setBeveragesLoading(false);
+        }
+      }
+    };
+
+    fetchBeverages();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [coffeeShopId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -142,9 +196,14 @@ export default function AiCreateScreen() {
 
   const handleSubmit = async () => {
     if (isLoading) return;
+    if (!selectedBeverageId) {
+      setBeverageSelectionError('Please choose a beverage.');
+      return;
+    }
     setIsLoading(true);
     router.push('/ai-loading');
     const payload = {
+      coffeeShopId,
       flavorProfile: {
         bitterness: profileValues.Bitterness,
         sweetness: profileValues.Sweetness,
@@ -152,7 +211,7 @@ export default function AiCreateScreen() {
         acidity: profileValues.Acidity,
       },
       basicInfo: {
-        beverageName,
+        beverageId: Number.parseInt(selectedBeverageId, 10),
         selectedFlavorStyleId: selectedStyle,
       },
       coffeeConfig: {
@@ -177,13 +236,14 @@ export default function AiCreateScreen() {
       },
       presentation: {
         selectedCupTypeId: cupType,
-        selectedSizeIds: [sizeOption],
         selectedColorStyleId: colorStyle,
         selectedCategoryId: category,
       },
     };
 
     try {
+      console.log('AI create payload:', JSON.stringify(payload, null, 2));
+
       const response = await fetch(`${getApiBaseUrl()}/api/AI/create-ai-recipe`, {
         method: 'POST',
         headers: {
@@ -191,13 +251,22 @@ export default function AiCreateScreen() {
         },
         body: JSON.stringify(payload),
       });
+      const responseText = await response.text();
+      console.log('AI create response status:', response.status);
+      console.log('AI create response body:', responseText);
+
       if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+        throw new Error(`Request failed: ${response.status}: ${responseText}`);
       }
-      const data = await response.json();
+
+      const data = responseText ? JSON.parse(responseText) : null;
       router.replace({
         pathname: '/ai-recommendations',
-        params: { data: JSON.stringify(data) },
+        params: {
+          data: JSON.stringify(data),
+          beverageId: selectedBeverageId,
+          beverage: selectedBeverage ? JSON.stringify(selectedBeverage) : undefined,
+        },
       });
     } catch (error) {
       // TODO: handle error UI
@@ -284,13 +353,40 @@ export default function AiCreateScreen() {
 
           <ThemedText style={styles.subSectionTitle}>Beverage</ThemedText>
           <ThemedText style={styles.helperText}>What drink does this recipe make?</ThemedText>
-          <TextInput
-            placeholder="Please specify your beverage\ne.g Cold Brew,..."
-            placeholderTextColor="#B8B8B8"
-            value={beverageName}
-            onChangeText={setBeverageName}
-            style={styles.input}
-          />
+          {beveragesLoading ? (
+            <ThemedText style={styles.beverageStateText}>Loading beverages...</ThemedText>
+          ) : beveragesError ? (
+            <ThemedText style={styles.beverageStateText}>{beveragesError}</ThemedText>
+          ) : beverages.length === 0 ? (
+            <ThemedText style={styles.beverageStateText}>No beverages found.</ThemedText>
+          ) : (
+            <View style={styles.beverageOptions}>
+              {beverages.map((item) => {
+                const isSelected = item.id === selectedBeverageId;
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => {
+                      setSelectedBeverageId(item.id);
+                      setSelectedBeverage(item.raw ?? null);
+                      setBeverageSelectionError(null);
+                    }}
+                    style={[styles.beverageOption, isSelected && styles.beverageOptionSelected]}>
+                    <ThemedText
+                      style={[
+                        styles.beverageOptionText,
+                        isSelected && styles.beverageOptionTextSelected,
+                      ]}>
+                      {item.name}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+          {beverageSelectionError ? (
+            <ThemedText style={styles.beverageErrorText}>{beverageSelectionError}</ThemedText>
+          ) : null}
 
           <View style={styles.sectionSpacing} />
 
@@ -637,28 +733,6 @@ export default function AiCreateScreen() {
           <View style={styles.sectionSpacing} />
 
           <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Size</ThemedText>
-            <ThemedText style={styles.groupValue}>{sizeOption}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {SIZE_OPTIONS.map((item) => {
-              const isSelected = item === sizeOption;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setSizeOption(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
             <ThemedText style={styles.subSectionTitle}>Color Style</ThemedText>
             <ThemedText style={styles.groupValue}>{colorStyle}</ThemedText>
           </View>
@@ -856,6 +930,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#1F2937',
     backgroundColor: '#FFFFFF',
+  },
+  beverageStateText: {
+    fontSize: 12,
+    color: '#7C7C7C',
+  },
+  beverageOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  beverageOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D8C3B4',
+    backgroundColor: '#FFFFFF',
+  },
+  beverageOptionSelected: {
+    backgroundColor: '#6B3E1F',
+    borderColor: '#6B3E1F',
+  },
+  beverageOptionText: {
+    fontSize: 12,
+    color: '#6B3E1F',
+  },
+  beverageOptionTextSelected: {
+    color: '#FFFFFF',
+  },
+  beverageErrorText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#B0412C',
   },
   submitButton: {
     marginTop: 18,

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   StyleSheet,
   View,
   Text,
@@ -7,6 +8,7 @@ import {
   TouchableOpacity,
   Image,
   Dimensions,
+  FlatList,
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +37,7 @@ interface BeverageItem {
 type BeverageApiItem = Record<string, any>;
 
 const { width } = Dimensions.get('window');
+const BEVERAGE_PAGE_SIZE = 4;
 
 const fallbackMenuImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
@@ -72,10 +75,13 @@ const resolveImageUrl = (baseUrl: string, image?: string) => {
 
 export default function MenuScreen() {
   const router = useRouter();
+  const coffeeShopId = 1;
   const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
   const [beverages, setBeverages] = useState<BeverageItem[]>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
+  const [beveragesLoadingMore, setBeveragesLoadingMore] = useState(false);
   const [beveragesError, setBeveragesError] = useState<string | null>(null);
+  const [beveragePage, setBeveragePage] = useState(1);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
@@ -145,7 +151,7 @@ export default function MenuScreen() {
       setBeveragesError(null);
       try {
         const baseUrl = getApiBaseUrl();
-        const response = await fetch(`${baseUrl}/api/ShopBeverage`);
+        const response = await fetch(`${baseUrl}/api/ShopBeverage/shop/${coffeeShopId}`);
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -171,6 +177,8 @@ export default function MenuScreen() {
 
         if (isMounted) {
           setBeverages(mapped);
+          setBeveragePage(1);
+          setBeveragesLoadingMore(false);
           console.log('Fetched Beverages:', mapped);
         }
       } catch (error) {
@@ -189,6 +197,34 @@ export default function MenuScreen() {
       isMounted = false;
     };
   }, []);
+
+  const totalBeveragePages = Math.ceil(beverages.length / BEVERAGE_PAGE_SIZE);
+  const visibleBeveragePages = Math.min(beveragePage, totalBeveragePages);
+  const beveragePages = Array.from({ length: visibleBeveragePages }, (_, index) =>
+    beverages.slice(index * BEVERAGE_PAGE_SIZE, (index + 1) * BEVERAGE_PAGE_SIZE)
+  );
+  const beveragePagerData = beveragesLoadingMore
+    ? [...beveragePages, null]
+    : beveragePages;
+
+  const handleLoadMoreBeverages = () => {
+    if (beveragesLoading || beveragesLoadingMore) return;
+    if (beveragePage >= totalBeveragePages) return;
+
+    setBeveragesLoadingMore(true);
+    setTimeout(() => {
+      setBeveragePage((prev) => Math.min(prev + 1, totalBeveragePages));
+      setBeveragesLoadingMore(false);
+    }, 900);
+  };
+
+  const handleBeveragePagerScrollEnd = (event: any) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    const reachedEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 40;
+    if (reachedEnd) {
+      handleLoadMoreBeverages();
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -296,57 +332,75 @@ export default function MenuScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.beverageGrid}>
-            {beveragesLoading ? (
-              <Text style={styles.beverageStateText}>Loading...</Text>
-            ) : beveragesError ? (
-              <Text style={styles.beverageStateText}>{beveragesError}</Text>
-            ) : beverages.length === 0 ? (
-              <Text style={styles.beverageStateText}>No beverages found</Text>
-            ) : (
-              beverages.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.beverageCard}
-                  onPress={() =>
-                    router.push(`/recipe-detail/${item.id}`)
-                  }
-                >
-                  <View style={styles.beverageImageWrap}>
-                    <Image source={item.image} style={styles.beverageImage} />
-                    <TouchableOpacity
-                      style={styles.beverageEditButton}
-                      onPress={(e) => {
-                        e.stopPropagation();
-                      }}
-                    >
-                      <Ionicons name="create-outline" size={18} color={stylesVars.espresso} />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.beverageContent}>
-                    <Text style={styles.beverageTitle}>{item.name}</Text>
-                    <View style={styles.beverageMetaRow}>
-                      <Ionicons name="cafe-outline" size={12} color={stylesVars.primary} />
-                      <Text style={styles.beverageMetaText}>{item.flavor}</Text>
-                      {item.time ? (
-                        <>
-                          <Ionicons
-                            name="time-outline"
-                            size={12}
-                            color={stylesVars.primary}
-                            style={{ marginLeft: 8 }}
-                          />
-                          <Text style={styles.beverageMetaText}>
-                            {item.time}{String(item.time).includes('min') ? '' : ' min'}
-                          </Text>
-                        </>
-                      ) : null}
+          {beveragesLoading ? (
+            <Text style={styles.beverageStateText}>Loading...</Text>
+          ) : beveragesError ? (
+            <Text style={styles.beverageStateText}>{beveragesError}</Text>
+          ) : beverages.length === 0 ? (
+            <Text style={styles.beverageStateText}>No beverages found</Text>
+          ) : (
+            <FlatList
+              horizontal
+              data={beveragePagerData}
+              keyExtractor={(_, index) => `beverage-page-${index}`}
+              showsHorizontalScrollIndicator={false}
+              pagingEnabled
+              onMomentumScrollEnd={handleBeveragePagerScrollEnd}
+              contentContainerStyle={styles.beveragePager}
+              renderItem={({ item: pageItems }) => (
+                <View style={styles.beveragePage}>
+                  {pageItems ? (
+                    <View style={styles.beverageGrid}>
+                      {pageItems.map((item) => (
+                        <TouchableOpacity
+                          key={item.id}
+                          style={styles.beverageCard}
+                          onPress={() => router.push(`/recipe-detail/${item.id}`)}
+                        >
+                          <View style={styles.beverageImageWrap}>
+                            <Image source={item.image} style={styles.beverageImage} />
+                            <TouchableOpacity
+                              style={styles.beverageEditButton}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                              }}
+                            >
+                              <Ionicons name="create-outline" size={18} color={stylesVars.espresso} />
+                            </TouchableOpacity>
+                          </View>
+                          <View style={styles.beverageContent}>
+                            <Text style={styles.beverageTitle}>{item.name}</Text>
+                            <View style={styles.beverageMetaRow}>
+                              <Ionicons name="cafe-outline" size={12} color={stylesVars.primary} />
+                              <Text style={styles.beverageMetaText}>{item.flavor}</Text>
+                              {item.time ? (
+                                <>
+                                  <Ionicons
+                                    name="time-outline"
+                                    size={12}
+                                    color={stylesVars.primary}
+                                    style={{ marginLeft: 8 }}
+                                  />
+                                  <Text style={styles.beverageMetaText}>
+                                    {item.time}{String(item.time).includes('min') ? '' : ' min'}
+                                  </Text>
+                                </>
+                              ) : null}
+                            </View>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
                     </View>
-                  </View>
-                </TouchableOpacity>
-              ))
-            )}
-          </View>
+                  ) : (
+                    <View style={styles.beverageLoadingMorePage}>
+                      <ActivityIndicator size="small" color={stylesVars.primary} />
+                      <Text style={styles.beverageLoadingText}>Loading...</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            />
+          )}
         </View>
 
         <View style={styles.suggestionCard}>
@@ -366,7 +420,10 @@ export default function MenuScreen() {
                 <Text style={styles.aiButtonText}>Create By AI</Text>
                 <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.manualButton}>
+              <TouchableOpacity
+                style={styles.manualButton}
+                onPress={() => router.push('/create-recipe')}
+              >
                 <Text style={styles.manualButtonText}>Create Manually</Text>
                 <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
               </TouchableOpacity>
@@ -595,10 +652,34 @@ const styles = StyleSheet.create({
     color: '#8B7355',
     paddingHorizontal: 4,
   },
+  beveragePager: {
+    paddingRight: 12,
+  },
+  beveragePage: {
+    width: width - 24 * 2,
+    marginRight: 16,
+  },
   beverageGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 16,
+  },
+  beverageLoadingMore: {
+    width: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  beverageLoadingMorePage: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  beverageLoadingText: {
+    fontSize: 12,
+    color: '#8B7355',
+    fontWeight: '600',
   },
   beverageCard: {
     width: (width - 24 * 2 - 16) / 2,

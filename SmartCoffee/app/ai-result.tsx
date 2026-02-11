@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
@@ -30,6 +31,8 @@ const getApiBaseUrl = () => {
     default: 'http://localhost:5080',
   });
 };
+
+const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
 interface Recipe {
   recipeName: string;
@@ -70,10 +73,26 @@ interface Recipe {
 
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
-  const { data } = useLocalSearchParams<{ data?: string }>();
+  const { data, beverageId, beverage } = useLocalSearchParams<{
+    data?: string;
+    beverageId?: string;
+    beverage?: string;
+  }>();
+  const parsedBeverageId = beverageId ? Number.parseInt(beverageId, 10) : NaN;
+  let selectedBeverage: Record<string, any> | null = null;
+  if (beverage) {
+    try {
+      selectedBeverage = JSON.parse(String(beverage));
+    } catch {
+      selectedBeverage = null;
+    }
+  }
   const fallbackImage =
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
@@ -162,9 +181,78 @@ export default function AiResultScreen() {
     return trimmed;
   };
 
+  let recipe: Recipe | null = null;
+  let imageGeneration: any = null;
+  if (data) {
+    try {
+      const parsed = JSON.parse(String(data));
+      console.log('AI Recipe Result raw payload:', parsed);
+      recipe = parsed?.recipe ?? parsed;
+      imageGeneration = parsed?.imageGeneration ?? null;
+    } catch {
+      recipe = null;
+      imageGeneration = null;
+    }
+  }
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2000);
+  };
+
+  useEffect(() => {
+    if (!recipe?.recipeId) {
+      setIsSaved(false);
+      return;
+    }
+
+    let isActive = true;
+    const loadSavedState = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(SAVED_RECIPES_KEY);
+        const ids = stored ? (JSON.parse(stored) as number[]) : [];
+        if (isActive) {
+          setIsSaved(ids.includes(Number(recipe?.recipeId)));
+        }
+      } catch {
+        if (isActive) {
+          setIsSaved(false);
+        }
+      }
+    };
+
+    loadSavedState();
+
+    return () => {
+      isActive = false;
+    };
+  }, [recipe?.recipeId]);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSaveRecipe = async () => {
     if (!recipe) {
       Alert.alert('Error', 'No recipe data to save');
+      return;
+    }
+
+    if (!Number.isFinite(parsedBeverageId)) {
+      Alert.alert('Error', 'Missing beverage selection. Please choose a beverage first.');
+      return;
+    }
+
+    if (isSaved) {
       return;
     }
 
@@ -184,7 +272,25 @@ export default function AiResultScreen() {
       const finalImageUrl = encodedFirebaseUrl || encodedRecipeImage;
       const recipeWithFinalImage = {
         ...cleanRecipe,
-        ...(finalImageUrl && { image: finalImageUrl })
+        ...(finalImageUrl && { image: finalImageUrl }),
+        beverageId: parsedBeverageId,
+      };
+
+      const {
+        beverage: _beverage,
+        coffeeShop: _coffeeShop,
+        Beverage: _Beverage,
+        CoffeeShop: _CoffeeShop,
+        ...restRecipe
+      } = recipeWithFinalImage as Record<string, unknown>;
+      const beveragePayload = selectedBeverage ?? { beverageId: parsedBeverageId };
+      const coffeeShopPayload = { coffeeShopId: 1 };
+      const requestRecipe = {
+        ...restRecipe,
+        beverage: beveragePayload,
+        coffeeShop: coffeeShopPayload,
+        Beverage: beveragePayload,
+        CoffeeShop: coffeeShopPayload,
       };
 
       // Update imageGeneration with encoded URL if it exists
@@ -194,8 +300,8 @@ export default function AiResultScreen() {
       } : null;
 
       const requestBody = {
-        recipe: recipeWithFinalImage,
-        ...(imageGenWithEncodedUrl && { imageGeneration: imageGenWithEncodedUrl })
+        Recipe: requestRecipe,
+        ...(imageGenWithEncodedUrl && { ImageGeneration: imageGenWithEncodedUrl })
       };
 
       console.log('========== SAVE RECIPE REQUEST ==========');
@@ -227,12 +333,21 @@ export default function AiResultScreen() {
 
       const result = JSON.parse(responseText);
       console.log('Recipe saved successfully:', result);
-      Alert.alert('Success', 'Recipe saved successfully!', [
-        {
-          text: 'OK',
-          onPress: () => router.back(),
-        },
-      ]);
+
+      try {
+        const stored = await AsyncStorage.getItem(SAVED_RECIPES_KEY);
+        const ids = stored ? (JSON.parse(stored) as number[]) : [];
+        const recipeId = Number(recipe?.recipeId);
+        if (Number.isFinite(recipeId) && !ids.includes(recipeId)) {
+          ids.push(recipeId);
+          await AsyncStorage.setItem(SAVED_RECIPES_KEY, JSON.stringify(ids));
+        }
+      } catch {
+        // Ignore storage errors for now.
+      }
+
+      setIsSaved(true);
+      showToast('Recipe saved successfully!');
     } catch (error) {
       console.error('Error saving recipe:', error);
       Alert.alert(
@@ -243,20 +358,6 @@ export default function AiResultScreen() {
       setIsLoading(false);
     }
   };
-
-  let recipe: Recipe | null = null;
-  let imageGeneration: any = null;
-  if (data) {
-    try {
-      const parsed = JSON.parse(String(data));
-      console.log('AI Recipe Result raw payload:', parsed);
-      recipe = parsed?.recipe ?? parsed;
-      imageGeneration = parsed?.imageGeneration ?? null;
-    } catch {
-      recipe = null;
-      imageGeneration = null;
-    }
-  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -473,7 +574,9 @@ export default function AiResultScreen() {
           {recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0 ? (
             <View style={styles.ingredientsList}>
               {recipe.shopRecipeIngredients.map((item, index) => (
-                <View key={item.id ?? index} style={styles.ingredientRow}>
+                <View
+                  key={`${item.id ?? item.ingredient?.ingredientId ?? 'ingredient'}-${index}`}
+                  style={styles.ingredientRow}>
                   <View style={styles.ingredientInfo}>
                     <ThemedText style={styles.ingredientName}>
                       {item.ingredient?.name || 'Unknown Ingredient'}
@@ -523,21 +626,33 @@ export default function AiResultScreen() {
           <View style={styles.sectionSpacing} />
 
           <Pressable
-            style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+            style={[
+              styles.saveButton,
+              (isLoading || isSaved) && styles.saveButtonDisabled,
+            ]}
             onPress={handleSaveRecipe}
-            disabled={isLoading}
+            disabled={isLoading || isSaved}
           >
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <>
                 <MaterialIcons name="save" size={18} color="#FFFFFF" />
-                <ThemedText style={styles.saveButtonText}>Save Recipe</ThemedText>
+                <ThemedText style={styles.saveButtonText}>
+                  {isSaved ? 'Saved' : 'Save Recipe'}
+                </ThemedText>
               </>
             )}
           </Pressable>
         </View>
       </ScrollView>
+      {toastMessage ? (
+        <View style={styles.toastContainer}>
+          <View style={styles.toastCard}>
+            <ThemedText style={styles.toastText}>{toastMessage}</ThemedText>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -795,5 +910,27 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.rounded,
     color: '#FFFFFF',
     fontWeight: '600',
+  },
+  toastContainer: {
+    position: 'absolute',
+    bottom: 26,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  toastCard: {
+    backgroundColor: '#2D2116',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+  },
+  toastText: {
+    color: '#FFF',
+    fontSize: 12,
   },
 });
