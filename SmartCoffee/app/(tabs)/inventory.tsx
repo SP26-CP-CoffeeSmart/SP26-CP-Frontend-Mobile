@@ -30,7 +30,9 @@ interface ShopRecipeIngredient {
   id: number;
   quantity: number;
   cost: number;
-  ingredient: Ingredient;
+  measurement?: string | null;
+  ingredient_id?: number;
+  ingredient?: Ingredient;
 }
 
 const getApiBaseUrl = () => {
@@ -75,7 +77,13 @@ export default function InventoryScreen() {
       setLoading(true);
       setError(null);
       const baseUrl = getApiBaseUrl();
-      const response = await axios.get(`${baseUrl}/api/ShopRecipeIngredients`);
+      
+      // Try with includeIngredient parameter
+      const url = `${baseUrl}/api/ShopRecipeIngredients?includeIngredient=true`;
+      console.log('Fetching ingredients from:', url);
+      const response = await axios.get(url);
+      
+      console.log('API Response sample:', response.data[0]); // Log first item to see structure
       
       if (Array.isArray(response.data)) {
         setIngredients(response.data);
@@ -100,14 +108,14 @@ export default function InventoryScreen() {
     // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter((item) =>
-        item.ingredient.category.toLowerCase().includes(selectedCategory.toLowerCase())
+        (item.ingredient?.category || 'Unknown Category').toLowerCase().includes(selectedCategory.toLowerCase())
       );
     }
 
     // Filter by search query
     if (searchQuery.trim() !== '') {
       filtered = filtered.filter((item) =>
-        item.ingredient.name.toLowerCase().includes(searchQuery.toLowerCase())
+        (item.ingredient?.name || `Ingredient #${item.id}`).toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -142,6 +150,11 @@ export default function InventoryScreen() {
   const renderItem = ({ item }: { item: ShopRecipeIngredient }) => {
     const status = getStockStatus(item.quantity);
     const percentage = getStockPercentage(item.quantity);
+    
+    // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
+    const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
+    const ingredientImage = item.ingredient?.image || null;
+    const ingredientCategory = item.ingredient?.category || 'Unknown Category';
 
     return (
       <TouchableOpacity
@@ -152,9 +165,9 @@ export default function InventoryScreen() {
         <View className="flex-row p-4">
           {/* Image */}
           <View className="w-16 h-16 rounded-xl mr-4 overflow-hidden">
-            {item.ingredient.image ? (
+            {ingredientImage ? (
               <Image
-                source={{ uri: item.ingredient.image }}
+                source={{ uri: ingredientImage }}
                 className="w-full h-full"
                 resizeMode="cover"
               />
@@ -174,7 +187,7 @@ export default function InventoryScreen() {
                   isDark ? 'text-gray-200' : 'text-gray-900'
                 }`}
                 numberOfLines={1}>
-                {item.ingredient.name}
+                {ingredientName}
               </Text>
               {item.cost > 50000 && (
                 <View className="bg-amber-50 px-2 py-0.5 rounded ml-2">
@@ -184,7 +197,7 @@ export default function InventoryScreen() {
             </View>
 
             {/* Subtitle */}
-            <Text className="text-gray-500 text-xs mb-2">{item.ingredient.category}</Text>
+            <Text className="text-gray-500 text-xs mb-2">{ingredientCategory}</Text>
 
             {/* Quantity and Status */}
             <View className="flex-row items-center justify-between mb-2">

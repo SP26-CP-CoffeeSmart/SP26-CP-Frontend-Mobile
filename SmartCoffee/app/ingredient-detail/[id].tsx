@@ -31,7 +31,9 @@ interface ShopRecipeIngredient {
   id: number;
   quantity: number;
   cost: number;
-  ingredient: Ingredient;
+  measurement?: string | null;
+  ingredient_id?: number;
+  ingredient?: Ingredient;
 }
 
 interface BatchInfo {
@@ -109,7 +111,10 @@ export default function IngredientDetailScreen() {
       setLoading(true);
       setError(null);
       const baseUrl = getApiBaseUrl();
-      const response = await axios.get(`${baseUrl}/api/ShopRecipeIngredients/${id}`);
+      const url = `${baseUrl}/api/ShopRecipeIngredients/${id}?includeIngredient=true`;
+      console.log('Fetching ingredient detail from:', url);
+      const response = await axios.get(url);
+      console.log('Ingredient detail response:', response.data);
       setIngredient(response.data);
     } catch (err) {
       console.error('Error fetching ingredient:', err);
@@ -172,6 +177,12 @@ export default function IngredientDetailScreen() {
   }
 
   const screenWidth = Dimensions.get('window').width;
+  
+  // Extract ingredient info with fallbacks
+  const ingredientName = ingredient.ingredient?.name || `Ingredient #${ingredient.id}`;
+  const ingredientImage = ingredient.ingredient?.image || null;
+  const ingredientCategory = ingredient.ingredient?.category || 'Unknown';
+  const ingredientEndDate = ingredient.ingredient?.endDate || new Date().toISOString();
 
   return (
     <View style={{ flex: 1, backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }}>
@@ -223,9 +234,9 @@ export default function IngredientDetailScreen() {
                 marginRight: 15,
               }}
             >
-              {ingredient.ingredient.image ? (
+              {ingredientImage ? (
                 <Image
-                  source={{ uri: ingredient.ingredient.image }}
+                  source={{ uri: ingredientImage }}
                   style={{ width: 60, height: 60, borderRadius: 30 }}
                   resizeMode="cover"
                 />
@@ -242,13 +253,13 @@ export default function IngredientDetailScreen() {
                   marginBottom: 5,
                 }}
               >
-                {ingredient.ingredient.name}
+                {ingredientName}
               </Text>
               <Text style={{ fontSize: 14, color: '#888', marginBottom: 3 }}>
                 Partner: Local Supplier Inc
               </Text>
               <Text style={{ fontSize: 14, color: '#888' }}>
-                Expiry Date: {new Date(ingredient.ingredient.endDate).toLocaleDateString('en-US', {
+                Expiry Date: {new Date(ingredientEndDate).toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',

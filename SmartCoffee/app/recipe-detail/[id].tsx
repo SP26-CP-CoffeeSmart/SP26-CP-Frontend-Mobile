@@ -50,8 +50,10 @@ interface Ingredient {
     id: number;
     quantity: number;
     cost: number;
+    measurement?: string | null;
+    ingredient_id?: number;
     shopRecipe: null;
-    ingredient: {
+    ingredient?: {
         ingredientId: number;
         name: string;
         image: string;
@@ -132,8 +134,11 @@ export default function RecipeDetailScreen() {
             const fetchIngredients = async () => {
                 try {
                     const baseUrl = getApiBaseUrl();
-                    const response = await axios.get(`${baseUrl}/api/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}`);
+                    const url = `${baseUrl}/api/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}?includeIngredient=true`;
+                    console.log('Fetching recipe ingredients from:', url);
+                    const response = await axios.get(url);
                     if (Array.isArray(response.data)) {
+                        console.log('Recipe ingredients sample:', response.data[0]);
                         setIngredients(response.data);
                     }
                 } catch (err) {
