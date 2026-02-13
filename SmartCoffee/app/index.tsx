@@ -37,7 +37,7 @@ export default function StartScreen() {
           <Text style={styles.tagText}>Amazing</Text>
         </View>
 
-        <Pressable style={styles.ctaButton} onPress={() => router.replace('/(tabs)/menu')}>
+        <Pressable style={styles.ctaButton} onPress={() => router.replace('/sign-in')}>
           <Text style={styles.ctaText}>Get Started</Text>
           <View style={styles.ctaIconWrap}>
             <Ionicons name="arrow-forward" size={18} color="#FFF" />
