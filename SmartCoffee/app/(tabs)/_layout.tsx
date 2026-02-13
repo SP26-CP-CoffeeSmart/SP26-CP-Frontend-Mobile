@@ -81,6 +81,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="menu-insights"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
         name="ai-create"
         options={{
           href: null,
