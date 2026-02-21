@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
   bg: '#F6F1EB',
@@ -53,29 +58,223 @@ const shopStyles = [
   'Vintage Classic',
 ];
 const pricingOptions = [
-  { key: 'budget', label: 'Budget', range: '2 - 4 $' },
-  { key: 'moderate', label: 'Moderate', range: '3 - 6 $' },
-  { key: 'premium', label: 'Premium', range: '5 - 8 $' },
-  { key: 'luxury', label: 'Luxury', range: '7 - 12 $' },
+  { key: 'budget', label: 'Budget', range: '20,000 - 40,000 VND' },
+  { key: 'moderate', label: 'Moderate', range: '30,000 - 60,000 VND' },
+  { key: 'premium', label: 'Premium', range: '50,000 - 80,000 VND' },
+  { key: 'luxury', label: 'Luxury', range: '70,000 - 120,000 VND' },
 ];
+
+type BeverageCategory = {
+  id?: number;
+  beverageCategoryId?: number;
+  name?: string;
+  categoryName?: string;
+};
+
+type MenuGroup = {
+  name: string;
+  selectedBeverageCategories: number[];
+};
 
 export default function MenuRecommendationsScreen() {
   const router = useRouter();
   const [menuTitle, setMenuTitle] = useState('');
   const [menuSize, setMenuSize] = useState(17);
-  const [menuSizeText, setMenuSizeText] = useState('');
   const [selectedLayout, setSelectedLayout] = useState('vertical');
   const [selectedTopic, setSelectedTopic] = useState('Summer Refresh');
   const [selectedShopStyle, setSelectedShopStyle] = useState('Modern Minimalist');
   const [shopStyleText, setShopStyleText] = useState('');
   const [selectedPricing, setSelectedPricing] = useState('budget');
-  const [menuGroups, setMenuGroups] = useState(['Menu Group 1', 'Menu Group 2']);
+  const [menuGroups, setMenuGroups] = useState<MenuGroup[]>([]);
   const [menuGroupInput, setMenuGroupInput] = useState('');
+  const [categories, setCategories] = useState<BeverageCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  const [activeGroupIndex, setActiveGroupIndex] = useState<number | null>(null);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  const numericMenuSize = useMemo(() => {
-    const parsed = Number(menuSizeText);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : menuSize;
-  }, [menuSize, menuSizeText]);
+  const getCategoryId = (category: BeverageCategory) =>
+    typeof category.id === 'number'
+      ? category.id
+      : typeof category.beverageCategoryId === 'number'
+      ? category.beverageCategoryId
+      : null;
+
+  const getCategoryName = (category: BeverageCategory) =>
+    String(category.name ?? category.categoryName ?? 'Unnamed category');
+
+  const loadCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await authorizedFetch(API_ENDPOINTS.beverageCategory.getAll(), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(
+          `Request failed (${response.status})${errorText ? `: ${errorText}` : ''}`
+        );
+      }
+
+      const data = await response.json();
+      setCategories(Array.isArray(data) ? data : []);
+      setCategoriesError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load beverage categories.';
+      console.error('Error loading beverage categories:', message);
+      setCategoriesError(message);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  const layoutValue = useMemo(
+    () => Math.max(1, layoutOptions.findIndex((option) => option.key === selectedLayout) + 1),
+    [selectedLayout]
+  );
+  const topicValue = useMemo(
+    () => Math.max(1, topics.findIndex((topic) => topic === selectedTopic) + 1),
+    [selectedTopic]
+  );
+  const pricingValue = useMemo(
+    () => Math.max(1, pricingOptions.findIndex((option) => option.key === selectedPricing) + 1),
+    [selectedPricing]
+  );
+  const categoryNameById = useMemo(() => {
+    const map = new Map<number, string>();
+    categories.forEach((category) => {
+      const id = getCategoryId(category);
+      if (id !== null) {
+        map.set(id, getCategoryName(category));
+      }
+    });
+    return map;
+  }, [categories]);
+
+  const selectedLayoutLabel =
+    layoutOptions.find((option) => option.key === selectedLayout)?.label ?? 'Vertical';
+
+  const handleAddGroup = () => {
+    const next = menuGroupInput.trim();
+    if (!next) {
+      return;
+    }
+
+    setMenuGroups((prev) => [...prev, { name: next, selectedBeverageCategories: [] }]);
+    setMenuGroupInput('');
+  };
+
+  const openCategoryModal = (groupIndex: number) => {
+    setActiveGroupIndex(groupIndex);
+    setCategoryModalOpen(true);
+    loadCategories();
+  };
+
+  const toggleCategoryForGroup = (categoryId: number) => {
+    if (activeGroupIndex === null) {
+      return;
+    }
+
+    setMenuGroups((prev) =>
+      prev.map((group, index) => {
+        if (index !== activeGroupIndex) {
+          return group;
+        }
+
+        const selected = group.selectedBeverageCategories.includes(categoryId);
+        return {
+          ...group,
+          selectedBeverageCategories: selected
+            ? group.selectedBeverageCategories.filter((id) => id !== categoryId)
+            : [...group.selectedBeverageCategories, categoryId],
+        };
+      })
+    );
+  };
+
+  const handleSubmit = async () => {
+    if (submitting) {
+      return;
+    }
+
+    const title = menuTitle.trim();
+    if (!title) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing title',
+        text2: 'Please enter a menu title.',
+      });
+      return;
+    }
+
+    const payload = {
+      title,
+      menuSizeValue: menuSize,
+      layout: layoutValue,
+      topic: topicValue,
+      shopStyle: shopStyleText.trim() || selectedShopStyle,
+      pricing: pricingValue,
+      groups: menuGroups.map((group) => ({
+        name: group.name,
+        selectedBeverageCategories: group.selectedBeverageCategories,
+      })),
+    };
+
+    try {
+      setSubmitting(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuSkeleton(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const responseText = await response.text();
+      let responsePayload: unknown = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      let cacheKey = '';
+      if (responsePayload) {
+        cacheKey = `menuSkeleton:${Date.now()}`;
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(responsePayload));
+      }
+
+      Toast.show({ type: 'success', text1: 'Menu skeleton created.' });
+      router.push({
+        pathname: '/menu-results',
+        params: {
+          data: responsePayload ? JSON.stringify(responsePayload) : '',
+          cacheKey,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create menu skeleton.';
+      Toast.show({ type: 'error', text1: 'Create menu failed', text2: message });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -111,7 +310,7 @@ export default function MenuRecommendationsScreen() {
           <View style={styles.fieldGroup}>
             <View style={styles.rowBetween}>
               <Text style={styles.label}>Menu Drinks' Size</Text>
-              <Text style={styles.valueText}>{numericMenuSize}</Text>
+              <Text style={styles.valueText}>{menuSize}</Text>
             </View>
             <Slider
               value={menuSize}
@@ -127,20 +326,12 @@ export default function MenuRecommendationsScreen() {
               <Text style={styles.helperText}>10</Text>
               <Text style={styles.helperText}>20</Text>
             </View>
-            <TextInput
-              style={styles.input}
-              placeholder="Please specify the number for your menu size"
-              placeholderTextColor={COLORS.muted}
-              keyboardType="number-pad"
-              value={menuSizeText}
-              onChangeText={setMenuSizeText}
-            />
           </View>
 
           <View style={styles.fieldGroup}>
             <View style={styles.rowBetween}>
-              <Text style={styles.label}>Menu Drinks' Size</Text>
-              <Text style={styles.valueText}>Vertical</Text>
+              <Text style={styles.label}>Menu Drinks' Layout</Text>
+              <Text style={styles.valueText}>{selectedLayoutLabel}</Text>
             </View>
             <Text style={styles.helperText}>Decide which layout suit your menu</Text>
             <View style={styles.layoutRow}>
@@ -220,7 +411,11 @@ export default function MenuRecommendationsScreen() {
                 {pricingOptions.find((item) => item.key === selectedPricing)?.label ?? 'Budget'}
               </Text>
             </View>
-            <View style={styles.pricingRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.pricingRow}
+            >
               {pricingOptions.map((option) => {
                 const active = selectedPricing === option.key;
                 return (
@@ -238,7 +433,7 @@ export default function MenuRecommendationsScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
           </View>
 
           <View style={styles.fieldGroup}>
@@ -251,13 +446,37 @@ export default function MenuRecommendationsScreen() {
             <Text style={styles.helperText}>How organizing you want for the menu ?</Text>
             <View style={styles.groupList}>
               {menuGroups.map((group, index) => (
-                <View key={`${group}-${index}`} style={styles.groupRow}>
+                <View key={`${group.name}-${index}`} style={styles.groupRow}>
                   <Ionicons name="reorder-three" size={18} color={COLORS.muted} />
-                  <Text style={styles.groupText}>{group}</Text>
-                  <TouchableOpacity style={styles.groupAddButton}>
-                    <Ionicons name="add" size={16} color={COLORS.accent} />
-                    <Text style={styles.groupAddText}>Add beverage</Text>
-                  </TouchableOpacity>
+                  <View style={styles.groupContent}>
+                    <View style={styles.groupHeaderRow}>
+                      <Text style={styles.groupText}>{group.name}</Text>
+                      <TouchableOpacity
+                        style={styles.groupAddButton}
+                        onPress={() => openCategoryModal(index)}
+                      >
+                        <Ionicons name="add" size={16} color={COLORS.accent} />
+                        <Text style={styles.groupAddText}>Add beverage category</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {group.selectedBeverageCategories.length === 0 ? (
+                      <Text style={styles.groupCategoryEmpty}>No beverage categories selected.</Text>
+                    ) : (
+                      <View style={styles.groupCategoryList}>
+                        {group.selectedBeverageCategories.map((id) => {
+                          const name = categoryNameById.get(id);
+                          if (!name) {
+                            return null;
+                          }
+                          return (
+                            <View key={`${group.name}-${id}`} style={styles.groupCategoryChip}>
+                              <Text style={styles.groupCategoryText}>{name}</Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
                 </View>
               ))}
               <View style={styles.groupInputRow}>
@@ -268,22 +487,78 @@ export default function MenuRecommendationsScreen() {
                   value={menuGroupInput}
                   onChangeText={setMenuGroupInput}
                 />
-                <TouchableOpacity
-                  style={styles.groupInputAction}
-                  onPress={() => {
-                    const next = menuGroupInput.trim();
-                    if (!next) return;
-                    setMenuGroups((prev) => [...prev, next]);
-                    setMenuGroupInput('');
-                  }}
-                >
+                <TouchableOpacity style={styles.groupInputAction} onPress={handleAddGroup}>
                   <Ionicons name="add" size={18} color={COLORS.accentDark} />
                 </TouchableOpacity>
               </View>
             </View>
           </View>
+
+          <TouchableOpacity
+            style={[styles.primaryButton, submitting && styles.primaryButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={submitting}
+          >
+            <Text style={styles.primaryButtonText}>
+              {submitting ? 'Submitting...' : 'Create Menu Skeleton'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={categoryModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCategoryModalOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Beverage Categories</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setCategoryModalOpen(false)}
+              >
+                <Ionicons name="close" size={18} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+
+            {categoriesLoading ? (
+              <Text style={styles.modalHint}>Loading categories...</Text>
+            ) : categoriesError ? (
+              <Text style={styles.modalHint}>{categoriesError}</Text>
+            ) : (
+              <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                {categories.map((category) => {
+                  const id = getCategoryId(category);
+                  if (id === null) {
+                    return null;
+                  }
+                  const selected =
+                    activeGroupIndex !== null &&
+                    menuGroups[activeGroupIndex]?.selectedBeverageCategories.includes(id);
+
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      style={[styles.modalRow, selected && styles.modalRowActive]}
+                      onPress={() => toggleCategoryForGroup(id)}
+                    >
+                      <Text style={[styles.modalRowText, selected && styles.modalRowTextActive]}>
+                        {getCategoryName(category)}
+                      </Text>
+                      {selected ? (
+                        <Ionicons name="checkmark-circle" size={18} color={COLORS.accent} />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -301,7 +576,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+      minWidth: 150,
   },
   backButton: {
     width: 36,
@@ -315,10 +590,12 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 16,
+      textAlign: 'center',
     fontWeight: '600',
     color: COLORS.text,
   },
   headerSpacer: {
+      textAlign: 'center',
     width: 36,
   },
   heroImage: {
@@ -458,10 +735,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   pricingChip: {
-    flex: 1,
+    minWidth: 150,
     borderRadius: 14,
     paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     backgroundColor: COLORS.chip,
     alignItems: 'center',
   },
@@ -472,10 +749,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.text,
     fontWeight: '600',
+    textAlign: 'center',
   },
   pricingRange: {
     fontSize: 10,
     color: COLORS.muted,
+    textAlign: 'center',
   },
   pricingLabelActive: {
     color: '#FFF',
@@ -504,6 +783,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  groupContent: {
+    flex: 1,
+    gap: 6,
+  },
+  groupHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   groupText: {
     flex: 1,
     fontSize: 12,
@@ -518,6 +806,26 @@ const styles = StyleSheet.create({
   groupAddText: {
     fontSize: 11,
     color: COLORS.accent,
+    fontWeight: '600',
+  },
+  groupCategoryEmpty: {
+    fontSize: 11,
+    color: COLORS.muted,
+  },
+  groupCategoryList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  groupCategoryChip: {
+    backgroundColor: '#F7ECDD',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  groupCategoryText: {
+    fontSize: 10,
+    color: COLORS.text,
     fontWeight: '600',
   },
   groupInputRow: {
@@ -542,5 +850,81 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1E7DC',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  primaryButton: {
+    marginTop: 8,
+    backgroundColor: COLORS.accentDark,
+    borderRadius: 18,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 16,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  modalCloseButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1E7DC',
+  },
+  modalHint: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+  modalList: {
+    marginTop: 6,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#F6F1EB',
+    marginBottom: 8,
+  },
+  modalRowActive: {
+    borderWidth: 1,
+    borderColor: COLORS.accent,
+    backgroundColor: '#F5E7D8',
+  },
+  modalRowText: {
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  modalRowTextActive: {
+    color: COLORS.accentDark,
   },
 });

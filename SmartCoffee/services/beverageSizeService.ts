@@ -1,5 +1,5 @@
 import { API_ENDPOINTS } from './api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from './authService';
 
 export interface BeverageSize {
   id?: number;
@@ -33,17 +33,11 @@ export interface UpdateBeverageSizePayload {
 }
 
 class BeverageSizeService {
-  private async getAuthHeaders() {
-    const token = await AsyncStorage.getItem('accessToken');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }
-
-  async getAll(): Promise<BeverageSize[]> {
+  async getByShop(shopId: number): Promise<BeverageSize[]> {
     try {
-      const response = await fetch(API_ENDPOINTS.beverageSize.getAll(), {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.getByShop(shopId), {
         headers: {
           Accept: '*/*',
-          ...(await this.getAuthHeaders()),
         },
       });
       if (!response.ok) {
@@ -59,18 +53,13 @@ class BeverageSizeService {
 
   async create(payload: CreateBeverageSizePayload): Promise<BeverageSize> {
     try {
-      const resolvedPayload = {
-        ...payload,
-        coffeeShopId: payload.coffeeShopId ?? 1,
-      };
-      const response = await fetch(API_ENDPOINTS.beverageSize.create(), {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.create(), {
         method: 'POST',
         headers: {
           Accept: 'text/plain',
           'Content-Type': 'application/json',
-          ...(await this.getAuthHeaders()),
         },
-        body: JSON.stringify(resolvedPayload),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -86,20 +75,13 @@ class BeverageSizeService {
 
   async update(id: number, payload: UpdateBeverageSizePayload): Promise<BeverageSize> {
     try {
-      const resolvedPayload = {
-        ...payload,
-        coffeeShop: {
-          coffeeShopId: payload.coffeeShop?.coffeeShopId ?? 1,
-        },
-      };
-      const response = await fetch(API_ENDPOINTS.beverageSize.update(id), {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.update(id), {
         method: 'PUT',
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
-          ...(await this.getAuthHeaders()),
         },
-        body: JSON.stringify(resolvedPayload),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -109,11 +91,11 @@ class BeverageSizeService {
       const text = await response.text();
       if (!text) {
         return {
-          beverageSizeId: resolvedPayload.beverageSizeId,
-          sizeName: resolvedPayload.sizeName,
-          volume: resolvedPayload.volume,
-          isActive: resolvedPayload.isActive,
-          coffeeShop: resolvedPayload.coffeeShop,
+          beverageSizeId: payload.beverageSizeId,
+          sizeName: payload.sizeName,
+          volume: payload.volume,
+          isActive: payload.isActive,
+          coffeeShop: payload.coffeeShop,
         } as BeverageSize;
       }
 
@@ -121,11 +103,11 @@ class BeverageSizeService {
         return JSON.parse(text);
       } catch {
         return {
-          beverageSizeId: resolvedPayload.beverageSizeId,
-          sizeName: resolvedPayload.sizeName,
-          volume: resolvedPayload.volume,
-          isActive: resolvedPayload.isActive,
-          coffeeShop: resolvedPayload.coffeeShop,
+          beverageSizeId: payload.beverageSizeId,
+          sizeName: payload.sizeName,
+          volume: payload.volume,
+          isActive: payload.isActive,
+          coffeeShop: payload.coffeeShop,
         } as BeverageSize;
       }
     } catch (error) {

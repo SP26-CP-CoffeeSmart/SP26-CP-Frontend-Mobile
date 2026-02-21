@@ -31,14 +31,22 @@ export default function SignInScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = async () => {
-    if (!email || !password) {
+    const trimmedEmail = email.trim();
+    const trimmedPassword = password.trim();
+
+    console.log('[Auth] login attempt:', {
+      email: trimmedEmail,
+      passwordLength: trimmedPassword.length,
+    });
+
+    if (!trimmedEmail || !trimmedPassword) {
       Toast.show({ type: 'error', text1: 'Login failed', text2: 'Please enter email and password.' });
       return;
     }
 
     try {
       setSubmitting(true);
-      const tokens = await loginAccount(email, password);
+      const tokens = await loginAccount(trimmedEmail, trimmedPassword);
       await AsyncStorage.multiSet([
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],

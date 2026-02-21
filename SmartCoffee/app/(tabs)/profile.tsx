@@ -8,10 +8,15 @@ import {
   Modal,
   TextInput,
   Switch,
+  Image,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
+import { getProfile, logoutAccount, ProfileResponse } from '@/services/authService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -21,6 +26,11 @@ const purchaseStatuses = [
 ];
 
 export default function ProfileScreen() {
+  const router = useRouter();
+  const [profile, setProfile] = useState<ProfileResponse | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [logoutSubmitting, setLogoutSubmitting] = useState(false);
   const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
   const [beverageSizesLoading, setBeverageSizesLoading] = useState(true);
   const [beverageSizesError, setBeverageSizesError] = useState<string | null>(null);
@@ -37,14 +47,146 @@ export default function ProfileScreen() {
   const [editSizeError, setEditSizeError] = useState<string | null>(null);
   const [editSizeSubmitting, setEditSizeSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let isActive = true;
 
-    const loadBeverageSizes = async () => {
+    const loadProfile = async () => {
       try {
-        const data = await beverageSizeService.getAll();
+        const data = await getProfile();
+        if (isActive) {
+          setProfile(data);
+          setProfileError(null);
+        }
+      } catch (error) {
+        if (isActive) {
+          setProfileError('Unable to load profile.');
+        }
+      } finally {
+        if (isActive) {
+          setProfileLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  const getSizeName = (size: BeverageSize, index: number) =>
+    String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
+
+  const getProfileField = (value: unknown, fallback: string) => {
+    if (value === null || value === undefined) {
+      return fallback;
+    }
+
+    if (typeof value === 'string') {
+      return value.trim() || fallback;
+    }
+
+    if (typeof value === 'number') {
+      return String(value);
+    }
+
+    return fallback;
+  };
+
+  const getNumericId = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    return null;
+  };
+
+  const getProfileCoffeeShopId = (data: ProfileResponse | null) =>
+    getNumericId(
+      data?.coffeeShopId ??
+        (data as any)?.shopId ??
+        (data as any)?.coffeeShopID ??
+        (data as any)?.coffeeShop?.coffeeShopId ??
+        (data as any)?.coffeeShop?.id
+    );
+
+  const profileName = getProfileField(
+    profile?.fullName ?? profile?.name ?? profile?.userName ?? profile?.username,
+    'Unknown user'
+  );
+  const profileRole = getProfileField(profile?.role ?? profile?.position ?? profile?.title, '');
+  const profileEmail = getProfileField(profile?.email ?? profile?.mail, '-');
+  const profilePhone = getProfileField(
+    profile?.phoneNumber ?? profile?.phone ?? profile?.mobile,
+    '-'
+  );
+  const profileShop = getProfileField(
+    profile?.shopName ?? profile?.coffeeShopName ?? profile?.storeName,
+    '-'
+  );
+  const getProfileImageUrl = (value: unknown) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed;
+  };
+  const profileImageUrl = getProfileImageUrl(
+    profile?.imageUrl ??
+      (profile as any)?.avatarUrl ??
+      (profile as any)?.avatar ??
+      (profile as any)?.photoUrl ??
+      (profile as any)?.profileImage ??
+      (profile as any)?.image
+  );
+  const profileShopDisplay = profileLoading ? 'Loading...' : profileShop;
+  const profileNameDisplay = profileLoading ? 'Loading...' : profileName;
+  const profileRoleDisplay = profileLoading
+    ? 'Loading profile...'
+    : profileError
+    ? profileError
+    : profileRole;
+  const profileEmailDisplay = profileLoading ? 'Loading...' : profileEmail;
+  const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
+  const profileHeaderName = profileShopDisplay;
+  const profileCoffeeShopId = getProfileCoffeeShopId(profile);
+
+  useEffect(() => {
+    let isActive = true;
+
+    const loadBeverageSizes = async () => {
+      if (profileLoading) {
+        return;
+      }
+
+      if (!profileCoffeeShopId) {
+        if (isActive) {
+          setBeverageSizes([]);
+          setBeverageSizesError('You have not added any sizes for your shop yet.');
+          setBeverageSizesLoading(false);
+        }
+        return;
+      }
+
+      try {
+        if (isActive) {
+          setBeverageSizesLoading(true);
+        }
+        const data = await beverageSizeService.getByShop(profileCoffeeShopId);
         if (isActive) {
           setBeverageSizes(data);
           setBeverageSizesError(null);
@@ -65,10 +207,7 @@ export default function ProfileScreen() {
     return () => {
       isActive = false;
     };
-  }, []);
-
-  const getSizeName = (size: BeverageSize, index: number) =>
-    String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
+  }, [profileCoffeeShopId, profileLoading]);
 
   const getSizeId = (size: BeverageSize) =>
     typeof size.id === 'number'
@@ -115,16 +254,8 @@ export default function ProfileScreen() {
 
   const getCoffeeShopId = (size: BeverageSize) => {
     const direct = size.coffeeShopId ?? (size as any).shopId ?? (size as any).coffeeShopID;
-    if (typeof direct === 'number') {
-      return direct;
-    }
-
     const nested = (size as any).coffeeShop?.coffeeShopId;
-    if (typeof nested === 'number') {
-      return nested;
-    }
-
-    return 1;
+    return getNumericId(direct ?? nested);
   };
 
   const showToast = (message: string) => {
@@ -162,6 +293,58 @@ export default function ProfileScreen() {
     setShowAddSizeModal(true);
   };
 
+  const handleLogout = async () => {
+    if (logoutSubmitting) {
+      return;
+    }
+
+    try {
+      setLogoutSubmitting(true);
+      await logoutAccount();
+      await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      router.replace('/sign-in');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Logout failed.';
+      showToast(message);
+    } finally {
+      setLogoutSubmitting(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (refreshing) {
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+      setProfileLoading(true);
+      setBeverageSizesLoading(true);
+
+      const profileData = await getProfile();
+      const coffeeShopId = getProfileCoffeeShopId(profileData);
+
+      setProfile(profileData);
+      setProfileError(null);
+
+      if (!coffeeShopId) {
+        setBeverageSizes([]);
+        setBeverageSizesError('You have not added any sizes for your shop yet.');
+      } else {
+        const sizeData = await beverageSizeService.getByShop(coffeeShopId);
+        setBeverageSizes(sizeData);
+        setBeverageSizesError(null);
+      }
+    } catch (error) {
+      setProfileError('Unable to load profile.');
+      setBeverageSizesError('Unable to load beverage sizes.');
+    } finally {
+      setProfileLoading(false);
+      setBeverageSizesLoading(false);
+      setRefreshing(false);
+    }
+  };
+
   const handleCreateSize = async () => {
     if (addSizeSubmitting) {
       return;
@@ -180,11 +363,16 @@ export default function ProfileScreen() {
       return;
     }
 
+    if (!profileCoffeeShopId) {
+      setAddSizeError('Missing coffee shop id.');
+      return;
+    }
+
     try {
       setAddSizeSubmitting(true);
       const created = await beverageSizeService.create({
         beverageSizeId: 0,
-        coffeeShopId: 1,
+        coffeeShopId: profileCoffeeShopId,
         sizeName: trimmedName,
         volume: parsedVolume,
         isActive: true,
@@ -235,7 +423,7 @@ export default function ProfileScreen() {
 
     const trimmedName = editSizeName.trim();
     const parsedVolume = Number(editSizeVolume);
-    const coffeeShopId = getCoffeeShopId(editingSize);
+    const coffeeShopId = getCoffeeShopId(editingSize) ?? profileCoffeeShopId;
 
     if (!trimmedName) {
       setEditSizeError('Please enter a size name.');
@@ -300,18 +488,26 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
         <View style={styles.header}>
           <View style={styles.avatarWrap}>
             <View style={styles.avatar}>
-              <Ionicons name="person-outline" size={36} color="#5C4634" />
+              {profileImageUrl ? (
+                <Image source={{ uri: profileImageUrl }} style={styles.avatarImage} />
+              ) : (
+                <Ionicons name="person-outline" size={36} color="#5C4634" />
+              )}
             </View>
             <View style={styles.avatarBadge}>
               <Ionicons name="pencil" size={12} color="#5C4634" />
             </View>
           </View>
-          <Text style={styles.name}>John Doe</Text>
-          <Text style={styles.role}>Coffee Shop Owner</Text>
+          <Text style={styles.name}>{profileHeaderName}</Text>
+          {profileRoleDisplay ? <Text style={styles.role}>{profileRoleDisplay}</Text> : null}
         </View>
 
         <View style={styles.card}>
@@ -340,24 +536,19 @@ export default function ProfileScreen() {
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Account information</Text>
           <View style={styles.infoRow}>
-            <Ionicons name="person" size={16} color="#8B5E3C" />
-            <Text style={styles.infoLabel}>Full name:</Text>
-            <Text style={styles.infoValue}>John Doe</Text>
-          </View>
-          <View style={styles.infoRow}>
             <Ionicons name="call" size={16} color="#8B5E3C" />
             <Text style={styles.infoLabel}>Phone number:</Text>
-            <Text style={styles.infoValue}>0123456789</Text>
+            <Text style={styles.infoValue}>{profilePhoneDisplay}</Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="mail" size={16} color="#8B5E3C" />
             <Text style={styles.infoLabel}>Email:</Text>
-            <Text style={styles.infoValue}>JohnDoe@exaple.com</Text>
+            <Text style={styles.infoValue}>{profileEmailDisplay}</Text>
           </View>
           <View style={styles.infoRow}>
             <Ionicons name="storefront" size={16} color="#8B5E3C" />
             <Text style={styles.infoLabel}>Shop name:</Text>
-            <Text style={styles.infoValue}>CoffeeShop</Text>
+            <Text style={styles.infoValue}>{profileShopDisplay}</Text>
           </View>
         </View>
 
@@ -372,7 +563,9 @@ export default function ProfileScreen() {
             ) : beverageSizesError ? (
               <Text style={styles.beverageFeedback}>{beverageSizesError}</Text>
             ) : beverageSizes.length === 0 ? (
-              <Text style={styles.beverageFeedback}>No beverage sizes found.</Text>
+              <Text style={styles.beverageFeedback}>
+                You have not added any sizes for your shop yet.
+              </Text>
             ) : (
               beverageSizes.map((size, index) => {
                 const active = isSizeActive(size);
@@ -581,10 +774,29 @@ export default function ProfileScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
           </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.listRow}
+            activeOpacity={0.7}
+            onPress={() => router.push('/change-password')}
+          >
+            <View style={styles.listLeft}>
+              <Ionicons name="lock-closed-outline" size={18} color="#8B5E3C" />
+              <Text style={styles.listText}>Change password</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity style={styles.logoutButton} activeOpacity={0.85}>
-          <Text style={styles.logoutText}>Log out</Text>
+        <TouchableOpacity
+          style={styles.logoutButton}
+          activeOpacity={0.85}
+          onPress={handleLogout}
+          disabled={logoutSubmitting}
+        >
+          <Text style={styles.logoutText}>
+            {logoutSubmitting ? 'Logging out...' : 'Log out'}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
       {toastMessage ? (
@@ -624,6 +836,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF8F0',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  avatarImage: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
   },
   avatarBadge: {
     position: 'absolute',
