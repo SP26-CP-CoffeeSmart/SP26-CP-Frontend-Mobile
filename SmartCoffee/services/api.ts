@@ -61,5 +61,5 @@ export const API_ENDPOINTS = {
   },
   menuPerformance: {
     getSummary: (menuId: number) => `${AUTH_BASE_URL}/MenuPerformance/${menuId}/summary`,
-  },
+  }
 };
