@@ -10,13 +10,17 @@ import {
   Dimensions,
   FlatList,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
+import { BeverageCategory, useBeverageCategories } from '@/context/beverage-category-context';
 
 interface MenuItem {
   id: string;
@@ -55,6 +59,14 @@ const resolveImageUrl = (baseUrl: string, image?: string) => {
 export default function MenuScreen() {
   const router = useRouter();
   const { coffeeShopId, loading: authLoading, profile } = useAuth();
+  const {
+    categories: beverageCategories,
+    loading: categoriesLoading,
+    error: categoriesError,
+    refresh: refreshCategories,
+    getCategoryId,
+    getCategoryName,
+  } = useBeverageCategories();
   const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
   const [beverages, setBeverages] = useState<BeverageItem[]>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
@@ -65,6 +77,14 @@ export default function MenuScreen() {
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createImageUrl, setCreateImageUrl] = useState('');
+  const [createCategoryName, setCreateCategoryName] = useState('');
+  const [createCategoryId, setCreateCategoryId] = useState<number | null>(null);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createImageUploading, setCreateImageUploading] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
@@ -253,6 +273,209 @@ export default function MenuScreen() {
         'User'
     ).trim() || 'User';
 
+  const resetCreateForm = () => {
+    setCreateName('');
+    setCreateImageUrl('');
+    setCreateCategoryName('');
+    setCreateCategoryId(null);
+    setCreateError(null);
+  };
+
+  const handleCategoryInputChange = (value: string) => {
+    setCreateCategoryName(value);
+    if (value.trim()) {
+      setCreateCategoryId(null);
+    }
+  };
+
+  const handleSelectCategory = (category: BeverageCategory) => {
+    const id = getCategoryId(category);
+    if (id === null) {
+      return;
+    }
+    if (createCategoryId === id) {
+      setCreateCategoryId(null);
+      return;
+    }
+    setCreateCategoryId(id);
+    setCreateCategoryName('');
+  };
+
+  const getUploadFileInfo = (uri: string) => {
+    const cleanUri = uri.split('?')[0];
+    const namePart = cleanUri.split('/').pop() || `beverage_${Date.now()}`;
+    const ext = namePart.includes('.') ? namePart.split('.').pop() : '';
+    const lowerExt = String(ext).toLowerCase();
+    const mimeType =
+      lowerExt === 'jpg' || lowerExt === 'jpeg'
+        ? 'image/jpeg'
+        : lowerExt === 'png'
+          ? 'image/png'
+          : lowerExt === 'webp'
+            ? 'image/webp'
+            : 'image/jpeg';
+    const fileName = namePart.includes('.') ? namePart : `${namePart}.jpg`;
+    return { fileName, mimeType };
+  };
+
+  const handlePickAndUploadImage = async () => {
+    if (createImageUploading) {
+      return;
+    }
+
+    try {
+      setCreateImageUploading(true);
+      setCreateError(null);
+
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setCreateError('Please allow photo access to upload an image.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      const { fileName, mimeType } = getUploadFileInfo(asset.uri);
+      const formData = new FormData();
+      formData.append('image', {
+        uri: asset.uri,
+        name: fileName,
+        type: mimeType,
+      } as any);
+
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/upload-image`, {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.log('[Upload Image] status:', response.status);
+        console.log('[Upload Image] body:', errorBody);
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const uploaded = await response.json();
+      console.log('[Upload Image] response:', uploaded);
+      const uploadedUrl = String(
+        uploaded?.url ??
+          uploaded?.imageUrl ??
+          uploaded?.data?.url ??
+          uploaded?.data?.imageUrl ??
+          ''
+      ).trim();
+      if (!uploadedUrl) {
+        throw new Error('Missing upload url');
+      }
+
+      setCreateImageUrl(uploadedUrl);
+    } catch (error) {
+      setCreateError('Failed to upload image.');
+    } finally {
+      setCreateImageUploading(false);
+    }
+  };
+
+  const handleCreateBeverage = async () => {
+    if (createSubmitting) {
+      return;
+    }
+
+    const trimmedName = createName.trim();
+    const trimmedCategory = createCategoryName.trim();
+    const trimmedImage = createImageUrl.trim();
+
+    if (!trimmedName) {
+      setCreateError('Please enter a beverage name.');
+      return;
+    }
+
+    if (!createCategoryId && !trimmedCategory) {
+      setCreateError('Please select or enter a beverage category.');
+      return;
+    }
+
+    if (!trimmedImage) {
+      setCreateError('Please upload an image before creating.');
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setCreateError('Missing coffee shop id.');
+      return;
+    }
+
+    try {
+      setCreateSubmitting(true);
+      setCreateError(null);
+
+      const selectedCategory = beverageCategories.find(
+        (category) => getCategoryId(category) === createCategoryId
+      );
+      const selectedCategoryName = selectedCategory ? getCategoryName(selectedCategory) : '';
+
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: trimmedName,
+          status: 'ACTIVE',
+          coffeeShopId,
+          image: trimmedImage,
+          beverageCategory: {
+            beverageCategoryId: createCategoryId ?? 0,
+            name: createCategoryId ? selectedCategoryName : trimmedCategory,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const created = await response.json();
+      const imageUrl = resolveImageUrl(
+        AUTH_BASE_URL,
+        String(created?.imageUrl ?? created?.image ?? '')
+      );
+
+      const mapped: BeverageItem = {
+        id: String(created?.beverageId ?? created?.id ?? Date.now()),
+        name: String(created?.name ?? trimmedName),
+        flavor: String(
+          created?.beverageCategory?.name ??
+            (createCategoryId ? selectedCategoryName : trimmedCategory)
+        ),
+        time: String(created?.brewingTimeMinutes ?? created?.time ?? created?.prepTime ?? ''),
+        image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+      };
+
+      setBeverages((prev) => [mapped, ...prev]);
+      setBeveragePage(1);
+      setBeveragesLoadingMore(false);
+      resetCreateForm();
+      setShowCreateModal(false);
+    } catch (error) {
+      setCreateError('Failed to create beverage.');
+    } finally {
+      setCreateSubmitting(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -353,9 +576,23 @@ export default function MenuScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Beverages</Text>
-            <TouchableOpacity>
-              <Text style={styles.sectionActionMuted}>See All</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Your Beverages</Text>
+              <Text style={styles.sectionActionMuted}>Swipe to see more</Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionHeaderActionRow}>
+            <TouchableOpacity
+              style={styles.addBeverageButton}
+              onPress={() => {
+                resetCreateForm();
+                refreshCategories();
+                setShowCreateModal(true);
+              }}
+            >
+              <Ionicons name="add" size={16} color={stylesVars.espresso} />
+              <Text style={styles.addBeverageText}>Add</Text>
             </TouchableOpacity>
           </View>
 
@@ -460,6 +697,155 @@ export default function MenuScreen() {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      <Modal
+        visible={showCreateModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Create Beverage</Text>
+            {createError ? <Text style={styles.modalError}>{createError}</Text> : null}
+
+            <Text style={styles.modalLabel}>Name</Text>
+            <TextInput
+              value={createName}
+              onChangeText={setCreateName}
+              placeholder="Beverage name"
+              style={styles.modalInput}
+              autoCapitalize="words"
+            />
+
+            <Text style={styles.modalLabel}>Category</Text>
+            <Text style={styles.modalHint}>Select existing or create a new one.</Text>
+            <View style={styles.categoryListCard}>
+              {categoriesLoading ? (
+                <ActivityIndicator size="small" color={stylesVars.espresso} />
+              ) : categoriesError ? (
+                <Text style={styles.modalError}>{categoriesError}</Text>
+              ) : beverageCategories.length === 0 ? (
+                <Text style={styles.modalMuted}>No categories yet.</Text>
+              ) : (
+                <ScrollView
+                  style={styles.categoryScroll}
+                  contentContainerStyle={styles.categoryScrollContent}
+                >
+                  {beverageCategories.map((category) => {
+                    const id = getCategoryId(category);
+                    const name = getCategoryName(category);
+                    if (id === null) {
+                      return null;
+                    }
+                    const isSelected = id === createCategoryId;
+                    return (
+                      <TouchableOpacity
+                        key={`${id}-${name}`}
+                        style={[
+                          styles.categoryItem,
+                          isSelected && styles.categoryItemSelected,
+                        ]}
+                        onPress={() => handleSelectCategory(category)}
+                      >
+                        <Text
+                          style={[
+                            styles.categoryItemText,
+                            isSelected && styles.categoryItemTextSelected,
+                          ]}
+                        >
+                          {name}
+                        </Text>
+                        {isSelected ? (
+                          <Ionicons
+                            name="checkmark-circle"
+                            size={16}
+                            color={stylesVars.primary}
+                          />
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+
+            {createCategoryId ? (
+              <TouchableOpacity
+                style={styles.clearSelectionButton}
+                onPress={() => {
+                  setCreateCategoryId(null);
+                  setCreateCategoryName('');
+                }}
+              >
+                <Text style={styles.clearSelectionText}>Clear selection to type</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TextInput
+              value={createCategoryName}
+              onChangeText={handleCategoryInputChange}
+              placeholder={createCategoryId ? 'Clear selection to type' : 'New category name'}
+              style={[
+                styles.modalInput,
+                createCategoryId ? styles.modalInputDisabled : null,
+              ]}
+              editable={!createCategoryId}
+            />
+
+            <Text style={styles.modalLabel}>Image</Text>
+            <TouchableOpacity
+              style={styles.uploadButton}
+              onPress={handlePickAndUploadImage}
+            >
+              {createImageUploading ? (
+                <ActivityIndicator size="small" color={stylesVars.espresso} />
+              ) : (
+                <>
+                  <Ionicons name="image-outline" size={16} color={stylesVars.espresso} />
+                  <Text style={styles.uploadButtonText}>
+                    {createImageUrl ? 'Change image' : 'Upload image'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {createImageUrl ? (
+              <>
+                <Text style={styles.uploadHint}>Image uploaded</Text>
+                <Image source={{ uri: createImageUrl }} style={styles.uploadPreview} />
+                <TouchableOpacity
+                  style={styles.removeImageButton}
+                  onPress={() => setCreateImageUrl('')}
+                >
+                  <Ionicons name="trash-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.removeImageText}>Remove image</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={styles.uploadHint}>Image required</Text>
+            )}
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalSecondaryButton}
+                onPress={() => setShowCreateModal(false)}
+              >
+                <Text style={styles.modalSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimaryButton}
+                onPress={handleCreateBeverage}
+              >
+                {createSubmitting ? (
+                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                ) : (
+                  <Text style={styles.modalPrimaryText}>Create</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -527,8 +913,19 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     marginBottom: 16,
+  },
+  sectionHeaderActionRow: {
+    alignItems: 'flex-end',
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    flex: 1,
   },
   sectionTitle: {
     fontSize: 22,
@@ -544,6 +941,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#A8A29E',
+  },
+  addBeverageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: '#F1E7D8',
+  },
+  addBeverageText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
   menuTabs: {
     gap: 12,
@@ -846,5 +1257,178 @@ const styles = StyleSheet.create({
     color: stylesVars.espresso,
     fontSize: 13,
     fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    padding: 20,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  modalError: {
+    fontSize: 12,
+    color: '#B45309',
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B5E52',
+  },
+  modalHint: {
+    fontSize: 12,
+    color: '#8B7355',
+  },
+  modalMuted: {
+    fontSize: 12,
+    color: '#8B7355',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: stylesVars.espresso,
+    backgroundColor: '#FFFDF9',
+  },
+  modalInputDisabled: {
+    backgroundColor: '#F4EEE7',
+    color: '#A39A90',
+  },
+  categoryListCard: {
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+    borderRadius: 12,
+    padding: 8,
+    backgroundColor: '#FFFDF9',
+  },
+  categoryScroll: {
+    maxHeight: 140,
+  },
+  categoryScrollContent: {
+    gap: 6,
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#EFE7DF',
+  },
+  categoryItemSelected: {
+    borderColor: stylesVars.primary,
+    backgroundColor: '#FFF4E6',
+  },
+  categoryItemText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.espresso,
+  },
+  categoryItemTextSelected: {
+    color: stylesVars.espresso,
+  },
+  clearSelectionButton: {
+    alignSelf: 'flex-start',
+  },
+  clearSelectionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: stylesVars.primary,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 6,
+  },
+  modalSecondaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+  },
+  modalSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.espresso,
+  },
+  modalPrimaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: stylesVars.primary,
+    minWidth: 90,
+    alignItems: 'center',
+  },
+  modalPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  uploadButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+    backgroundColor: '#FFF',
+  },
+  uploadButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: stylesVars.espresso,
+  },
+  uploadHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B7355',
+  },
+  uploadPreview: {
+    width: '100%',
+    height: 160,
+    borderRadius: 14,
+    marginTop: 6,
+    backgroundColor: '#F4EEE7',
+  },
+  removeImageButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+    backgroundColor: '#FFF',
+  },
+  removeImageText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: stylesVars.espresso,
   },
 });
