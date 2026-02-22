@@ -23,6 +23,7 @@ export default function MenuInsightsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchMenuPerformance();
@@ -210,6 +211,28 @@ export default function MenuInsightsScreen() {
               </View>
             </View>
           </ScrollView>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color="#847362" />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search menu items..."
+              placeholderTextColor="#847362"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#847362" />
+              </TouchableOpacity>
+            )}
+          </View>
+          <TouchableOpacity style={styles.filterButton}>
+            <Ionicons name="options" size={20} color="#4a3621" />
+          </TouchableOpacity>
         </View>
 
         {/* AI Suggestions */}
@@ -415,6 +438,25 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 1,
   },
+  searchSection: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    gap: 12,
+    alignItems: 'center',
+  },
+  searchBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    gap: 8,
+  },
   kpiValue: {
     fontSize: 18,
     fontWeight: '700',
@@ -441,7 +483,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: 24,
     paddingVertical: 16,
-    gap: 12,
+    gap: 12
   },
   searchContainer: {
     flex: 1,
@@ -458,7 +500,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 2,
     fontSize: 14,
     color: '#4a3621',
   },
