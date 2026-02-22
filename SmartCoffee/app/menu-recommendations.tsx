@@ -17,6 +17,7 @@ import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
   bg: '#F6F1EB',
@@ -78,6 +79,7 @@ type MenuGroup = {
 
 export default function MenuRecommendationsScreen() {
   const router = useRouter();
+  const { coffeeShopId, loading: authLoading } = useAuth();
   const [menuTitle, setMenuTitle] = useState('');
   const [menuSize, setMenuSize] = useState(17);
   const [selectedLayout, setSelectedLayout] = useState('vertical');
@@ -105,9 +107,21 @@ export default function MenuRecommendationsScreen() {
     String(category.name ?? category.categoryName ?? 'Unnamed category');
 
   const loadCategories = useCallback(async () => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setCategories([]);
+      setCategoriesError('Missing coffee shop id.');
+      return;
+    }
+
     try {
       setCategoriesLoading(true);
-      const response = await authorizedFetch(API_ENDPOINTS.beverageCategory.getByShop(1));
+      const response = await authorizedFetch(
+        API_ENDPOINTS.beverageCategory.getByShop(coffeeShopId)
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -126,7 +140,7 @@ export default function MenuRecommendationsScreen() {
     } finally {
       setCategoriesLoading(false);
     }
-  }, []);
+  }, [authLoading, coffeeShopId]);
 
   useEffect(() => {
     loadCategories();
@@ -166,6 +180,19 @@ export default function MenuRecommendationsScreen() {
 
     setMenuGroups((prev) => [...prev, { name: next, selectedBeverageCategories: [] }]);
     setMenuGroupInput('');
+  };
+
+  const handleRemoveGroup = (groupIndex: number) => {
+    setMenuGroups((prev) => prev.filter((_, index) => index !== groupIndex));
+    setActiveGroupIndex((current) => {
+      if (current === null) {
+        return current;
+      }
+      if (current === groupIndex) {
+        return null;
+      }
+      return current > groupIndex ? current - 1 : current;
+    });
   };
 
   const openCategoryModal = (groupIndex: number) => {
@@ -226,6 +253,7 @@ export default function MenuRecommendationsScreen() {
 
     try {
       setSubmitting(true);
+      console.log('[Menu Create] Request payload:', payload);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuSkeleton(), {
         method: 'POST',
         headers: {
@@ -249,6 +277,7 @@ export default function MenuRecommendationsScreen() {
           responsePayload = responseText;
         }
       }
+      console.log('[Menu Create] Response payload:', responsePayload ?? responseText);
 
       let cacheKey = '';
       if (responsePayload) {
@@ -453,6 +482,12 @@ export default function MenuRecommendationsScreen() {
                       >
                         <Ionicons name="add" size={16} color={COLORS.accent} />
                         <Text style={styles.groupAddText}>Add beverage category</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.groupDeleteButton}
+                        onPress={() => handleRemoveGroup(index)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={COLORS.accentDark} />
                       </TouchableOpacity>
                     </View>
                     {group.selectedBeverageCategories.length === 0 ? (
@@ -802,6 +837,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: COLORS.accent,
     fontWeight: '600',
+  },
+  groupDeleteButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1E3D5',
   },
   groupCategoryEmpty: {
     fontSize: 11,
