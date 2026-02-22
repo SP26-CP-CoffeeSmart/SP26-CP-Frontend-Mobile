@@ -47,6 +47,7 @@ export default function SignInScreen() {
     try {
       setSubmitting(true);
       const tokens = await loginAccount(trimmedEmail, trimmedPassword);
+      console.log('[Auth] login successful, tokens received:', tokens);
       await AsyncStorage.multiSet([
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],

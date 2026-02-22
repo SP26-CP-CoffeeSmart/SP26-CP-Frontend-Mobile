@@ -1,36 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import Constants from 'expo-constants';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
-  });
-};
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
@@ -258,8 +237,6 @@ export default function AiResultScreen() {
 
     setIsLoading(true);
     try {
-      const apiUrl = getApiBaseUrl();
-
       // Remove imageGeneration from recipe if it exists, send it separately
       const { imageGeneration: imageGenFromRecipe, ...cleanRecipe } = recipe as any;
       const finalImageGeneration = imageGeneration || imageGenFromRecipe;
@@ -305,12 +282,12 @@ export default function AiResultScreen() {
       };
 
       console.log('========== SAVE RECIPE REQUEST ==========');
-      console.log('API URL:', `${apiUrl}/api/ShopRecipe/save-ai-recipe`);
+      console.log('API URL:', `${AUTH_BASE_URL}/ShopRecipe/save-ai-recipe`);
       console.log('Request Body:');
       console.log(JSON.stringify(requestBody, null, 2));
       console.log('========================================');
 
-      const response = await fetch(`${apiUrl}/api/ShopRecipe/save-ai-recipe`, {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/save-ai-recipe`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

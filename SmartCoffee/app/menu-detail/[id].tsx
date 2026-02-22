@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
@@ -18,61 +18,124 @@ const toArray = (value: unknown): any[] => {
   return [value];
 };
 
-const getItemName = (item: any, index: number) =>
-  String(
-    item?.name ??
-      item?.beverageName ??
-      item?.recipeName ??
-      item?.title ??
-      item?.menuItemName ??
-      `Item ${index + 1}`
-  );
+interface MenuItemGrouped {
+  groupName: string;
+  beverageCategoryId: number;
+  items: Array<{
+    menuItemId: number;
+    recipeName: string;
+    description: string;
+    priceInfo: string;
+    image: string | null;
+    shopBeverage: any;
+    shopRecipe: any;
+  }>;
+}
 
-const flattenMenuItems = (menu: any) => {
-  const flat: Array<{ group?: string; item: any }> = [];
+const getFallbackImage = () => require('../../assets/1.jpg');
 
-  const directItems =
-    menu?.beverages ??
-    menu?.menuItems ??
-    menu?.items ??
-    menu?.recipes ??
-    menu?.drinks ??
-    [];
-  toArray(directItems).forEach((item) => flat.push({ item }));
-
-  const groups = menu?.groups ?? menu?.menuGroups ?? [];
-  toArray(groups).forEach((group) => {
-    const groupName = String(group?.name ?? group?.groupName ?? '').trim();
-    const groupedItems =
-      group?.beverages ?? group?.menuItems ?? group?.items ?? group?.recipes ?? [];
-    toArray(groupedItems).forEach((item) => flat.push({ group: groupName, item }));
-  });
-
-  return flat;
+const getRecipeImage = (shopRecipe: any) => {
+  if (!shopRecipe) return getFallbackImage();
+  const imageUrl = shopRecipe?.image;
+  if (!imageUrl || imageUrl === 'null' || imageUrl === 'undefined') {
+    return getFallbackImage();
+  }
+  if (typeof imageUrl === 'string' && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
+    return { uri: imageUrl };
+  }
+  return getFallbackImage();
 };
 
-const extractPrimitiveEntries = (item: any) => {
-  if (!item || typeof item !== 'object') return [] as Array<[string, string]>;
-  return Object.entries(item)
-    .filter(([, value]) =>
-      value === null || ['string', 'number', 'boolean'].includes(typeof value)
-    )
-    .map(([key, value]) => [key, String(value)] as [string, string]);
+const splitDescription = (description: string): { text: string; prices: string } => {
+  if (!description) return { text: '', prices: '' };
+  const parts = description.split('[PRICES]');
+  if (parts.length === 2) {
+    return {
+      text: parts[0].trim(),
+      prices: '[PRICES]' + parts[1].trim(),
+    };
+  }
+  return { text: description, prices: '' };
+};
+
+const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
+  if (!menu) return [];
+
+  const menuItems = toArray(menu?.menuItems ?? []);
+  const menuGroups = toArray(menu?.menuGroups ?? []);
+
+  const result: MenuItemGrouped[] = [];
+
+  // Duyệt qua menuGroups
+  menuGroups.forEach((group) => {
+    const groupName = group?.name ?? 'Unknown Group';
+    const menuGroupId = group?.menuGroupId ?? 0;
+    const menuGroupCategory = toArray(group?.menuGroupCategory ?? []);
+
+    // Lấy danh sách beverageCategoryIds của group này
+    const categoryIds = new Set<number>();
+    menuGroupCategory.forEach((categoryMap) => {
+      const beverageCategoryId = categoryMap?.beverageCategroupId || categoryMap?.beverageCategoryId;
+      if (beverageCategoryId) {
+        categoryIds.add(Number(beverageCategoryId));
+      }
+    });
+
+    // Lọc menuItems thuộc group này (có beverageCategoryId nằm trong categoryIds)
+    const groupItems: MenuItemGrouped['items'] = [];
+    menuItems.forEach((menuItem) => {
+      const shopBeverage = menuItem?.shopBeverage || {};
+      const beverageCategoryId = shopBeverage?.beverageCategoryId || 0;
+
+      if (categoryIds.has(Number(beverageCategoryId))) {
+        const shopRecipe = menuItem?.shopRecipe || {};
+        const recipeName = shopRecipe?.recipeName || menuItem?.name || 'Unknown Item';
+        const { text, prices } = splitDescription(menuItem?.description || '');
+
+        groupItems.push({
+          menuItemId: menuItem?.menuItemId || 0,
+          recipeName,
+          description: text,
+          priceInfo: prices,
+          image: shopRecipe?.image,
+          shopBeverage,
+          shopRecipe,
+        });
+      }
+    });
+
+    // Chỉ thêm group nếu có items
+    if (groupItems.length > 0) {
+      result.push({
+        groupName,
+        beverageCategoryId: menuGroupId,
+        items: groupItems,
+      });
+    }
+  });
+
+  return result;
 };
 
 export default function MenuDetailScreen() {
   const router = useRouter();
   const { item, title } = useLocalSearchParams<{ item?: string; title?: string }>();
   const parsedItem = useMemo(() => safeParseJson(item), [item]);
-  const menuItems = useMemo(() => flattenMenuItems(parsedItem), [parsedItem]);
-  const rawMenu = useMemo(() => {
-    if (!parsedItem) return '';
-    try {
-      return JSON.stringify(parsedItem, null, 2);
-    } catch {
-      return String(parsedItem);
-    }
-  }, [parsedItem]);
+  const groupedItems = useMemo(() => groupMenuItemsByCategory(parsedItem), [parsedItem]);
+
+  const handleItemPress = (menuItem: any) => {
+    const shopRecipe = menuItem.shopRecipe || {};
+    const shopRecipeIngredients = toArray(shopRecipe?.shopRecipeIngredients ?? []);
+
+    router.push({
+      pathname: '/recipe-detail/[id]',
+      params: {
+        id: menuItem.menuItemId?.toString() || '0',
+        recipe: JSON.stringify(shopRecipe),
+        ingredients: JSON.stringify(shopRecipeIngredients),
+      },
+    });
+  };
 
   return (
     <View style={styles.container}>
@@ -85,63 +148,41 @@ export default function MenuDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.filterRow}>
-          <View style={styles.filterChipActive}>
-            <Text style={styles.filterChipTextActive}>All</Text>
-          </View>
-          <View style={styles.filterChip}>
-            <Text style={styles.filterChipText}>Hot</Text>
-          </View>
-          <View style={styles.filterChip}>
-            <Text style={styles.filterChipText}>Cold</Text>
-          </View>
-          <View style={styles.filterChip}>
-            <Text style={styles.filterChipText}>Filter</Text>
-          </View>
-        </View>
-
-        {menuItems.length === 0 ? (
-          <Text style={styles.emptyText}>No menu items found in the response.</Text>
+        {groupedItems.length === 0 ? (
+          <Text style={styles.emptyText}>No menu items found in this menu.</Text>
         ) : (
-          menuItems.map((entry, index) => {
-            const itemName = getItemName(entry.item, index);
-            const details = extractPrimitiveEntries(entry.item);
-            return (
-              <View key={`${itemName}-${index}`} style={styles.itemCard}>
-                <Text style={styles.itemTitle}>{itemName}</Text>
-                {entry.group ? (
-                  <Text style={styles.itemGroup}>Group: {entry.group}</Text>
-                ) : null}
-                <View style={styles.itemDetails}>
-                  {details.map(([key, value]) => (
-                    <Text key={`${itemName}-${key}`} style={styles.itemDetailText}>
-                      {key}: {value}
-                    </Text>
-                  ))}
-                </View>
-                <View style={styles.rawItemCard}>
-                  <Text style={styles.rawItemTitle}>Raw item data</Text>
-                  <Text style={styles.rawItemText}>
-                    {(() => {
-                      try {
-                        return JSON.stringify(entry.item, null, 2);
-                      } catch {
-                        return String(entry.item);
-                      }
-                    })()}
-                  </Text>
-                </View>
-              </View>
-            );
-          })
-        )}
+          groupedItems.map((group, groupIndex) => (
+            <View key={`group-${group.beverageCategoryId}-${groupIndex}`} style={styles.groupSection}>
+              <Text style={styles.groupTitle}>{group.groupName}</Text>
+              <View style={styles.itemList}>
+                {group.items.map((item, itemIndex) => (
+                  <TouchableOpacity
+                    key={`${group.beverageCategoryId}-item-${itemIndex}`}
+                    style={styles.itemCard}
+                    onPress={() => handleItemPress(item)}
+                    activeOpacity={0.7}
+                  >
+                    <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
 
-        {rawMenu ? (
-          <View style={styles.rawMenuCard}>
-            <Text style={styles.rawMenuTitle}>Raw menu data</Text>
-            <Text style={styles.rawMenuText}>{rawMenu}</Text>
-          </View>
-        ) : null}
+                    <View style={styles.itemContent}>
+                      <Text style={styles.itemName}>{item.recipeName}</Text>
+
+                      {item.description && (
+                        <Text style={styles.itemDescription} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      )}
+
+                      {item.priceInfo && (
+                        <Text style={styles.itemPrice}>{item.priceInfo}</Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ))
+        )}
       </ScrollView>
     </View>
   );
@@ -181,100 +222,64 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 24,
   },
-  filterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-    marginTop: 6,
-  },
-  filterChip: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2D6C9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#FFFFFF',
-  },
-  filterChipActive: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#8B5E3C',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#F8E7D3',
-  },
-  filterChipText: {
-    fontSize: 11,
-    color: '#3C2A21',
-    fontWeight: '600',
-  },
-  filterChipTextActive: {
-    fontSize: 11,
-    color: '#8B5E3C',
-    fontWeight: '700',
-  },
   emptyText: {
     fontSize: 12,
     color: '#8E7B6F',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  groupSection: {
+    marginBottom: 20,
+  },
+  groupTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#3C2A21',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  itemList: {
+    gap: 12,
   },
   itemCard: {
+    flexDirection: 'row',
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    padding: 14,
-    marginBottom: 16,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#E8DED3',
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
   },
-  itemTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#3C2A21',
+  itemImage: {
+    width: 100,
+    height: 100,
+    backgroundColor: '#E8DED3',
   },
-  itemGroup: {
-    fontSize: 11,
-    color: '#8B5E3C',
-    marginTop: 4,
-  },
-  itemDetails: {
-    marginTop: 8,
-    gap: 4,
-  },
-  itemDetailText: {
-    fontSize: 11,
-    color: '#5E4A3A',
-  },
-  rawItemCard: {
-    marginTop: 10,
-    backgroundColor: '#F6F1EB',
-    borderRadius: 12,
+  itemContent: {
+    flex: 1,
     padding: 10,
+    justifyContent: 'space-between',
   },
-  rawItemTitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#3C2A21',
-    marginBottom: 4,
-  },
-  rawItemText: {
-    fontSize: 10,
-    color: '#6D5B4B',
-  },
-  rawMenuCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E2D6C9',
-  },
-  rawMenuTitle: {
-    fontSize: 12,
+  itemName: {
+    fontSize: 14,
     fontWeight: '700',
     color: '#3C2A21',
     marginBottom: 6,
   },
-  rawMenuText: {
-    fontSize: 10,
-    color: '#6D5B4B',
+  itemDescription: {
+    fontSize: 11,
+    color: '#5E4A3A',
+    lineHeight: 16,
+    marginBottom: 6,
+  },
+  itemPrice: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8B5E3C',
   },
 });
