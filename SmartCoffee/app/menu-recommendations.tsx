@@ -98,8 +98,8 @@ export default function MenuRecommendationsScreen() {
     typeof category.id === 'number'
       ? category.id
       : typeof category.beverageCategoryId === 'number'
-      ? category.beverageCategoryId
-      : null;
+        ? category.beverageCategoryId
+        : null;
 
   const getCategoryName = (category: BeverageCategory) =>
     String(category.name ?? category.categoryName ?? 'Unnamed category');
@@ -107,11 +107,7 @@ export default function MenuRecommendationsScreen() {
   const loadCategories = useCallback(async () => {
     try {
       setCategoriesLoading(true);
-      const response = await authorizedFetch(API_ENDPOINTS.beverageCategory.getAll(), {
-        headers: {
-          Accept: '*/*',
-        },
-      });
+      const response = await authorizedFetch(API_ENDPOINTS.beverageCategory.getByShop(1));
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -576,7 +572,7 @@ const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-      minWidth: 150,
+    minWidth: 150,
   },
   backButton: {
     width: 36,
@@ -590,12 +586,11 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'center',
     fontSize: 16,
-      textAlign: 'center',
     fontWeight: '600',
     color: COLORS.text,
   },
   headerSpacer: {
-      textAlign: 'center',
+    textAlign: 'center',
     width: 36,
   },
   heroImage: {

@@ -12,10 +12,9 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 interface Ingredient {
   ingredientId: number;
@@ -32,28 +31,6 @@ interface ShopRecipeIngredient {
   cost: number;
   ingredient: Ingredient;
 }
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
-  });
-};
 
 export default function InventoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -73,12 +50,12 @@ export default function InventoryScreen() {
     try {
       setLoading(true);
       setError(null);
-      const baseUrl = getApiBaseUrl();
-      const response = await axios.get(`${baseUrl}/api/ShopRecipeIngredients`);
-      
-      if (Array.isArray(response.data)) {
-        setIngredients(response.data);
-        setFilteredIngredients(response.data);
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients`);
+      const data = await response.json();
+
+      if (Array.isArray(data)) {
+        setIngredients(data);
+        setFilteredIngredients(data);
       }
     } catch (err) {
       console.error('Error fetching ingredients:', err);
@@ -123,29 +100,29 @@ export default function InventoryScreen() {
     const percentage = (quantity / maxQuantity) * 100;
 
     if (percentage >= 80) {
-      return { 
-        label: 'GOOD', 
+      return {
+        label: 'GOOD',
         color: '#10B981',
         bgColor: '#ECFDF5',
         barColor: '#10B981'
       };
     } else if (percentage >= 60) {
-      return { 
-        label: 'IN STOCK', 
+      return {
+        label: 'IN STOCK',
         color: '#14B8A6',
         bgColor: '#F0FDFA',
         barColor: '#14B8A6'
       };
     } else if (percentage >= 30) {
-      return { 
-        label: 'LOW STOCK', 
+      return {
+        label: 'LOW STOCK',
         color: '#F59E0B',
         bgColor: '#FEF3C7',
         barColor: '#F59E0B'
       };
     } else {
-      return { 
-        label: 'CRITICAL', 
+      return {
+        label: 'CRITICAL',
         color: '#EF4444',
         bgColor: '#FEE2E2',
         barColor: '#EF4444'
@@ -280,7 +257,7 @@ export default function InventoryScreen() {
         <View
           style={[
             styles.searchBar,
-            { 
+            {
               backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
               borderColor: isDark ? '#374151' : '#F0F0F0'
             }
@@ -314,8 +291,8 @@ export default function InventoryScreen() {
                   backgroundColor: selectedCategory === category
                     ? '#3E2723'
                     : isDark
-                    ? '#1F2937'
-                    : '#F5F5F5'
+                      ? '#1F2937'
+                      : '#F5F5F5'
                 }
               ]}>
               <Text
@@ -325,8 +302,8 @@ export default function InventoryScreen() {
                     color: selectedCategory === category
                       ? '#FFFFFF'
                       : isDark
-                      ? '#9CA3AF'
-                      : '#4B5563'
+                        ? '#9CA3AF'
+                        : '#4B5563'
                   }
                 ]}>
                 {category}
