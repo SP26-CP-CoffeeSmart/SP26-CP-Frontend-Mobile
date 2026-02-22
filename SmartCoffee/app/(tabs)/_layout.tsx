@@ -83,7 +83,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="menu-insights"
         options={{
-          href: null,
+          title: 'Menu Insights',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'analytics' : 'analytics-outline'} size={24} color={color} />
+          ),
         }}
       />
       <Tabs.Screen

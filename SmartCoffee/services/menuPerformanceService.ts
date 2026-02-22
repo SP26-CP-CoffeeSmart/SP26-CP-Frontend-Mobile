@@ -2,22 +2,28 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { authorizedFetch } from './authService';
 
+export interface ChartDataItem {
+  date: string;
+  totalRevenue: number;
+  totalCups: number;
+  cost: number;
+  menuItemId: number | null;
+  menuItemName: string | null;
+}
+
 export interface MenuPerformanceSummary {
   menuId: number;
-  menuScore?: string; // e.g., "Good", "Excellent", "Poor"
-  startDate?: string;
-  endDate?: string;
-  revenue?: number;
-  revenueChange?: number; // percentage change
-  profit?: number;
-  profitChange?: number; // percentage change
-  cost?: number;
-  costChange?: number; // percentage change
-  menuItems?: MenuItemPerformance[];
-  aiSuggestions?: {
-    count?: number;
-    description?: string;
-  };
+  versionNumber: string;
+  status: string;
+  isActive: boolean;
+  totalRevenue: number;
+  totalSales: number;
+  avgRating: number | null;
+  calculatedAt: string;
+  revenueCurrentPeriod: number;
+  revenuePreviousPeriod: number;
+  revenueChangePercent: number;
+  chartData: ChartDataItem[];
 }
 
 export interface MenuItemPerformance {

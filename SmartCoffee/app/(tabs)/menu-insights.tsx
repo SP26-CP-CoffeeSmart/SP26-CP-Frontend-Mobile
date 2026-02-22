@@ -7,18 +7,22 @@ import {
   TextInput,
   StyleSheet,
   ActivityIndicator,
+  Modal,
+  FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import menuPerformanceService, {
   MenuPerformanceSummary,
-  MenuItemPerformance,
+  ChartDataItem,
 } from '../../services/menuPerformanceService';
 
 export default function MenuInsightsScreen() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedDateIndex, setSelectedDateIndex] = useState(0);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   useEffect(() => {
     fetchMenuPerformance();
@@ -28,9 +32,12 @@ export default function MenuInsightsScreen() {
     try {
       setLoading(true);
       setError(null);
-      // Using menuId = 1 as requested
       const result = await menuPerformanceService.getSummary(1);
       setData(result);
+      // Set to latest date by default
+      if (result.chartData && result.chartData.length > 0) {
+        setSelectedDateIndex(result.chartData.length - 1);
+      }
     } catch (err) {
       console.error('Error fetching menu performance:', err);
       setError('Failed to load menu performance data');
@@ -39,41 +46,45 @@ export default function MenuInsightsScreen() {
     }
   };
 
-  const formatCurrency = (amount?: number) => {
-    if (!amount && amount !== 0) return 'N/A';
+  const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND',
     }).format(amount);
   };
 
-  const formatPercentage = (value?: number) => {
-    if (!value && value !== 0) return '';
+  const formatPercentage = (value: number) => {
     const sign = value > 0 ? '+' : '';
-    return `${sign}${value}%`;
+    return `${sign}${value.toFixed(1)}%`;
   };
 
-  const getStatusBadge = (status?: string) => {
-    switch (status) {
-      case 'HIGH_MARGIN':
-        return { text: 'HIGH MARGIN', style: styles.badgeGreen };
-      case 'HIGH_COST':
-        return { text: 'HIGH COST', style: styles.badgeRed };
-      case 'LOW_SALES':
-        return { text: 'LOW SALES', style: styles.badgeRed };
-      default:
-        return null;
-    }
+  const getSelectedDateData = (): ChartDataItem | null => {
+    if (!data || !data.chartData || data.chartData.length === 0) return null;
+    return data.chartData[selectedDateIndex] || null;
   };
 
-  const calculateProfitBarWidth = (item: MenuItemPerformance) => {
-    const total = (item.profit || 0) + (item.cost || 0);
-    if (total === 0) return { profitWidth: 50, costWidth: 50 };
-    const profitWidth = ((item.profit || 0) / total) * 100;
-    return {
-      profitWidth: profitWidth,
-      costWidth: 100 - profitWidth,
-    };
+  const getMenuScore = () => {
+    const selectedData = getSelectedDateData();
+    if (!selectedData) return 'N/A';
+    
+    const profit = selectedData.totalRevenue - selectedData.cost;
+    const profitMargin = selectedData.totalRevenue > 0 
+      ? (profit / selectedData.totalRevenue) * 100 
+      : 0;
+    
+    if (profitMargin >= 70) return 'Excellent';
+    if (profitMargin >= 50) return 'Good';
+    if (profitMargin >= 30) return 'Fair';
+    return 'Poor';
+  };
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('vi-VN', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric' 
+    });
   };
 
   if (loading) {
@@ -119,9 +130,9 @@ export default function MenuInsightsScreen() {
         <View style={styles.bannerContainer}>
           <View style={styles.banner}>
             <View style={styles.bannerContent}>
-              <Text style={styles.bannerSubtitle}>Weekly Performance</Text>
+              <Text style={styles.bannerSubtitle}>Daily Performance</Text>
               <Text style={styles.bannerTitle}>
-                Menu Score: {data?.menuScore || 'N/A'}
+                Menu Score: {getMenuScore()}
               </Text>
             </View>
             <View style={styles.bannerIcon}>
@@ -132,13 +143,16 @@ export default function MenuInsightsScreen() {
 
         {/* Date Picker */}
         <View style={styles.section}>
-          <TouchableOpacity style={styles.datePicker}>
+          <TouchableOpacity 
+            style={styles.datePicker}
+            onPress={() => setShowDatePicker(true)}
+          >
             <View style={styles.datePickerContent}>
               <Ionicons name="calendar-outline" size={20} color="#847362" />
               <Text style={styles.datePickerText}>
-                {data?.startDate && data?.endDate
-                  ? `${new Date(data.startDate).toLocaleDateString('vi-VN')} - ${new Date(data.endDate).toLocaleDateString('vi-VN')}`
-                  : 'Select date range'}
+                {getSelectedDateData() 
+                  ? formatDate(getSelectedDateData()!.date)
+                  : 'Select date'}
               </Text>
             </View>
             <Ionicons name="chevron-down" size={20} color="#847362" />
@@ -153,191 +167,137 @@ export default function MenuInsightsScreen() {
           >
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>REVENUE</Text>
-              <Text style={styles.kpiValue}>{formatCurrency(data?.revenue)}</Text>
-              {data?.revenueChange !== undefined && (
-                <View style={styles.kpiChange}>
-                  <Ionicons
-                    name={data.revenueChange >= 0 ? 'arrow-up' : 'arrow-down'}
-                    size={12}
-                    color={data.revenueChange >= 0 ? '#07880e' : '#e71008'}
-                  />
-                  <Text
-                    style={
-                      data.revenueChange >= 0
-                        ? styles.kpiChangeTextGreen
-                        : styles.kpiChangeTextRed
-                    }
-                  >
-                    {formatPercentage(data.revenueChange)}
-                  </Text>
-                </View>
-              )}
+              <Text style={styles.kpiValue}>
+                {formatCurrency(getSelectedDateData()?.totalRevenue || 0)}
+              </Text>
+              <View style={styles.kpiChange}>
+                <Ionicons
+                  name={data?.revenueChangePercent && data.revenueChangePercent >= 0 ? 'arrow-up' : 'arrow-down'}
+                  size={12}
+                  color={data?.revenueChangePercent && data.revenueChangePercent >= 0 ? '#07880e' : '#e71008'}
+                />
+                <Text
+                  style={
+                    data?.revenueChangePercent && data.revenueChangePercent >= 0
+                      ? styles.kpiChangeTextGreen
+                      : styles.kpiChangeTextRed
+                  }
+                >
+                  {formatPercentage(data?.revenueChangePercent || 0)}
+                </Text>
+              </View>
             </View>
 
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>PROFIT</Text>
-              <Text style={styles.kpiValue}>{formatCurrency(data?.profit)}</Text>
-              {data?.profitChange !== undefined && (
-                <View style={styles.kpiChange}>
-                  <Ionicons
-                    name={data.profitChange >= 0 ? 'arrow-up' : 'arrow-down'}
-                    size={12}
-                    color={data.profitChange >= 0 ? '#07880e' : '#e71008'}
-                  />
-                  <Text
-                    style={
-                      data.profitChange >= 0
-                        ? styles.kpiChangeTextGreen
-                        : styles.kpiChangeTextRed
-                    }
-                  >
-                    {formatPercentage(data.profitChange)}
-                  </Text>
-                </View>
-              )}
+              <Text style={styles.kpiValue}>
+                {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - (getSelectedDateData()?.cost || 0))}
+              </Text>
+              <View style={styles.kpiChange}>
+                <Ionicons name="circle" size={12} color="#847362" />
+                <Text style={styles.kpiChangeTextGreen}>—</Text>
+              </View>
             </View>
 
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>COST</Text>
-              <Text style={styles.kpiValue}>{formatCurrency(data?.cost)}</Text>
-              {data?.costChange !== undefined && (
-                <View style={styles.kpiChange}>
-                  <Ionicons
-                    name={data.costChange >= 0 ? 'warning-outline' : 'arrow-down'}
-                    size={12}
-                    color={data.costChange >= 0 ? '#e71008' : '#07880e'}
-                  />
-                  <Text
-                    style={
-                      data.costChange >= 0
-                        ? styles.kpiChangeTextRed
-                        : styles.kpiChangeTextGreen
-                    }
-                  >
-                    {formatPercentage(data.costChange)}
-                  </Text>
-                </View>
-              )}
+              <Text style={styles.kpiValue}>
+                {formatCurrency(getSelectedDateData()?.cost || 0)}
+              </Text>
+              <View style={styles.kpiChange}>
+                <Ionicons name="circle" size={12} color="#847362" />
+                <Text style={styles.kpiChangeTextGreen}>—</Text>
+              </View>
             </View>
           </ScrollView>
         </View>
 
-        {/* Filter Bar */}
-        <View style={styles.filterBar}>
-          <View style={styles.searchContainer}>
-            <Ionicons
-              name="search"
-              size={20}
-              color="#847362"
-              style={styles.searchIcon}
-            />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search menu..."
-              placeholderTextColor="#847362"
-            />
-          </View>
-          <TouchableOpacity style={styles.filterButton}>
-            <Ionicons name="filter" size={20} color="#4a3621" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Menu Items List */}
+        {/* AI Suggestions */}
         <View style={styles.itemsList}>
-          {data?.menuItems && data.menuItems.length > 0 ? (
-            data.menuItems.map((item) => {
-              const badge = getStatusBadge(item.status);
-              const { profitWidth, costWidth } = calculateProfitBarWidth(item);
-              const isLowSales = item.status === 'LOW_SALES';
-
-              return (
-                <View
-                  key={item.id}
-                  style={[styles.menuItem, isLowSales && styles.menuItemWarning]}
-                >
-                  <View style={[styles.menuItemImage, { backgroundColor: '#D4A574' }]}>
-                    <Ionicons name="cafe" size={40} color="#FFF" />
-                  </View>
-                  <View style={styles.menuItemContent}>
-                    <View style={styles.menuItemHeader}>
-                      <Text style={styles.menuItemTitle}>{item.name}</Text>
-                      {badge && (
-                        <View style={badge.style}>
-                          <Text
-                            style={
-                              item.status === 'HIGH_MARGIN'
-                                ? styles.badgeTextGreen
-                                : styles.badgeTextRed
-                            }
-                          >
-                            {badge.text}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.menuItemStats}>
-                      {item.rating !== undefined && (
-                        <View style={styles.rating}>
-                          <Ionicons name="star" size={14} color="#fb923c" />
-                          <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
-                        </View>
-                      )}
-                      {item.totalSold !== undefined && (
-                        <Text style={styles.soldText}>• {item.totalSold} sold</Text>
-                      )}
-                    </View>
-                    <View style={styles.profitBarContainer}>
-                      <View style={styles.profitBarLabels}>
-                        <Text style={styles.profitLabel}>
-                          Profit: {formatCurrency(item.profit)}
-                        </Text>
-                        <Text style={styles.costLabel}>
-                          Cost: {formatCurrency(item.cost)}
-                        </Text>
-                      </View>
-                      <View style={styles.profitBar}>
-                        <View style={[styles.profitFill, { width: `${profitWidth}%` }]} />
-                        <View style={[styles.costFill, { width: `${costWidth}%` }]} />
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              );
-            })
-          ) : (
-            <View style={{ padding: 24, alignItems: 'center' }}>
-              <Ionicons name="restaurant-outline" size={48} color="#847362" />
-              <Text style={{ marginTop: 12, color: '#847362', fontSize: 14 }}>
-                No menu items available
-              </Text>
-            </View>
-          )}
-
-          {/* AI Suggestions */}
-          {data?.aiSuggestions && (
-            <View style={styles.aiSection}>
-              <View style={styles.aiHeader}>
-                <View style={styles.aiIconContainer}>
-                  <Ionicons name="bulb" size={24} color="#FFF" />
-                </View>
-                <View style={styles.aiTextContainer}>
-                  <Text style={styles.aiTitle}>AI Suggestions</Text>
-                  <Text style={styles.aiDescription}>
-                    {data.aiSuggestions.description ||
-                      `Found ${data.aiSuggestions.count || 0} versions to improve profit based on current trends.`}
-                  </Text>
-                </View>
+          <View style={styles.aiSection}>
+            <View style={styles.aiHeader}>
+              <View style={styles.aiIconContainer}>
+                <Ionicons name="bulb" size={24} color="#FFF" />
               </View>
-              <TouchableOpacity style={styles.aiButton}>
-                <Text style={styles.aiButtonText}>Generate Menu</Text>
-                <Ionicons name="rocket" size={16} color="#FFF" />
-              </TouchableOpacity>
+              <View style={styles.aiTextContainer}>
+                <Text style={styles.aiTitle}>AI Suggestions</Text>
+                <Text style={styles.aiDescription}>
+                  Analyze your menu performance and get AI-powered recommendations to improve profit.
+                </Text>
+              </View>
             </View>
-          )}
+            <TouchableOpacity style={styles.aiButton}>
+              <Text style={styles.aiButtonText}>Generate Menu</Text>
+              <Ionicons name="rocket" size={16} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.bottomSpacing} />
       </ScrollView>
+
+      {/* Date Picker Modal */}
+      <Modal
+        visible={showDatePicker}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Date</Text>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                <Ionicons name="close" size={24} color="#4a3621" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={data?.chartData || []}
+              keyExtractor={(item, index) => index.toString()}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.dateItem,
+                    selectedDateIndex === index && styles.dateItemSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedDateIndex(index);
+                    setShowDatePicker(false);
+                  }}
+                >
+                  <View style={styles.dateItemContent}>
+                    <Ionicons 
+                      name="calendar" 
+                      size={20} 
+                      color={selectedDateIndex === index ? '#FFF' : '#4a3621'} 
+                    />
+                    <Text style={[
+                      styles.dateItemText,
+                      selectedDateIndex === index && styles.dateItemTextSelected
+                    ]}>
+                      {formatDate(item.date)}
+                    </Text>
+                  </View>
+                  <View style={styles.dateItemStats}>
+                    <Text style={[
+                      styles.dateItemRevenue,
+                      selectedDateIndex === index && styles.dateItemTextSelected
+                    ]}>
+                      {formatCurrency(item.totalRevenue)}
+                    </Text>
+                    <Text style={[
+                      styles.dateItemCups,
+                      selectedDateIndex === index && styles.dateItemTextSelected
+                    ]}>
+                      {item.totalCups} cups
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -690,5 +650,110 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: 100,
+  },
+  summaryCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 16,
+  },
+  summaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1dbd6',
+  },
+  summaryTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#847362',
+    fontWeight: '500',
+  },
+  summaryValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '70%',
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e1dbd6',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  dateItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  dateItemSelected: {
+    backgroundColor: '#4a3621',
+  },
+  dateItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  dateItemText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  dateItemTextSelected: {
+    color: '#FFF',
+  },
+  dateItemStats: {
+    alignItems: 'flex-end',
+  },
+  dateItemRevenue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  dateItemCups: {
+    fontSize: 12,
+    color: '#847362',
+    marginTop: 2,
   },
 });

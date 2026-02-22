@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+  import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
@@ -142,7 +143,7 @@ export default function InventoryScreen() {
     
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
-    const ingredientImage = item.ingredient?.image || fallbackIngredientImage;
+    const ingredientImage = item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
 
     return (
@@ -258,13 +259,16 @@ export default function InventoryScreen() {
 
         {/* Search */}
         <View
-          style={[
-            styles.searchBar,
-            {
-              backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
-              borderColor: isDark ? '#374151' : '#F0F0F0'
-            }
-          ]}>
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
+            borderColor: isDark ? '#374151' : '#F0F0F0'
+          }}>
           <Ionicons name="search-outline" size={20} color="#9CA3AF" />
           <TextInput
             className={`flex-1 ml-2 text-base ${isDark ? 'text-gray-200' : 'text-gray-900'}`}
@@ -288,27 +292,27 @@ export default function InventoryScreen() {
             <TouchableOpacity
               key={category}
               onPress={() => setSelectedCategory(category)}
-              style={[
-                styles.categoryTab,
-                {
-                  backgroundColor: selectedCategory === category
-                    ? '#3E2723'
-                    : isDark
-                      ? '#1F2937'
-                      : '#F5F5F5'
-                }
-              ]}>
+              style={{
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: 20,
+                marginRight: 8,
+                backgroundColor: selectedCategory === category
+                  ? '#3E2723'
+                  : isDark
+                    ? '#1F2937'
+                    : '#F5F5F5'
+              }}>
               <Text
-                style={[
-                  styles.categoryText,
-                  {
-                    color: selectedCategory === category
-                      ? '#FFFFFF'
-                      : isDark
-                        ? '#9CA3AF'
-                        : '#4B5563'
-                  }
-                ]}>
+                style={{
+                  fontSize: 14,
+                  fontWeight: '600',
+                  color: selectedCategory === category
+                    ? '#FFFFFF'
+                    : isDark
+                      ? '#9CA3AF'
+                      : '#4B5563'
+                }}>
                 {category}
               </Text>
             </TouchableOpacity>
