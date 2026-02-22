@@ -10,6 +10,8 @@ import {
   Dimensions,
   FlatList,
   RefreshControl,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -65,6 +67,12 @@ export default function MenuScreen() {
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createImageUrl, setCreateImageUrl] = useState('');
+  const [createCategoryName, setCreateCategoryName] = useState('');
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
@@ -253,6 +261,88 @@ export default function MenuScreen() {
         'User'
     ).trim() || 'User';
 
+  const resetCreateForm = () => {
+    setCreateName('');
+    setCreateImageUrl('');
+    setCreateCategoryName('');
+    setCreateError(null);
+  };
+
+  const handleCreateBeverage = async () => {
+    if (createSubmitting) {
+      return;
+    }
+
+    const trimmedName = createName.trim();
+    const trimmedCategory = createCategoryName.trim();
+    const trimmedImage = createImageUrl.trim();
+
+    if (!trimmedName) {
+      setCreateError('Please enter a beverage name.');
+      return;
+    }
+
+    if (!trimmedCategory) {
+      setCreateError('Please enter a beverage category.');
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setCreateError('Missing coffee shop id.');
+      return;
+    }
+
+    try {
+      setCreateSubmitting(true);
+      setCreateError(null);
+
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: trimmedName,
+          status: 'ACTIVE',
+          coffeeShopId,
+          image: trimmedImage || null,
+          beverageCategory: {
+            beverageCategoryId: 0,
+            name: trimmedCategory,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const created = await response.json();
+      const imageUrl = resolveImageUrl(
+        AUTH_BASE_URL,
+        String(created?.imageUrl ?? created?.image ?? '')
+      );
+
+      const mapped: BeverageItem = {
+        id: String(created?.beverageId ?? created?.id ?? Date.now()),
+        name: String(created?.name ?? trimmedName),
+        flavor: String(created?.beverageCategory?.name ?? trimmedCategory),
+        time: String(created?.brewingTimeMinutes ?? created?.time ?? created?.prepTime ?? ''),
+        image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+      };
+
+      setBeverages((prev) => [mapped, ...prev]);
+      setBeveragePage(1);
+      setBeveragesLoadingMore(false);
+      resetCreateForm();
+      setShowCreateModal(false);
+    } catch (error) {
+      setCreateError('Failed to create beverage.');
+    } finally {
+      setCreateSubmitting(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -353,9 +443,22 @@ export default function MenuScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Your Beverages</Text>
-            <TouchableOpacity>
-              <Text style={styles.sectionActionMuted}>See All</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Your Beverages</Text>
+              <Text style={styles.sectionActionMuted}>Swipe to see more</Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionHeaderActionRow}>
+            <TouchableOpacity
+              style={styles.addBeverageButton}
+              onPress={() => {
+                resetCreateForm();
+                setShowCreateModal(true);
+              }}
+            >
+              <Ionicons name="add" size={16} color={stylesVars.espresso} />
+              <Text style={styles.addBeverageText}>Add</Text>
             </TouchableOpacity>
           </View>
 
@@ -460,6 +563,65 @@ export default function MenuScreen() {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      <Modal
+        visible={showCreateModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Create Beverage</Text>
+            {createError ? <Text style={styles.modalError}>{createError}</Text> : null}
+
+            <Text style={styles.modalLabel}>Name</Text>
+            <TextInput
+              value={createName}
+              onChangeText={setCreateName}
+              placeholder="Beverage name"
+              style={styles.modalInput}
+              autoCapitalize="words"
+            />
+
+            <Text style={styles.modalLabel}>Category</Text>
+            <TextInput
+              value={createCategoryName}
+              onChangeText={setCreateCategoryName}
+              placeholder="Beverage category"
+              style={styles.modalInput}
+            />
+
+            <Text style={styles.modalLabel}>Image URL (optional)</Text>
+            <TextInput
+              value={createImageUrl}
+              onChangeText={setCreateImageUrl}
+              placeholder="https://..."
+              style={styles.modalInput}
+              autoCapitalize="none"
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalSecondaryButton}
+                onPress={() => setShowCreateModal(false)}
+              >
+                <Text style={styles.modalSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalPrimaryButton}
+                onPress={handleCreateBeverage}
+              >
+                {createSubmitting ? (
+                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                ) : (
+                  <Text style={styles.modalPrimaryText}>Create</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -527,8 +689,19 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     marginBottom: 16,
+  },
+  sectionHeaderActionRow: {
+    alignItems: 'flex-end',
+    marginTop: -8,
+    marginBottom: 12,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    flex: 1,
   },
   sectionTitle: {
     fontSize: 22,
@@ -544,6 +717,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#A8A29E',
+  },
+  addBeverageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    backgroundColor: '#F1E7D8',
+  },
+  addBeverageText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
   menuTabs: {
     gap: 12,
@@ -846,5 +1033,75 @@ const styles = StyleSheet.create({
     color: stylesVars.espresso,
     fontSize: 13,
     fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    padding: 20,
+    gap: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  modalError: {
+    fontSize: 12,
+    color: '#B45309',
+  },
+  modalLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6B5E52',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: stylesVars.espresso,
+    backgroundColor: '#FFFDF9',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 6,
+  },
+  modalSecondaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7E2DC',
+  },
+  modalSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.espresso,
+  },
+  modalPrimaryButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: stylesVars.primary,
+    minWidth: 90,
+    alignItems: 'center',
+  },
+  modalPrimaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
 });
