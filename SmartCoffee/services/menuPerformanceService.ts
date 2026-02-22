@@ -1,6 +1,7 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { authorizedFetch } from './authService';
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface ChartDataItem {
   date: string;
@@ -39,8 +40,8 @@ export interface MenuItemPerformance {
 }
 
 const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
+  if (process.env.EXPO_PUBLIC_AUTH_BASE_URL) {
+    return process.env.EXPO_PUBLIC_AUTH_BASE_URL;
   }
 
   const hostUri =
@@ -60,23 +61,57 @@ const getApiBaseUrl = () => {
   });
 };
 
+// Create axios instance
+const apiClient = axios.create({
+  baseURL: `${getApiBaseUrl()}/api`,
+  headers: {
+    'Content-Type': 'application/json',
+    Accept: '*/*',
+  },
+  timeout: 10000,
+});
+
+// Request interceptor to add auth token
+apiClient.interceptors.request.use(
+  async (config) => {
+    const token = await AsyncStorage.getItem('accessToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor for error handling
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response) {
+      // Server responded with error status
+      console.error('API Error:', error.response.status, error.response.data);
+    } else if (error.request) {
+      // Request made but no response
+      console.error('Network Error:', error.message);
+    } else {
+      // Something else happened
+      console.error('Error:', error.message);
+    }
+    return Promise.reject(error);
+  }
+);
+
 class MenuPerformanceService {
   async getSummary(menuId: number): Promise<MenuPerformanceSummary> {
     try {
-      const baseUrl = getApiBaseUrl();
-      const response = await authorizedFetch(`${baseUrl}/api/MenuPerformance/${menuId}/summary`, {
-        headers: {
-          Accept: '*/*',
-        },
-      });
+      const response = await apiClient.get<MenuPerformanceSummary>(
+        `/MenuPerformance/${menuId}/summary`
+      );
       
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('Menu Performance API Response:', data);
-      return data;
+      console.log('Menu Performance API Response:', response.data);
+      return response.data;
     } catch (error) {
       console.error('Error fetching menu performance summary:', error);
       throw error;
