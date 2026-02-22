@@ -112,12 +112,15 @@ export const verifyOtp = async (email: string, otp: string): Promise<AuthTokens>
 };
 
 export const refreshTokens = async (): Promise<AuthTokens> => {
+  const accessToken = await AsyncStorage.getItem('accessToken');
   const refreshToken = await AsyncStorage.getItem('refreshToken');
-  if (!refreshToken) {
-    throw new Error('Missing refresh token.');
+
+  if (!accessToken || !refreshToken) {
+    throw new Error('Missing access token or refresh token.');
   }
 
   const tokens = await postJson<AuthTokens>(API_ENDPOINTS.auth.refreshToken(), {
+    accessToken,
     refreshToken,
   });
 
@@ -137,7 +140,10 @@ export const authorizedFetch = async (url: string, options: RequestInit = {}) =>
     const tokens = await refreshTokens();
     const retryOptions = await withAuthHeader(options, tokens.accessToken);
     response = await fetch(url, retryOptions);
-  } catch {
+  } catch (error) {
+    // Refresh failed - clear tokens and return 401
+    console.error('Token refresh failed:', error);
+    await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
     return response;
   }
 
@@ -168,16 +174,25 @@ export const getProfile = async (): Promise<ProfileResponse> => {
 };
 
 export const logoutAccount = async (): Promise<void> => {
-  const response = await authorizedFetch(API_ENDPOINTS.auth.logout(), {
-    method: 'POST',
-    headers: {
-      Accept: '*/*',
-    },
-  });
+  try {
+    const response = await authorizedFetch(API_ENDPOINTS.auth.logout(), {
+      method: 'POST',
+      headers: {
+        Accept: '*/*',
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(await parseErrorMessage(response));
+    // Log the response but don't fail on 401 since user is logging out anyway
+    if (!response.ok) {
+      console.warn('Logout API returned:', response.status);
+    }
+  } catch (error) {
+    // Log error but continue with local logout
+    console.warn('Logout API call failed:', error);
   }
+
+  // Always clear tokens from storage regardless of API response
+  await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
 };
 
 export const changePassword = async (oldPassword: string, newPassword: string): Promise<void> => {
