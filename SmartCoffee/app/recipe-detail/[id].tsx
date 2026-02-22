@@ -51,8 +51,10 @@ interface Ingredient {
     id: number;
     quantity: number;
     cost: number;
+    measurement?: string | null;
+    ingredient_id?: number;
     shopRecipe: null;
-    ingredient: {
+    ingredient?: {
         ingredientId: number;
         name: string;
         image: string;

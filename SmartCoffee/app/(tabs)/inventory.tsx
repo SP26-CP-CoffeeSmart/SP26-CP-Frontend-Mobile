@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+  import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,11 @@ import {
   RefreshControl,
   Image,
   ScrollView,
-  StyleSheet,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
@@ -35,6 +36,7 @@ interface ShopRecipeIngredient {
 export default function InventoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const isDark = colorScheme === 'dark';
+  const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -76,14 +78,14 @@ export default function InventoryScreen() {
     // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter((item) =>
-        item.ingredient.category.toLowerCase().includes(selectedCategory.toLowerCase())
+        (item.ingredient?.category || 'Unknown Category').toLowerCase().includes(selectedCategory.toLowerCase())
       );
     }
 
     // Filter by search query
     if (searchQuery.trim() !== '') {
       filtered = filtered.filter((item) =>
-        item.ingredient.name.toLowerCase().includes(searchQuery.toLowerCase())
+        (item.ingredient?.name || `Ingredient #${item.id}`).toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
@@ -138,72 +140,74 @@ export default function InventoryScreen() {
   const renderItem = ({ item }: { item: ShopRecipeIngredient }) => {
     const status = getStockStatus(item.quantity);
     const percentage = getStockPercentage(item.quantity);
+    
+    // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
+    const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
+    const ingredientImage = item.ingredient?.image;
+    const ingredientCategory = item.ingredient?.category || 'Unknown Category';
 
     return (
       <TouchableOpacity
-        style={[
-          styles.card,
-          { backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF' }
-        ]}>
-        <View style={styles.cardContent}>
+        onPress={() => router.push(`/ingredient-detail/${item.id}`)}
+        className={`mx-4 mb-3 rounded-2xl overflow-hidden shadow-md ${
+          isDark ? 'bg-gray-800' : 'bg-white'
+        }`}>
+        <View className="flex-row p-4">
           {/* Image */}
-          <View style={styles.imageContainer}>
-            {item.ingredient.image ? (
+          <View className="w-16 h-16 rounded-xl mr-4 overflow-hidden">
+            {ingredientImage ? (
               <Image
-                source={{ uri: item.ingredient.image }}
-                style={styles.image}
+                source={{ uri: ingredientImage }}
+                className="w-full h-full"
                 resizeMode="cover"
               />
             ) : (
-              <View style={[styles.imagePlaceholder, { backgroundColor: '#D1D5DB' }]}>
+              <View className="w-full h-full bg-gray-300 items-center justify-center">
                 <Ionicons name="cafe" size={32} color="#9CA3AF" />
               </View>
             )}
           </View>
 
           {/* Content */}
-          <View style={styles.contentContainer}>
+          <View className="flex-1">
             {/* Title and Badge */}
-            <View style={styles.titleRow}>
+            <View className="flex-row items-center mb-1">
               <Text
-                style={[
-                  styles.itemTitle,
-                  { color: isDark ? '#E0E0E0' : '#111827' }
-                ]}
+                className={`flex-1 text-base font-semibold ${
+                  isDark ? 'text-gray-200' : 'text-gray-900'
+                }`}
                 numberOfLines={1}>
-                {item.ingredient.name}
+                {ingredientName}
               </Text>
               {item.cost > 50000 && (
-                <View style={[styles.premiumBadge, { backgroundColor: '#FEF3C7' }]}>
-                  <Text style={[styles.premiumText, { color: '#B45309' }]}>Premium</Text>
+                <View className="bg-amber-50 px-2 py-0.5 rounded ml-2">
+                  <Text className="text-amber-700 text-xs font-semibold">Premium</Text>
                 </View>
               )}
             </View>
 
             {/* Subtitle */}
-            <Text style={[styles.category, { color: '#6B7280' }]}>{item.ingredient.category}</Text>
+            <Text className="text-gray-500 text-xs mb-2">{ingredientCategory}</Text>
 
             {/* Quantity and Status */}
-            <View style={styles.quantityRow}>
-              <Text style={[styles.quantityText, { color: isDark ? '#E0E0E0' : '#374151' }]}>
+            <View className="flex-row items-center justify-between mb-2">
+              <Text className={`text-sm font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
                 {item.quantity} / 500 UNITS
               </Text>
-              <View style={[styles.statusBadge, { backgroundColor: status.bgColor }]}>
-                <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
+              <View className={`px-2 py-1 rounded ${status.bgClass}`}>
+                <Text className={`text-xs font-bold ${status.colorClass}`}>{status.label}</Text>
               </View>
             </View>
 
             {/* Progress Bar */}
-            <View style={styles.progressRow}>
-              <View style={[styles.progressBarBg, { backgroundColor: '#E5E7EB' }]}>
+            <View className="flex-row items-center">
+              <View className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden mr-2">
                 <View
-                  style={[
-                    styles.progressBar,
-                    { width: `${percentage}%`, backgroundColor: status.barColor }
-                  ]}
+                  className={`h-full ${status.barClass}`}
+                  style={{ width: `${percentage}%` }}
                 />
               </View>
-              <Text style={[styles.percentageText, { color: '#4B5563' }]}>{Math.round(percentage)}%</Text>
+              <Text className="text-gray-600 text-xs font-semibold">{Math.round(percentage)}%</Text>
             </View>
           </View>
         </View>
@@ -213,7 +217,7 @@ export default function InventoryScreen() {
 
   if (loading && !refreshing) {
     return (
-      <View className={`flex-1 items-center justify-center ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
+      <View className={`flex-1 items-center justify-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
         <ActivityIndicator size="large" color="#D9A05B" />
       </View>
     );
@@ -221,12 +225,12 @@ export default function InventoryScreen() {
 
   if (error) {
     return (
-      <View className={`flex-1 items-center justify-center px-6 ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
-        <Text className={`text-center mb-4 ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+      <View className={`flex-1 items-center justify-center px-6 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+        <Text className={`text-center mb-4 ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>
           {error}
         </Text>
         <TouchableOpacity
-          className="bg-primary px-6 py-3 rounded-full"
+          className="bg-amber-600 px-6 py-3 rounded-full"
           onPress={fetchIngredients}>
           <Text className="text-white font-semibold">Try Again</Text>
         </TouchableOpacity>
@@ -235,36 +239,39 @@ export default function InventoryScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: isDark ? '#121212' : '#FAFAFA' }}>
+    <View className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: isDark ? '#121212' : '#FFFFFF' }]}>
+      <View className={`pt-12 px-4 pb-4 ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
         {/* Title and Notification */}
-        <View style={styles.headerTop}>
+        <View className="flex-row justify-between items-center mb-4">
           <View>
-            <Text style={[styles.managementLabel, { color: '#6B7280' }]}>
+            <Text className="text-gray-500 text-xs tracking-wider uppercase mb-1">
               MANAGEMENT
             </Text>
-            <Text style={[styles.headerTitle, { color: isDark ? '#E0E0E0' : '#111827' }]}>
+            <Text className={`text-2xl font-bold ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>
               Inventory
             </Text>
           </View>
-          <TouchableOpacity style={[styles.notificationButton, { backgroundColor: '#FFEDD5' }]}>
+          <TouchableOpacity className="w-10 h-10 bg-orange-100 rounded-full items-center justify-center">
             <Ionicons name="notifications-outline" size={22} color="#F97316" />
           </TouchableOpacity>
         </View>
 
         {/* Search */}
         <View
-          style={[
-            styles.searchBar,
-            {
-              backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
-              borderColor: isDark ? '#374151' : '#F0F0F0'
-            }
-          ]}>
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            paddingHorizontal: 16,
+            paddingVertical: 12,
+            borderRadius: 12,
+            borderWidth: 1,
+            backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
+            borderColor: isDark ? '#374151' : '#F0F0F0'
+          }}>
           <Ionicons name="search-outline" size={20} color="#9CA3AF" />
           <TextInput
-            style={[styles.searchInput, { color: isDark ? '#E0E0E0' : '#111827' }]}
+            className={`flex-1 ml-2 text-base ${isDark ? 'text-gray-200' : 'text-gray-900'}`}
             placeholder="Search stock items..."
             placeholderTextColor="#9CA3AF"
             value={searchQuery}
@@ -279,33 +286,33 @@ export default function InventoryScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
+          className="mt-4"
           contentContainerStyle={{ paddingRight: 16 }}>
           {categories.map((category) => (
             <TouchableOpacity
               key={category}
               onPress={() => setSelectedCategory(category)}
-              style={[
-                styles.categoryTab,
-                {
-                  backgroundColor: selectedCategory === category
-                    ? '#3E2723'
-                    : isDark
-                      ? '#1F2937'
-                      : '#F5F5F5'
-                }
-              ]}>
+              style={{
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                borderRadius: 20,
+                marginRight: 8,
+                backgroundColor: selectedCategory === category
+                  ? '#3E2723'
+                  : isDark
+                    ? '#1F2937'
+                    : '#F5F5F5'
+              }}>
               <Text
-                style={[
-                  styles.categoryText,
-                  {
-                    color: selectedCategory === category
-                      ? '#FFFFFF'
-                      : isDark
-                        ? '#9CA3AF'
-                        : '#4B5563'
-                  }
-                ]}>
+                style={{
+                  fontSize: 14,
+                  fontWeight: '600',
+                  color: selectedCategory === category
+                    ? '#FFFFFF'
+                    : isDark
+                      ? '#9CA3AF'
+                      : '#4B5563'
+                }}>
                 {category}
               </Text>
             </TouchableOpacity>
@@ -315,8 +322,8 @@ export default function InventoryScreen() {
 
       {/* List */}
       {filteredIngredients.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <Text style={{ color: isDark ? '#9CA3AF' : '#4B5563', textAlign: 'center' }}>
+        <View className="flex-1 items-center justify-center">
+          <Text className={isDark ? 'text-gray-400' : 'text-gray-600'}>
             No ingredients found
           </Text>
         </View>
@@ -338,183 +345,9 @@ export default function InventoryScreen() {
       )}
 
       {/* Floating Action Button */}
-      <TouchableOpacity
-        style={[styles.fab, { backgroundColor: '#3E2723' }]}>
+      <TouchableOpacity className="absolute bottom-6 right-6 w-14 h-14 bg-stone-800 rounded-full items-center justify-center shadow-lg">
         <Ionicons name="add" size={28} color="white" />
       </TouchableOpacity>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  cardContent: {
-    flexDirection: 'row',
-    padding: 16,
-  },
-  imageContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    marginRight: 16,
-    overflow: 'hidden',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  imagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  contentContainer: {
-    flex: 1,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  itemTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    flex: 1,
-  },
-  premiumBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginLeft: 8,
-  },
-  premiumText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  category: {
-    fontSize: 12,
-    marginBottom: 8,
-  },
-  quantityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  quantityText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  progressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  progressBarBg: {
-    flex: 1,
-    height: 6,
-    borderRadius: 3,
-    overflow: 'hidden',
-    marginRight: 8,
-  },
-  progressBar: {
-    height: '100%',
-  },
-  percentageText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  header: {
-    paddingTop: 48,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  managementLabel: {
-    fontSize: 11,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  notificationButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  searchInput: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 16,
-  },
-  categoryScroll: {
-    marginTop: 16,
-  },
-  categoryTab: {
-    marginRight: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-  },
-  categoryText: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  emptyContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-});
