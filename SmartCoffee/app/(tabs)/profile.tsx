@@ -14,9 +14,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
-import { getProfile, logoutAccount, ProfileResponse } from '@/services/authService';
+import { logoutAccount } from '@/services/authService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { useAuth } from '@/context/auth-context';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -27,9 +28,13 @@ const purchaseStatuses = [
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const [profile, setProfile] = useState<ProfileResponse | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const {
+    profile,
+    coffeeShopId: profileCoffeeShopId,
+    loading: profileLoading,
+    error: profileError,
+    refreshProfile,
+  } = useAuth();
   const [logoutSubmitting, setLogoutSubmitting] = useState(false);
   const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
   const [beverageSizesLoading, setBeverageSizesLoading] = useState(true);
@@ -49,34 +54,6 @@ export default function ProfileScreen() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    let isActive = true;
-
-    const loadProfile = async () => {
-      try {
-        const data = await getProfile();
-        if (isActive) {
-          setProfile(data);
-          setProfileError(null);
-        }
-      } catch (error) {
-        if (isActive) {
-          setProfileError('Unable to load profile.');
-        }
-      } finally {
-        if (isActive) {
-          setProfileLoading(false);
-        }
-      }
-    };
-
-    loadProfile();
-
-    return () => {
-      isActive = false;
-    };
-  }, []);
 
   const getSizeName = (size: BeverageSize, index: number) =>
     String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
@@ -109,15 +86,6 @@ export default function ProfileScreen() {
 
     return null;
   };
-
-  const getProfileCoffeeShopId = (data: ProfileResponse | null) =>
-    getNumericId(
-      data?.coffeeShopId ??
-        (data as any)?.shopId ??
-        (data as any)?.coffeeShopID ??
-        (data as any)?.coffeeShop?.coffeeShopId ??
-        (data as any)?.coffeeShop?.id
-    );
 
   const profileName = getProfileField(
     profile?.fullName ?? profile?.name ?? profile?.userName ?? profile?.username,
@@ -163,7 +131,6 @@ export default function ProfileScreen() {
   const profileEmailDisplay = profileLoading ? 'Loading...' : profileEmail;
   const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
   const profileHeaderName = profileShopDisplay;
-  const profileCoffeeShopId = getProfileCoffeeShopId(profile);
 
   useEffect(() => {
     let isActive = true;
@@ -318,29 +285,8 @@ export default function ProfileScreen() {
 
     try {
       setRefreshing(true);
-      setProfileLoading(true);
-      setBeverageSizesLoading(true);
-
-      const profileData = await getProfile();
-      const coffeeShopId = getProfileCoffeeShopId(profileData);
-
-      setProfile(profileData);
-      setProfileError(null);
-
-      if (!coffeeShopId) {
-        setBeverageSizes([]);
-        setBeverageSizesError('You have not added any sizes for your shop yet.');
-      } else {
-        const sizeData = await beverageSizeService.getByShop(coffeeShopId);
-        setBeverageSizes(sizeData);
-        setBeverageSizesError(null);
-      }
-    } catch (error) {
-      setProfileError('Unable to load profile.');
-      setBeverageSizesError('Unable to load beverage sizes.');
+      await refreshProfile();
     } finally {
-      setProfileLoading(false);
-      setBeverageSizesLoading(false);
       setRefreshing(false);
     }
   };

@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 interface MenuItem {
   id: string;
@@ -53,7 +54,7 @@ const resolveImageUrl = (baseUrl: string, image?: string) => {
 
 export default function MenuScreen() {
   const router = useRouter();
-  const coffeeShopId = 1;
+  const { coffeeShopId, loading: authLoading, profile } = useAuth();
   const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
   const [beverages, setBeverages] = useState<BeverageItem[]>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
@@ -70,10 +71,25 @@ export default function MenuScreen() {
   useEffect(() => {
     let isMounted = true;
     const fetchMenus = async () => {
+      if (authLoading) {
+        return;
+      }
+
+      if (!coffeeShopId) {
+        if (isMounted) {
+          setMenuItems([]);
+          setMenuError('Missing coffee shop id.');
+          setMenuLoading(false);
+        }
+        return;
+      }
+
       setMenuLoading(true);
       setMenuError(null);
       try {
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/Menu`);
+        const response = await authorizedFetch(
+          `${AUTH_BASE_URL}/Menu/by-shop/${coffeeShopId}`
+        );
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -85,6 +101,14 @@ export default function MenuScreen() {
             : Array.isArray(result?.items)
               ? result.items
               : [];
+
+        if (rawList.length === 0) {
+          if (isMounted) {
+            setMenuItems([]);
+            setMenuError('No menu found for this shop.');
+          }
+          return;
+        }
 
         const mapped = rawList.map((item, index) => {
           const imageUrl = resolveImageUrl(
@@ -103,6 +127,7 @@ export default function MenuScreen() {
 
         if (isMounted) {
           setMenuItems(mapped);
+          console.log('[Menu List] menuItems (detailed):', JSON.stringify(mapped, null, 2));
         }
       } catch (error) {
         if (isMounted) {
@@ -119,11 +144,24 @@ export default function MenuScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [authLoading, coffeeShopId]);
 
   useEffect(() => {
     let isMounted = true;
     const fetchBeverages = async () => {
+      if (authLoading) {
+        return;
+      }
+
+      if (!coffeeShopId) {
+        if (isMounted) {
+          setBeverages([]);
+          setBeveragesError('Missing coffee shop id.');
+          setBeveragesLoading(false);
+        }
+        return;
+      }
+
       setBeveragesLoading(true);
       setBeveragesError(null);
       try {
@@ -173,7 +211,7 @@ export default function MenuScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [authLoading, coffeeShopId]);
 
   const totalBeveragePages = Math.ceil(beverages.length / BEVERAGE_PAGE_SIZE);
   const visibleBeveragePages = Math.min(beveragePage, totalBeveragePages);
@@ -203,6 +241,18 @@ export default function MenuScreen() {
     }
   };
 
+  const headerName =
+    String(
+      profile?.shopName ??
+        (profile as any)?.coffeeShopName ??
+        (profile as any)?.storeName ??
+        profile?.fullName ??
+        profile?.name ??
+        profile?.userName ??
+        profile?.username ??
+        'User'
+    ).trim() || 'User';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
@@ -213,7 +263,7 @@ export default function MenuScreen() {
               <Ionicons name="sunny-outline" size={18} color={stylesVars.primary} />
               <Text style={styles.greetingText}>Good Morning</Text>
             </View>
-            <Text style={styles.userName}>John Smith</Text>
+            <Text style={styles.userName}>{headerName}</Text>
           </View>
           <TouchableOpacity style={styles.cartButton}>
             <Ionicons name="cart-outline" size={20} color="#FFF" />
