@@ -167,11 +167,10 @@ export default function MenuResultsScreen() {
                   <TouchableOpacity
                     style={styles.cardAction}
                     onPress={() => {
-                      console.log('[Menu Detail] Navigate from card action:', {
-                        menuId,
-                        title,
-                        item: menu,
-                      });
+                      console.log(
+                        '[Menu Detail] Navigate from card action (detailed):',
+                        JSON.stringify({ menuId, title, item: menu }, null, 2)
+                      );
                       router.push({
                         pathname: `/menu-detail/${menuId}`,
                         params: {
@@ -242,11 +241,10 @@ export default function MenuResultsScreen() {
                 <TouchableOpacity
                   style={styles.detailsRow}
                   onPress={() => {
-                    console.log('[Menu Detail] Navigate from details row:', {
-                      menuId,
-                      title,
-                      item: menu,
-                    });
+                    console.log(
+                      '[Menu Detail] Navigate from details row (detailed):',
+                      JSON.stringify({ menuId, title, item: menu }, null, 2)
+                    );
                     router.push({
                       pathname: `/menu-detail/${menuId}`,
                       params: {

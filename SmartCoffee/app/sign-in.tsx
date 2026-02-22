@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loginAccount } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -25,6 +26,7 @@ const COLORS = {
 
 export default function SignInScreen() {
   const router = useRouter();
+  const { refreshProfile } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -52,6 +54,7 @@ export default function SignInScreen() {
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],
       ]);
+      await refreshProfile();
       Toast.show({ type: 'success', text1: 'Login successful' });
       router.replace('/(tabs)/menu');
     } catch (error) {
