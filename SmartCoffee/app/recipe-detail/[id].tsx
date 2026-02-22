@@ -9,9 +9,8 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-import axios from 'axios';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 interface RecipeVariant {
     name: string;
@@ -22,6 +21,7 @@ interface RecipeVariant {
     flavor: string;
     milkIce: string;
     occasions: string;
+    presentation: any;
     cogs: string;
     price: string;
     margin: string;
@@ -43,6 +43,7 @@ interface RecipeData {
     brewingSteps: string;
     brewingVariablesData: string;
     presentationData: string;
+    suggestedOccasions?: string;
     hasIce: boolean;
 }
 
@@ -63,32 +64,10 @@ interface Ingredient {
     };
 }
 
-const getApiBaseUrl = () => {
-    if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-        return process.env.EXPO_PUBLIC_API_BASE_URL;
-    }
-
-    const hostUri =
-        Constants.expoConfig?.hostUri ||
-        Constants.manifest?.hostUri ||
-        Constants.manifest2?.extra?.expoClient?.hostUri;
-
-    if (hostUri) {
-        const host = hostUri.split(':')[0];
-        return `http://${host}:5080`;
-    }
-
-    return Platform.select({
-        android: 'http://10.0.2.2:5080',
-        ios: 'http://localhost:5080',
-        default: 'http://localhost:5080',
-    });
-};
-
 export default function RecipeDetailScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
-    const { id } = useLocalSearchParams();
+    const { id, recipe: recipeParam, ingredients: ingredientsParam } = useLocalSearchParams();
     const router = useRouter();
     const [showChipsSelector, setShowChipsSelector] = useState(false);
     const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
@@ -99,19 +78,49 @@ export default function RecipeDetailScreen() {
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
 
     useEffect(() => {
+        const safeParseJson = (value?: string) => {
+            if (!value) return null;
+            try {
+                return JSON.parse(value);
+            } catch {
+                return null;
+            }
+        };
+
         const fetchRecipe = async () => {
             try {
                 setLoading(true);
-                const baseUrl = getApiBaseUrl();
-                const response = await axios.get(`${baseUrl}/api/ShopRecipe/by-beverage/${id}`);
 
-                if (Array.isArray(response.data) && response.data.length > 0) {
-                    setRecipes(response.data);
-                    setRecipeData(response.data[0]);
+                // Nếu có recipe từ params (từ menu-detail), dùng luôn
+                if (recipeParam) {
+                    const parsed = safeParseJson(recipeParam as string);
+                    if (parsed) {
+                        setRecipeData(parsed);
+                        setRecipes([parsed]);
+                        setActiveRecipeIndex(0);
+
+                        // Nếu có ingredients từ params, dùng luôn
+                        const parsedIngredients = safeParseJson(ingredientsParam as string);
+                        if (Array.isArray(parsedIngredients)) {
+                            setIngredients(parsedIngredients);
+                        }
+                        setError(null);
+                        setLoading(false);
+                        return;
+                    }
+                }
+
+                // Nếu không có params, gọi API
+                const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${id}`);
+                const data = await response.json();
+
+                if (Array.isArray(data) && data.length > 0) {
+                    setRecipes(data);
+                    setRecipeData(data[0]);
                     setActiveRecipeIndex(0);
-                } else if (response.data) {
-                    setRecipes([response.data]);
-                    setRecipeData(response.data);
+                } else if (data) {
+                    setRecipes([data]);
+                    setRecipeData(data);
                     setActiveRecipeIndex(0);
                 }
                 setError(null);
@@ -123,23 +132,25 @@ export default function RecipeDetailScreen() {
             }
         };
 
-        if (id) {
+        if (id || recipeParam) {
             fetchRecipe();
         }
-    }, [id]);
+    }, [id, recipeParam, ingredientsParam]);
 
     // Fetch ingredients when recipeData changes
     useEffect(() => {
+        // Nếu đã có ingredients từ params, không cần fetch
+        if (ingredientsParam) {
+            return;
+        }
+
         if (recipeData?.recipeId) {
             const fetchIngredients = async () => {
                 try {
-                    const baseUrl = getApiBaseUrl();
-                    const url = `${baseUrl}/api/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}?includeIngredient=true`;
-                    console.log('Fetching recipe ingredients from:', url);
-                    const response = await axios.get(url);
-                    if (Array.isArray(response.data)) {
-                        console.log('Recipe ingredients sample:', response.data[0]);
-                        setIngredients(response.data);
+                    const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}`);
+                    const data = await response.json();
+                    if (Array.isArray(data)) {
+                        setIngredients(data);
                     }
                 } catch (err) {
                     console.error('Ingredients fetch error:', err);
@@ -148,7 +159,7 @@ export default function RecipeDetailScreen() {
             };
             fetchIngredients();
         }
-    }, [recipeData?.recipeId]);
+    }, [recipeData?.recipeId, ingredientsParam]);
 
     const getEmojiForIngredient = (category: string, ingredientName: string): string => {
         // Map by category first
@@ -216,6 +227,7 @@ export default function RecipeDetailScreen() {
                 flavor: '',
                 milkIce: '',
                 occasions: '',
+                presentation: null,
                 cogs: '',
                 price: '',
                 margin: '',
@@ -236,7 +248,8 @@ export default function RecipeDetailScreen() {
             caffeine: recipeData.caffeineStrength?.toString() || '',
             flavor: recipeData.flavorNote || '',
             milkIce: recipeData.containsMilk ? 'Có Sữa' : 'Không Sữa',
-            occasions: '',
+            occasions: recipeData.suggestedOccasions || '',
+            presentation: getPresentationData(),
             cogs: '',
             price: recipeData.proposedSellingPrice ? `${recipeData.proposedSellingPrice.toLocaleString()} đ` : '',
             margin: recipeData.profitMarginPercent ? `${recipeData.profitMarginPercent}%` : '',
@@ -267,6 +280,20 @@ export default function RecipeDetailScreen() {
         return parseJSON(recipeData.presentationData);
     };
 
+    const getFallbackImage = () => require('../../assets/1.jpg');
+
+    const getRecipeImageSource = () => {
+        if (!recipeData?.image || recipeData.image === 'null' || recipeData.image === 'undefined') {
+            return getFallbackImage();
+        }
+
+        if (recipeData.image.startsWith('http')) {
+            return { uri: recipeData.image };
+        }
+
+        return { uri: `${AUTH_BASE_URL}${recipeData.image.startsWith('/') ? recipeData.image : '/images/' + recipeData.image}` };
+    };
+
     const getRecipeImage = () => {
         if (!recipeData?.image) {
             return 'https://lh3.googleusercontent.com/aida-public/AB6AXuDl87arBmNghjOioarMuDcsgcswz2hHA3F2yNZ8NePUKywSLDcrQEW0dtF4rv3_qdJ2Q_UYP57nWMWho_KZIKZgX2Bcpf5IYXA6YaWoa1e-WzZHj1QVtev7hcIPqo2lws-rrsBVrCtaWTk9PdnKySgNsVxF26RwQ9HQ99gWzikR8L_0WdHKWLOWEh3v-FObZD41CuhVwyUJsvJQfOe4mr1c00xlUYhbHTwENoSkh0v4p-B1jR7ro_N6HqFvYH2L7pltH0bHCLX9i0ve';
@@ -276,8 +303,7 @@ export default function RecipeDetailScreen() {
             return recipeData.image;
         }
 
-        const baseUrl = getApiBaseUrl();
-        return `${baseUrl}${recipeData.image.startsWith('/') ? recipeData.image : '/images/' + recipeData.image}`;
+        return `${AUTH_BASE_URL}${recipeData.image.startsWith('/') ? recipeData.image : '/images/' + recipeData.image}`;
     };
 
     const variant = getVariantFromRecipe();
@@ -321,9 +347,7 @@ export default function RecipeDetailScreen() {
                     {/* Recipe Image */}
                     <View className="items-center mt-8 mb-4">
                         <Image
-                            source={{
-                                uri: getRecipeImage(),
-                            }}
+                            source={getRecipeImageSource()}
                             className={`w-32 h-44 rounded-2xl border-2 ${isDark ? 'border-gray-700' : 'border-secondary'}`}
                         />
 
@@ -410,6 +434,16 @@ export default function RecipeDetailScreen() {
                                     </Text>
                                 </View>
                             </View>
+
+                            {/* Suggested Occasions */}
+                            {variant.occasions && (
+                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                    <Text className="text-xl font-bold italic text-primary mb-4">Suggested Occasions</Text>
+                                    <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                        {variant.occasions}
+                                    </Text>
+                                </View>
+                            )}
 
                             {/* Brewing Variables */}
                             {getBrewingVariables() && (

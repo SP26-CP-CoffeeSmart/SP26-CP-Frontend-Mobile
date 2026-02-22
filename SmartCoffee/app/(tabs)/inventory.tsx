@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 interface Ingredient {
   ingredientId: number;
@@ -31,38 +31,6 @@ interface ShopRecipeIngredient {
   cost: number;
   ingredient: Ingredient;
 }
-
-const fallbackIngredientImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5037`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5037',
-    ios: 'http://localhost:5037',
-    default: 'http://localhost:5037',
-  });
-};
-
-const resolveImageUrl = (baseUrl: string, image?: string) => {
-  if (!image) return null;
-  if (image.startsWith('http://') || image.startsWith('https://')) return image;
-  if (image.startsWith('/')) return `${baseUrl}${image}`;
-  return `${baseUrl}/images/${image}`;
-};
 
 export default function InventoryScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -83,49 +51,13 @@ export default function InventoryScreen() {
     try {
       setLoading(true);
       setError(null);
-      
-      console.log('Fetching ingredients from API...');
-      const baseUrl = getApiBaseUrl();
-      const response = await fetch(`${baseUrl}/api/ShopRecipeIngredients`);
-      
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients`);
+      const data = await response.json();
+
+      if (Array.isArray(data)) {
+        setIngredients(data);
+        setFilteredIngredients(data);
       }
-      
-      const result = await response.json();
-      const rawList: any[] = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.data)
-        ? result.data
-        : Array.isArray(result?.items)
-        ? result.items
-        : [];
-      
-      console.log('API Response sample:', rawList[0]); // Log first item to see structure
-      
-      const mapped: ShopRecipeIngredient[] = rawList.map((item, index) => {
-        const ingredientImage = resolveImageUrl(
-          baseUrl,
-          item?.ingredient?.image || ''
-        );
-        
-        return {
-          id: item?.id ?? index,
-          quantity: item?.quantity ?? 0,
-          cost: item?.cost ?? 0,
-          ingredient: {
-            ingredientId: item?.ingredient?.ingredientId ?? 0,
-            name: item?.ingredient?.name ?? `Ingredient #${item?.id || index}`,
-            image: ingredientImage || fallbackIngredientImage,
-            category: item?.ingredient?.category || 'Unknown Category',
-            createDate: item?.ingredient?.createDate || '',
-            endDate: item?.ingredient?.endDate || '',
-          },
-        };
-      });
-      
-      setIngredients(mapped);
-      setFilteredIngredients(mapped);
     } catch (err) {
       console.error('Error fetching ingredients:', err);
       setError('Failed to load ingredients. Please try again.');
@@ -169,13 +101,33 @@ export default function InventoryScreen() {
     const percentage = (quantity / maxQuantity) * 100;
 
     if (percentage >= 80) {
-      return { label: 'GOOD', colorClass: 'text-emerald-500', bgClass: 'bg-emerald-50', barClass: 'bg-emerald-500' };
+      return {
+        label: 'GOOD',
+        color: '#10B981',
+        bgColor: '#ECFDF5',
+        barColor: '#10B981'
+      };
     } else if (percentage >= 60) {
-      return { label: 'IN STOCK', colorClass: 'text-teal-500', bgClass: 'bg-teal-50', barClass: 'bg-teal-500' };
+      return {
+        label: 'IN STOCK',
+        color: '#14B8A6',
+        bgColor: '#F0FDFA',
+        barColor: '#14B8A6'
+      };
     } else if (percentage >= 30) {
-      return { label: 'LOW STOCK', colorClass: 'text-amber-500', bgClass: 'bg-amber-50', barClass: 'bg-amber-500' };
+      return {
+        label: 'LOW STOCK',
+        color: '#F59E0B',
+        bgColor: '#FEF3C7',
+        barColor: '#F59E0B'
+      };
     } else {
-      return { label: 'CRITICAL', colorClass: 'text-red-500', bgClass: 'bg-red-50', barClass: 'bg-red-500' };
+      return {
+        label: 'CRITICAL',
+        color: '#EF4444',
+        bgColor: '#FEE2E2',
+        barColor: '#EF4444'
+      };
     }
   };
 
@@ -306,9 +258,13 @@ export default function InventoryScreen() {
 
         {/* Search */}
         <View
-          className={`flex-row items-center px-4 py-3 rounded-xl border ${
-            isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-100'
-          }`}>
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
+              borderColor: isDark ? '#374151' : '#F0F0F0'
+            }
+          ]}>
           <Ionicons name="search-outline" size={20} color="#9CA3AF" />
           <TextInput
             className={`flex-1 ml-2 text-base ${isDark ? 'text-gray-200' : 'text-gray-900'}`}
@@ -332,21 +288,27 @@ export default function InventoryScreen() {
             <TouchableOpacity
               key={category}
               onPress={() => setSelectedCategory(category)}
-              className={`mr-2 px-4 py-2 rounded-full ${
-                selectedCategory === category
-                  ? 'bg-stone-800'
-                  : isDark
-                  ? 'bg-gray-800'
-                  : 'bg-gray-100'
-              }`}>
-              <Text
-                className={`text-sm font-medium ${
-                  selectedCategory === category
-                    ? 'text-white'
+              style={[
+                styles.categoryTab,
+                {
+                  backgroundColor: selectedCategory === category
+                    ? '#3E2723'
                     : isDark
-                    ? 'text-gray-400'
-                    : 'text-gray-600'
-                }`}>
+                      ? '#1F2937'
+                      : '#F5F5F5'
+                }
+              ]}>
+              <Text
+                style={[
+                  styles.categoryText,
+                  {
+                    color: selectedCategory === category
+                      ? '#FFFFFF'
+                      : isDark
+                        ? '#9CA3AF'
+                        : '#4B5563'
+                  }
+                ]}>
                 {category}
               </Text>
             </TouchableOpacity>
