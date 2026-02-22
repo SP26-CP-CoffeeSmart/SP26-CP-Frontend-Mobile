@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Slider from '@react-native-community/slider';
@@ -8,7 +7,6 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   BackHandler,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,6 +16,9 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+import { Platform } from 'react-native';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
 const COFFEE_TYPES = ['Robusta', 'Arabica', 'Blend', 'Cherry', 'Culi'];
@@ -43,8 +44,8 @@ const BREW_METHODS = ['Espresso', 'Pour-over', 'Cold Brew', 'Phin Vietnam', 'Sha
 const ICE_RATIOS = ['30%', '50%', '70%'];
 const FROTHING_LEVELS = [
   { label: 'Micro-foam', icon: 'local-cafe' },
-  { label: 'Airy-foam', icon: 'coffee' },
-  { label: 'No foam', icon: 'do-not-disturb' },
+  { label: 'Airy-foam', icon: 'grain' },
+  { label: 'No foam', icon: 'stop-circle' },
 ];
 const DIFFICULTY_LEVELS = ['Easy', 'Medium', 'Hard'];
 const EQUIPMENTS = [
@@ -54,34 +55,12 @@ const EQUIPMENTS = [
 ];
 const CUP_TYPES = [
   { label: 'Plastic', icon: 'local-drink' },
-  { label: 'Glass', icon: 'wine-bar' },
+  { label: 'Glass', icon: 'liquor' },
 ];
 const COLOR_STYLES = ['Black', 'White', 'Iced-crystal', 'Brown', 'Creamy'];
 const CATEGORIES = ['Seasonal', 'Signature', 'Special', 'Budget', 'Premium', 'Latte Art', 'Dirty Coffee'];
 
 const SLIDER_KEYS = ['Bitterness', 'Sweetness', 'Body', 'Acidity'] as const;
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
-  });
-};
 
 const getLevelLabel = (value: number) => {
   if (value <= 2) return 'Very Low';
@@ -138,7 +117,7 @@ export default function AiCreateScreen() {
       setBeveragesLoading(true);
       setBeveragesError(null);
       try {
-        const response = await fetch(`${getApiBaseUrl()}/api/ShopBeverage/shop/${coffeeShopId}`);
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -244,7 +223,7 @@ export default function AiCreateScreen() {
     try {
       console.log('AI create payload:', JSON.stringify(payload, null, 2));
 
-      const response = await fetch(`${getApiBaseUrl()}/api/AI/create-ai-recipe`, {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/create-ai-recipe`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -316,491 +295,491 @@ export default function AiCreateScreen() {
               contentContainerStyle={styles.formContent}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled">
-            <View style={styles.grabber} />
-            <ThemedText style={styles.sectionTitle}>What’s your coffee idea ?</ThemedText>
+              <View style={styles.grabber} />
+              <ThemedText style={styles.sectionTitle}>What’s your coffee idea ?</ThemedText>
 
-          <ThemedText style={styles.subSectionTitle}>Flavor Profile</ThemedText>
-          {sliderItems.map((slider) => (
-            <View key={slider.key} style={styles.sliderBlock}>
-              <View style={styles.sliderRow}>
-                <ThemedText style={styles.sliderLabel}>{slider.key}</ThemedText>
-                <ThemedText style={styles.sliderValue}>{slider.label}</ThemedText>
+              <ThemedText style={styles.subSectionTitle}>Flavor Profile</ThemedText>
+              {sliderItems.map((slider) => (
+                <View key={slider.key} style={styles.sliderBlock}>
+                  <View style={styles.sliderRow}>
+                    <ThemedText style={styles.sliderLabel}>{slider.key}</ThemedText>
+                    <ThemedText style={styles.sliderValue}>{slider.label}</ThemedText>
+                  </View>
+                  <Slider
+                    value={slider.value}
+                    minimumValue={1}
+                    maximumValue={10}
+                    step={1}
+                    minimumTrackTintColor="#B4632D"
+                    maximumTrackTintColor="#E5E5E5"
+                    thumbTintColor="#B4632D"
+                    onValueChange={(next) =>
+                      setProfileValues((prev) => ({
+                        ...prev,
+                        [slider.key]: next,
+                      }))
+                    }
+                  />
+                  <View style={styles.sliderScale}>
+                    <ThemedText style={styles.scaleText}>Very Low</ThemedText>
+                    <ThemedText style={styles.scaleText}>Medium</ThemedText>
+                    <ThemedText style={styles.scaleText}>Very High</ThemedText>
+                  </View>
+                </View>
+              ))}
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Beverage</ThemedText>
+              <ThemedText style={styles.helperText}>What drink does this recipe make?</ThemedText>
+              {beveragesLoading ? (
+                <ThemedText style={styles.beverageStateText}>Loading beverages...</ThemedText>
+              ) : beveragesError ? (
+                <ThemedText style={styles.beverageStateText}>{beveragesError}</ThemedText>
+              ) : beverages.length === 0 ? (
+                <ThemedText style={styles.beverageStateText}>No beverages found.</ThemedText>
+              ) : (
+                <View style={styles.beverageOptions}>
+                  {beverages.map((item) => {
+                    const isSelected = item.id === selectedBeverageId;
+                    return (
+                      <Pressable
+                        key={item.id}
+                        onPress={() => {
+                          setSelectedBeverageId(item.id);
+                          setSelectedBeverage(item.raw ?? null);
+                          setBeverageSelectionError(null);
+                        }}
+                        style={[styles.beverageOption, isSelected && styles.beverageOptionSelected]}>
+                        <ThemedText
+                          style={[
+                            styles.beverageOptionText,
+                            isSelected && styles.beverageOptionTextSelected,
+                          ]}>
+                          {item.name}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+              {beverageSelectionError ? (
+                <ThemedText style={styles.beverageErrorText}>{beverageSelectionError}</ThemedText>
+              ) : null}
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Flavor Style</ThemedText>
+              <ThemedText style={styles.helperText}>Please specify a style you enjoy</ThemedText>
+              <View style={styles.tags}>
+                {TAGS.map((tag) => {
+                  const isSelected = tag === selectedStyle;
+                  return (
+                    <Pressable
+                      key={tag}
+                      onPress={() => setSelectedStyle(tag)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {tag}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+              <View style={styles.tipRow}>
+                <View style={styles.tipIcon}>
+                  <ThemedText style={styles.tipIconText}>i</ThemedText>
+                </View>
+                <ThemedText style={styles.tipText}>
+                  An intense flavor profile, often with roasty or smoky notes and a heavy body.
+                </ThemedText>
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Coffee</ThemedText>
+              <ThemedText style={styles.helperText}>Determine which kind of coffee and its process</ThemedText>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Type</ThemedText>
+                <ThemedText style={styles.groupValue}>{coffeeType}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {COFFEE_TYPES.map((item) => {
+                  const isSelected = item === coffeeType;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setCoffeeType(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Frying</ThemedText>
+                <ThemedText style={styles.groupValue}>{roastLevel}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {ROAST_LEVELS.map((item) => {
+                  const isSelected = item === roastLevel;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setRoastLevel(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Grinding</ThemedText>
+                <ThemedText style={styles.groupValue}>{grindLevel}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {GRIND_LEVELS.map((item) => {
+                  const isSelected = item === grindLevel;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setGrindLevel(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Liquid</ThemedText>
+              <ThemedText style={styles.helperText}>Decide what liquid to add to your coffee</ThemedText>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Type</ThemedText>
+                <ThemedText style={styles.groupValue}>{liquidType}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {LIQUID_TYPES.map((item) => {
+                  const isSelected = item === liquidType;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setLiquidType(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Milk</ThemedText>
+                <ThemedText style={styles.groupValue}>{milkType}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {['None', ...MILK_TYPES].map((item) => {
+                  const isSelected = item === milkType;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setMilkType(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Sweetener</ThemedText>
+              <ThemedText style={styles.helperText}>How do you want your coffee sweet?</ThemedText>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}></ThemedText>
+                <ThemedText style={styles.groupValue}>{sweetener}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {SWEETENERS.map((item) => {
+                  const isSelected = item === sweetener;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setSweetener(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Topping</ThemedText>
+              <ThemedText style={styles.helperText}>Which topping to add to your coffee ?</ThemedText>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}></ThemedText>
+                <ThemedText style={styles.groupValue}>{topping}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {TOPPINGS.map((item) => {
+                  const isSelected = item === topping;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setTopping(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Brewing Method</ThemedText>
+              <ThemedText style={styles.helperText}>Choose method to make coffee</ThemedText>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}></ThemedText>
+                <ThemedText style={styles.groupValue}>{brewMethod}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {BREW_METHODS.map((item) => {
+                  const isSelected = item === brewMethod;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setBrewMethod(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Time</ThemedText>
+                <ThemedText style={styles.groupValue}>{brewTime} mins</ThemedText>
               </View>
               <Slider
-                value={slider.value}
-                minimumValue={1}
+                value={brewTime}
+                minimumValue={0}
                 maximumValue={10}
                 step={1}
                 minimumTrackTintColor="#B4632D"
                 maximumTrackTintColor="#E5E5E5"
                 thumbTintColor="#B4632D"
-                onValueChange={(next) =>
-                  setProfileValues((prev) => ({
-                    ...prev,
-                    [slider.key]: next,
-                  }))
-                }
+                onValueChange={(next) => setBrewTime(next)}
               />
               <View style={styles.sliderScale}>
-                <ThemedText style={styles.scaleText}>Very Low</ThemedText>
-                <ThemedText style={styles.scaleText}>Medium</ThemedText>
-                <ThemedText style={styles.scaleText}>Very High</ThemedText>
+                <ThemedText style={styles.scaleText}>0 min</ThemedText>
+                <ThemedText style={styles.scaleText}>10 mins</ThemedText>
               </View>
-            </View>
-          ))}
 
-          <View style={styles.sectionSpacing} />
+              <View style={styles.sectionSpacing} />
 
-          <ThemedText style={styles.subSectionTitle}>Beverage</ThemedText>
-          <ThemedText style={styles.helperText}>What drink does this recipe make?</ThemedText>
-          {beveragesLoading ? (
-            <ThemedText style={styles.beverageStateText}>Loading beverages...</ThemedText>
-          ) : beveragesError ? (
-            <ThemedText style={styles.beverageStateText}>{beveragesError}</ThemedText>
-          ) : beverages.length === 0 ? (
-            <ThemedText style={styles.beverageStateText}>No beverages found.</ThemedText>
-          ) : (
-            <View style={styles.beverageOptions}>
-              {beverages.map((item) => {
-                const isSelected = item.id === selectedBeverageId;
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => {
-                      setSelectedBeverageId(item.id);
-                      setSelectedBeverage(item.raw ?? null);
-                      setBeverageSelectionError(null);
-                    }}
-                    style={[styles.beverageOption, isSelected && styles.beverageOptionSelected]}>
-                    <ThemedText
-                      style={[
-                        styles.beverageOptionText,
-                        isSelected && styles.beverageOptionTextSelected,
-                      ]}>
-                      {item.name}
-                    </ThemedText>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-          {beverageSelectionError ? (
-            <ThemedText style={styles.beverageErrorText}>{beverageSelectionError}</ThemedText>
-          ) : null}
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Ice Ratio</ThemedText>
+                <ThemedText style={styles.groupValue}>{iceRatio}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {ICE_RATIOS.map((item) => {
+                  const isSelected = item === iceRatio;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setIceRatio(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <View style={styles.sectionSpacing} />
+              <View style={styles.sectionSpacing} />
 
-          <ThemedText style={styles.subSectionTitle}>Flavor Style</ThemedText>
-          <ThemedText style={styles.helperText}>Please specify a style you enjoy</ThemedText>
-          <View style={styles.tags}>
-            {TAGS.map((tag) => {
-              const isSelected = tag === selectedStyle;
-              return (
-                <Pressable
-                  key={tag}
-                  onPress={() => setSelectedStyle(tag)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {tag}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-          <View style={styles.tipRow}>
-            <View style={styles.tipIcon}>
-              <ThemedText style={styles.tipIconText}>i</ThemedText>
-            </View>
-            <ThemedText style={styles.tipText}>
-              An intense flavor profile, often with roasty or smoky notes and a heavy body.
-            </ThemedText>
-          </View>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Frothing Level</ThemedText>
+                <ThemedText style={styles.groupValue}>{frothingLevel}</ThemedText>
+              </View>
+              <View style={styles.cardsRow}>
+                {FROTHING_LEVELS.map((item) => {
+                  const isSelected = item.label === frothingLevel;
+                  return (
+                    <Pressable
+                      key={item.label}
+                      onPress={() => setFrothingLevel(item.label)}
+                      style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
+                      <MaterialIcons name={item.icon as any} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
+                      <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
+                        {item.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <View style={styles.sectionSpacing} />
+              <View style={styles.sectionSpacing} />
 
-          <ThemedText style={styles.subSectionTitle}>Coffee</ThemedText>
-          <ThemedText style={styles.helperText}>Determine which kind of coffee and its process</ThemedText>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Difficulty Level</ThemedText>
+                <ThemedText style={styles.groupValue}>{difficulty}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {DIFFICULTY_LEVELS.map((item) => {
+                  const isSelected = item === difficulty;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setDifficulty(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Type</ThemedText>
-            <ThemedText style={styles.groupValue}>{coffeeType}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {COFFEE_TYPES.map((item) => {
-              const isSelected = item === coffeeType;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setCoffeeType(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.sectionSpacing} />
 
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Frying</ThemedText>
-            <ThemedText style={styles.groupValue}>{roastLevel}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {ROAST_LEVELS.map((item) => {
-              const isSelected = item === roastLevel;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setRoastLevel(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Special Equipment</ThemedText>
+                <ThemedText style={styles.groupValue}>{equipment}</ThemedText>
+              </View>
+              <View style={styles.cardsRow}>
+                {EQUIPMENTS.map((item) => {
+                  const isSelected = item.label === equipment;
+                  return (
+                    <Pressable
+                      key={item.label}
+                      onPress={() => setEquipment(item.label)}
+                      style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
+                      <MaterialIcons name={item.icon as any} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
+                      <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
+                        {item.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Grinding</ThemedText>
-            <ThemedText style={styles.groupValue}>{grindLevel}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {GRIND_LEVELS.map((item) => {
-              const isSelected = item === grindLevel;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setGrindLevel(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.sectionSpacing} />
 
-          <View style={styles.sectionSpacing} />
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Cup Type</ThemedText>
+                <ThemedText style={styles.groupValue}>{cupType}</ThemedText>
+              </View>
+              <View style={styles.cardsRow}>
+                {CUP_TYPES.map((item) => {
+                  const isSelected = item.label === cupType;
+                  return (
+                    <Pressable
+                      key={item.label}
+                      onPress={() => setCupType(item.label)}
+                      style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
+                      <MaterialIcons name={item.icon as any} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
+                      <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
+                        {item.label}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <ThemedText style={styles.subSectionTitle}>Liquid</ThemedText>
-          <ThemedText style={styles.helperText}>Decide what liquid to add to your coffee</ThemedText>
+              <View style={styles.sectionSpacing} />
 
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Type</ThemedText>
-            <ThemedText style={styles.groupValue}>{liquidType}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {LIQUID_TYPES.map((item) => {
-              const isSelected = item === liquidType;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setLiquidType(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Color Style</ThemedText>
+                <ThemedText style={styles.groupValue}>{colorStyle}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {COLOR_STYLES.map((item) => {
+                  const isSelected = item === colorStyle;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setColorStyle(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Milk</ThemedText>
-            <ThemedText style={styles.groupValue}>{milkType}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {['None', ...MILK_TYPES].map((item) => {
-              const isSelected = item === milkType;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setMilkType(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.sectionSpacing} />
 
-          <View style={styles.sectionSpacing} />
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.subSectionTitle}>Category</ThemedText>
+                <ThemedText style={styles.groupValue}>{category}</ThemedText>
+              </View>
+              <View style={styles.tags}>
+                {CATEGORIES.map((item) => {
+                  const isSelected = item === category;
+                  return (
+                    <Pressable
+                      key={item}
+                      onPress={() => setCategory(item)}
+                      style={[styles.tag, isSelected && styles.tagSelected]}>
+                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
+                        {item}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-          <ThemedText style={styles.subSectionTitle}>Sweetener</ThemedText>
-          <ThemedText style={styles.helperText}>How do you want your coffee sweet?</ThemedText>
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}></ThemedText>
-            <ThemedText style={styles.groupValue}>{sweetener}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {SWEETENERS.map((item) => {
-              const isSelected = item === sweetener;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setSweetener(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
+              <View style={styles.sectionSpacing} />
 
-          <View style={styles.sectionSpacing} />
-
-          <ThemedText style={styles.subSectionTitle}>Topping</ThemedText>
-          <ThemedText style={styles.helperText}>Which topping to add to your coffee ?</ThemedText>
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}></ThemedText>
-            <ThemedText style={styles.groupValue}>{topping}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {TOPPINGS.map((item) => {
-              const isSelected = item === topping;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setTopping(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <ThemedText style={styles.subSectionTitle}>Brewing Method</ThemedText>
-          <ThemedText style={styles.helperText}>Choose method to make coffee</ThemedText>
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}></ThemedText>
-            <ThemedText style={styles.groupValue}>{brewMethod}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {BREW_METHODS.map((item) => {
-              const isSelected = item === brewMethod;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setBrewMethod(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Time</ThemedText>
-            <ThemedText style={styles.groupValue}>{brewTime} mins</ThemedText>
-          </View>
-          <Slider
-            value={brewTime}
-            minimumValue={0}
-            maximumValue={10}
-            step={1}
-            minimumTrackTintColor="#B4632D"
-            maximumTrackTintColor="#E5E5E5"
-            thumbTintColor="#B4632D"
-            onValueChange={(next) => setBrewTime(next)}
-          />
-          <View style={styles.sliderScale}>
-            <ThemedText style={styles.scaleText}>0 min</ThemedText>
-            <ThemedText style={styles.scaleText}>10 mins</ThemedText>
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Ice Ratio</ThemedText>
-            <ThemedText style={styles.groupValue}>{iceRatio}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {ICE_RATIOS.map((item) => {
-              const isSelected = item === iceRatio;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setIceRatio(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Frothing Level</ThemedText>
-            <ThemedText style={styles.groupValue}>{frothingLevel}</ThemedText>
-          </View>
-          <View style={styles.cardsRow}>
-            {FROTHING_LEVELS.map((item) => {
-              const isSelected = item.label === frothingLevel;
-              return (
-                <Pressable
-                  key={item.label}
-                  onPress={() => setFrothingLevel(item.label)}
-                  style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
-                  <MaterialIcons name={item.icon} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
-                  <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
-                    {item.label}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Difficulty Level</ThemedText>
-            <ThemedText style={styles.groupValue}>{difficulty}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {DIFFICULTY_LEVELS.map((item) => {
-              const isSelected = item === difficulty;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setDifficulty(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Special Equipment</ThemedText>
-            <ThemedText style={styles.groupValue}>{equipment}</ThemedText>
-          </View>
-          <View style={styles.cardsRow}>
-            {EQUIPMENTS.map((item) => {
-              const isSelected = item.label === equipment;
-              return (
-                <Pressable
-                  key={item.label}
-                  onPress={() => setEquipment(item.label)}
-                  style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
-                  <MaterialIcons name={item.icon} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
-                  <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
-                    {item.label}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Cup Type</ThemedText>
-            <ThemedText style={styles.groupValue}>{cupType}</ThemedText>
-          </View>
-          <View style={styles.cardsRow}>
-            {CUP_TYPES.map((item) => {
-              const isSelected = item.label === cupType;
-              return (
-                <Pressable
-                  key={item.label}
-                  onPress={() => setCupType(item.label)}
-                  style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
-                  <MaterialIcons name={item.icon} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
-                  <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
-                    {item.label}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Color Style</ThemedText>
-            <ThemedText style={styles.groupValue}>{colorStyle}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {COLOR_STYLES.map((item) => {
-              const isSelected = item === colorStyle;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setColorStyle(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.subSectionTitle}>Category</ThemedText>
-            <ThemedText style={styles.groupValue}>{category}</ThemedText>
-          </View>
-          <View style={styles.tags}>
-            {CATEGORIES.map((item) => {
-              const isSelected = item === category;
-              return (
-                <Pressable
-                  key={item}
-                  onPress={() => setCategory(item)}
-                  style={[styles.tag, isSelected && styles.tagSelected]}>
-                  <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                    {item}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.sectionSpacing} />
-
-          <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
-          <View style={styles.groupHeader}>
-            <ThemedText style={styles.groupTitle}>Margin</ThemedText>
-            <ThemedText style={styles.groupValue}>{margin}%</ThemedText>
-          </View>
-          <Slider
-            value={margin}
-            minimumValue={0}
-            maximumValue={70}
-            step={1}
-            minimumTrackTintColor="#B4632D"
-            maximumTrackTintColor="#E5E5E5"
-            thumbTintColor="#B4632D"
-            onValueChange={(next) => setMargin(next)}
-          />
-          <View style={styles.sliderScale}>
-            <ThemedText style={styles.scaleText}>0%</ThemedText>
-            <ThemedText style={styles.scaleText}>70%</ThemedText>
-          </View>
-          <Pressable
-            style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
-            onPress={handleSubmit}
-            disabled={isLoading}>
-            <ThemedText style={styles.submitButtonText}>AI Recommend Recipe</ThemedText>
-          </Pressable>
+              <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
+              <View style={styles.groupHeader}>
+                <ThemedText style={styles.groupTitle}>Margin</ThemedText>
+                <ThemedText style={styles.groupValue}>{margin}%</ThemedText>
+              </View>
+              <Slider
+                value={margin}
+                minimumValue={0}
+                maximumValue={70}
+                step={1}
+                minimumTrackTintColor="#B4632D"
+                maximumTrackTintColor="#E5E5E5"
+                thumbTintColor="#B4632D"
+                onValueChange={(next) => setMargin(next)}
+              />
+              <View style={styles.sliderScale}>
+                <ThemedText style={styles.scaleText}>0%</ThemedText>
+                <ThemedText style={styles.scaleText}>70%</ThemedText>
+              </View>
+              <Pressable
+                style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
+                onPress={handleSubmit}
+                disabled={isLoading}>
+                <ThemedText style={styles.submitButtonText}>AI Recommend Recipe</ThemedText>
+              </Pressable>
             </ScrollView>
           </View>
         </View>

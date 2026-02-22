@@ -42,12 +42,13 @@ const pickMenus = (payload: any): any[] => {
 
 const getMenuTitle = (menu: any, index: number) =>
   String(
+    menu?.versionNumber ??
     menu?.name ??
-      menu?.menuName ??
-      menu?.title ??
-      menu?.topic ??
-      menu?.layout ??
-      `Menu ${index + 1}`
+    menu?.menuName ??
+    menu?.title ??
+    menu?.topic ??
+    menu?.layout ??
+    `Menu ${index + 1}`
   );
 
 const getMenuSubtitle = (menu: any) => {
@@ -63,6 +64,16 @@ const getMenuSubtitle = (menu: any) => {
 
   if (candidates.length === 0) return 'AI generated menu suggestion.';
   return candidates.slice(0, 2).join(' • ');
+};
+
+const getAveragePrice = (menu: any): string => {
+  const price = menu?.averagePrice;
+  if (!price) return '-';
+  return Number(price).toLocaleString('vi-VN') + ' VNĐ';
+};
+
+const getVisualTheme = (menu: any) => {
+  return menu?.visualTheme ?? null;
 };
 
 const getMenuImage = (menu: any) => {
@@ -141,13 +152,18 @@ export default function MenuResultsScreen() {
             const title = getMenuTitle(menu, index);
             const subtitle = getMenuSubtitle(menu);
             const groups = getGroupNames(menu);
+            const averagePrice = getAveragePrice(menu);
+            const visualTheme = getVisualTheme(menu);
             const menuId = String(menu?.menuId ?? menu?.id ?? index);
             const menuKey = `${menuId}-${index}`;
 
             return (
               <View key={menuKey} style={styles.card}>
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>{title}</Text>
+                  <View style={styles.cardTitleSection}>
+                    <Text style={styles.cardTitle}>{title}</Text>
+                    <Text style={styles.cardPrice}>Average: {averagePrice}</Text>
+                  </View>
                   <TouchableOpacity
                     style={styles.cardAction}
                     onPress={() =>
@@ -177,6 +193,47 @@ export default function MenuResultsScreen() {
                     ) : null}
                   </View>
                 </View>
+
+                {visualTheme && (
+                  <View style={styles.themeSection}>
+                    <Text style={styles.themeSectionTitle}>Visual Theme</Text>
+                    <View style={styles.themeGrid}>
+                      {visualTheme.baseTheme && (
+                        <View style={styles.themeItem}>
+                          <Text style={styles.themeLabel}>Theme:</Text>
+                          <Text style={styles.themeValue}>{visualTheme.baseTheme}</Text>
+                        </View>
+                      )}
+                      {visualTheme.primaryHex && (
+                        <View style={styles.themeItem}>
+                          <Text style={styles.themeLabel}>Primary:</Text>
+                          <View style={[styles.colorSwatch, { backgroundColor: visualTheme.primaryHex }]} />
+                          <Text style={styles.themeValue}>{visualTheme.primaryHex}</Text>
+                        </View>
+                      )}
+                      {visualTheme.secondaryHex && (
+                        <View style={styles.themeItem}>
+                          <Text style={styles.themeLabel}>Secondary:</Text>
+                          <View style={[styles.colorSwatch, { backgroundColor: visualTheme.secondaryHex }]} />
+                          <Text style={styles.themeValue}>{visualTheme.secondaryHex}</Text>
+                        </View>
+                      )}
+                      {visualTheme.fontPairing && (
+                        <View style={styles.themeItem}>
+                          <Text style={styles.themeLabel}>Font:</Text>
+                          <Text style={styles.themeValue}>{visualTheme.fontPairing}</Text>
+                        </View>
+                      )}
+                    </View>
+                    {visualTheme.backgroundPrompt && (
+                      <View style={styles.promptBox}>
+                        <Text style={styles.promptLabel}>Background:</Text>
+                        <Text style={styles.promptText}>{visualTheme.backgroundPrompt}</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+
                 <TouchableOpacity
                   style={styles.detailsRow}
                   onPress={() =>
@@ -278,10 +335,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 6,
   },
+  cardTitleSection: {
+    flex: 1,
+  },
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#3C2A21',
+  },
+  cardPrice: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#8B5E3C',
+    marginTop: 4,
   },
   cardAction: {
     width: 28,
@@ -335,5 +401,64 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#3C2A21',
+  },
+  themeSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E8DED3',
+  },
+  themeSectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#3C2A21',
+    marginBottom: 8,
+  },
+  themeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  themeItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#F9F4EF',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  themeLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#8B5E3C',
+  },
+  themeValue: {
+    fontSize: 10,
+    color: '#5E4A3A',
+  },
+  colorSwatch: {
+    width: 14,
+    height: 14,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#D4C4B0',
+  },
+  promptBox: {
+    backgroundColor: '#F9F4EF',
+    borderRadius: 8,
+    padding: 8,
+  },
+  promptLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#8B5E3C',
+    marginBottom: 4,
+  },
+  promptText: {
+    fontSize: 10,
+    color: '#5E4A3A',
+    lineHeight: 14,
   },
 });

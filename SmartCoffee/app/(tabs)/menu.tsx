@@ -13,9 +13,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 interface MenuItem {
   id: string;
@@ -43,28 +43,6 @@ const fallbackMenuImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
 const fallbackBeverageImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
-  });
-};
 
 const resolveImageUrl = (baseUrl: string, image?: string) => {
   if (!image) return null;
@@ -95,8 +73,7 @@ export default function MenuScreen() {
       setMenuLoading(true);
       setMenuError(null);
       try {
-        const baseUrl = getApiBaseUrl();
-        const response = await fetch(`${baseUrl}/api/Menu`);
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/Menu`);
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -111,7 +88,7 @@ export default function MenuScreen() {
 
         const mapped = rawList.map((item, index) => {
           const imageUrl = resolveImageUrl(
-            baseUrl,
+            AUTH_BASE_URL,
             String(item?.image ?? item?.imageUrl ?? item?.thumbnail ?? '')
           );
           return {
@@ -150,8 +127,8 @@ export default function MenuScreen() {
       setBeveragesLoading(true);
       setBeveragesError(null);
       try {
-        const baseUrl = getApiBaseUrl();
-        const response = await fetch(`${baseUrl}/api/ShopBeverage/shop/${coffeeShopId}`);
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+        console.log('Fetching beverages from:', `${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -165,7 +142,7 @@ export default function MenuScreen() {
               : [];
 
         const mapped = rawList.map((item, index) => {
-          const imageUrl = resolveImageUrl(baseUrl, String(item?.image ?? item?.imageUrl ?? ''));
+          const imageUrl = resolveImageUrl(AUTH_BASE_URL, String(item?.image ?? item?.imageUrl ?? ''));
           return {
             id: String(item?.beverageId ?? item?.id ?? index),
             name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
