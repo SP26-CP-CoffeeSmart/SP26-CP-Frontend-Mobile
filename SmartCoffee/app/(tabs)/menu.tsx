@@ -246,7 +246,7 @@ export default function MenuScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Menu List</Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/menu-recommendations')}>
               <Text style={styles.sectionActionPrimary}>New Menu</Text>
             </TouchableOpacity>
           </View>

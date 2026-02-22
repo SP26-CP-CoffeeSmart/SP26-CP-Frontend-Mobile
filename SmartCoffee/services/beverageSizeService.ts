@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from './api';
+import { authorizedFetch } from './authService';
 
 export interface BeverageSize {
   id?: number;
@@ -32,9 +33,13 @@ export interface UpdateBeverageSizePayload {
 }
 
 class BeverageSizeService {
-  async getAll(): Promise<BeverageSize[]> {
+  async getByShop(shopId: number): Promise<BeverageSize[]> {
     try {
-      const response = await fetch(API_ENDPOINTS.beverageSize.getAll());
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.getByShop(shopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -48,7 +53,7 @@ class BeverageSizeService {
 
   async create(payload: CreateBeverageSizePayload): Promise<BeverageSize> {
     try {
-      const response = await fetch(API_ENDPOINTS.beverageSize.create(), {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.create(), {
         method: 'POST',
         headers: {
           Accept: 'text/plain',
@@ -70,7 +75,7 @@ class BeverageSizeService {
 
   async update(id: number, payload: UpdateBeverageSizePayload): Promise<BeverageSize> {
     try {
-      const response = await fetch(API_ENDPOINTS.beverageSize.update(id), {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.update(id), {
         method: 'PUT',
         headers: {
           Accept: '*/*',
