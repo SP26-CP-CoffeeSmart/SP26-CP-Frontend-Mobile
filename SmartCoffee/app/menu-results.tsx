@@ -150,15 +150,20 @@ export default function MenuResultsScreen() {
                   <Text style={styles.cardTitle}>{title}</Text>
                   <TouchableOpacity
                     style={styles.cardAction}
-                    onPress={() =>
+                    onPress={() => {
+                      console.log('[Menu Detail] Navigate from card action:', {
+                        menuId,
+                        title,
+                        item: menu,
+                      });
                       router.push({
                         pathname: `/menu-detail/${menuId}`,
                         params: {
                           item: JSON.stringify(menu),
                           title,
                         },
-                      })
-                    }
+                      });
+                    }}
                   >
                     <Ionicons name="pencil" size={16} color="#8B5E3C" />
                   </TouchableOpacity>
@@ -179,15 +184,20 @@ export default function MenuResultsScreen() {
                 </View>
                 <TouchableOpacity
                   style={styles.detailsRow}
-                  onPress={() =>
+                  onPress={() => {
+                    console.log('[Menu Detail] Navigate from details row:', {
+                      menuId,
+                      title,
+                      item: menu,
+                    });
                     router.push({
                       pathname: `/menu-detail/${menuId}`,
                       params: {
                         item: JSON.stringify(menu),
                         title,
                       },
-                    })
-                  }
+                    });
+                  }}
                 >
                   <Text style={styles.detailsText}>View Details</Text>
                   <Ionicons name="chevron-forward" size={16} color="#8B5E3C" />

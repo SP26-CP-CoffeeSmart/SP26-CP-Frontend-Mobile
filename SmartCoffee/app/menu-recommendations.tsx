@@ -230,6 +230,7 @@ export default function MenuRecommendationsScreen() {
 
     try {
       setSubmitting(true);
+      console.log('[Menu Create] Request payload:', payload);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuSkeleton(), {
         method: 'POST',
         headers: {
@@ -253,6 +254,7 @@ export default function MenuRecommendationsScreen() {
           responsePayload = responseText;
         }
       }
+      console.log('[Menu Create] Response payload:', responsePayload ?? responseText);
 
       let cacheKey = '';
       if (responsePayload) {
