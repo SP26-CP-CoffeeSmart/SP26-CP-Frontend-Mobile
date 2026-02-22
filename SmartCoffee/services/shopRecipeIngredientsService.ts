@@ -1,4 +1,5 @@
 import { API_ENDPOINTS } from './api';
+import { authorizedFetch } from './authService';
 
 export interface Ingredient {
   ingredientId: number;
@@ -22,7 +23,11 @@ class ShopRecipeIngredientsService {
    */
   async getAll(): Promise<ShopRecipeIngredient[]> {
     try {
-      const response = await fetch(API_ENDPOINTS.shopRecipeIngredients.getAll());
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipeIngredients.getAll(), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -39,7 +44,11 @@ class ShopRecipeIngredientsService {
    */
   async getById(id: number): Promise<ShopRecipeIngredient> {
     try {
-      const response = await fetch(API_ENDPOINTS.shopRecipeIngredients.getById(id));
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipeIngredients.getById(id), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -56,7 +65,11 @@ class ShopRecipeIngredientsService {
    */
   async getByRecipeId(recipeId: number): Promise<ShopRecipeIngredient[]> {
     try {
-      const response = await fetch(API_ENDPOINTS.shopRecipeIngredients.getByRecipeId(recipeId));
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipeIngredients.getByRecipeId(recipeId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

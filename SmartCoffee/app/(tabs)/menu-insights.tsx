@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,104 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import menuPerformanceService, {
+  MenuPerformanceSummary,
+  MenuItemPerformance,
+} from '../../services/menuPerformanceService';
 
 export default function MenuInsightsScreen() {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<MenuPerformanceSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchMenuPerformance();
+  }, []);
+
+  const fetchMenuPerformance = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      // Using menuId = 1 as requested
+      const result = await menuPerformanceService.getSummary(1);
+      setData(result);
+    } catch (err) {
+      console.error('Error fetching menu performance:', err);
+      setError('Failed to load menu performance data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (amount?: number) => {
+    if (!amount && amount !== 0) return 'N/A';
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+    }).format(amount);
+  };
+
+  const formatPercentage = (value?: number) => {
+    if (!value && value !== 0) return '';
+    const sign = value > 0 ? '+' : '';
+    return `${sign}${value}%`;
+  };
+
+  const getStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'HIGH_MARGIN':
+        return { text: 'HIGH MARGIN', style: styles.badgeGreen };
+      case 'HIGH_COST':
+        return { text: 'HIGH COST', style: styles.badgeRed };
+      case 'LOW_SALES':
+        return { text: 'LOW SALES', style: styles.badgeRed };
+      default:
+        return null;
+    }
+  };
+
+  const calculateProfitBarWidth = (item: MenuItemPerformance) => {
+    const total = (item.profit || 0) + (item.cost || 0);
+    if (total === 0) return { profitWidth: 50, costWidth: 50 };
+    const profitWidth = ((item.profit || 0) / total) * 100;
+    return {
+      profitWidth: profitWidth,
+      costWidth: 100 - profitWidth,
+    };
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+          <ActivityIndicator size="large" color="#4a3621" />
+          <Text style={{ marginTop: 12, color: '#847362' }}>Loading menu insights...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+          <Ionicons name="alert-circle-outline" size={48} color="#e71008" />
+          <Text style={{ marginTop: 12, color: '#4a3621', fontSize: 16, textAlign: 'center' }}>{error}</Text>
+          <TouchableOpacity
+            onPress={fetchMenuPerformance}
+            style={[styles.aiButton, { marginTop: 16, paddingHorizontal: 24 }]}
+          >
+            <Text style={styles.aiButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
@@ -27,7 +120,9 @@ export default function MenuInsightsScreen() {
           <View style={styles.banner}>
             <View style={styles.bannerContent}>
               <Text style={styles.bannerSubtitle}>Weekly Performance</Text>
-              <Text style={styles.bannerTitle}>Menu Score: Good</Text>
+              <Text style={styles.bannerTitle}>
+                Menu Score: {data?.menuScore || 'N/A'}
+              </Text>
             </View>
             <View style={styles.bannerIcon}>
               <Ionicons name="trending-up" size={32} color="#FFF" />
@@ -40,7 +135,11 @@ export default function MenuInsightsScreen() {
           <TouchableOpacity style={styles.datePicker}>
             <View style={styles.datePickerContent}>
               <Ionicons name="calendar-outline" size={20} color="#847362" />
-              <Text style={styles.datePickerText}>Oct 1 - Oct 31, 2023</Text>
+              <Text style={styles.datePickerText}>
+                {data?.startDate && data?.endDate
+                  ? `${new Date(data.startDate).toLocaleDateString('vi-VN')} - ${new Date(data.endDate).toLocaleDateString('vi-VN')}`
+                  : 'Select date range'}
+              </Text>
             </View>
             <Ionicons name="chevron-down" size={20} color="#847362" />
           </TouchableOpacity>
@@ -54,29 +153,71 @@ export default function MenuInsightsScreen() {
           >
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>REVENUE</Text>
-              <Text style={styles.kpiValue}>4.5M VNĐ</Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="arrow-up" size={12} color="#07880e" />
-                <Text style={styles.kpiChangeTextGreen}>+12%</Text>
-              </View>
+              <Text style={styles.kpiValue}>{formatCurrency(data?.revenue)}</Text>
+              {data?.revenueChange !== undefined && (
+                <View style={styles.kpiChange}>
+                  <Ionicons
+                    name={data.revenueChange >= 0 ? 'arrow-up' : 'arrow-down'}
+                    size={12}
+                    color={data.revenueChange >= 0 ? '#07880e' : '#e71008'}
+                  />
+                  <Text
+                    style={
+                      data.revenueChange >= 0
+                        ? styles.kpiChangeTextGreen
+                        : styles.kpiChangeTextRed
+                    }
+                  >
+                    {formatPercentage(data.revenueChange)}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>PROFIT</Text>
-              <Text style={styles.kpiValue}>800.000 VNĐ</Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="arrow-up" size={12} color="#07880e" />
-                <Text style={styles.kpiChangeTextGreen}>+26%</Text>
-              </View>
+              <Text style={styles.kpiValue}>{formatCurrency(data?.profit)}</Text>
+              {data?.profitChange !== undefined && (
+                <View style={styles.kpiChange}>
+                  <Ionicons
+                    name={data.profitChange >= 0 ? 'arrow-up' : 'arrow-down'}
+                    size={12}
+                    color={data.profitChange >= 0 ? '#07880e' : '#e71008'}
+                  />
+                  <Text
+                    style={
+                      data.profitChange >= 0
+                        ? styles.kpiChangeTextGreen
+                        : styles.kpiChangeTextRed
+                    }
+                  >
+                    {formatPercentage(data.profitChange)}
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>COST</Text>
-              <Text style={styles.kpiValue}>926.000 VNĐ</Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="warning-outline" size={12} color="#e71008" />
-                <Text style={styles.kpiChangeTextRed}>Low Sales</Text>
-              </View>
+              <Text style={styles.kpiValue}>{formatCurrency(data?.cost)}</Text>
+              {data?.costChange !== undefined && (
+                <View style={styles.kpiChange}>
+                  <Ionicons
+                    name={data.costChange >= 0 ? 'warning-outline' : 'arrow-down'}
+                    size={12}
+                    color={data.costChange >= 0 ? '#e71008' : '#07880e'}
+                  />
+                  <Text
+                    style={
+                      data.costChange >= 0
+                        ? styles.kpiChangeTextRed
+                        : styles.kpiChangeTextGreen
+                    }
+                  >
+                    {formatPercentage(data.costChange)}
+                  </Text>
+                </View>
+              )}
             </View>
           </ScrollView>
         </View>
@@ -103,120 +244,96 @@ export default function MenuInsightsScreen() {
 
         {/* Menu Items List */}
         <View style={styles.itemsList}>
-          {/* Item 1 - Cold Brew */}
-          <View style={styles.menuItem}>
-            <View style={[styles.menuItemImage, { backgroundColor: '#D4A574' }]}>
-              <Ionicons name="cafe" size={40} color="#FFF" />
-            </View>
-            <View style={styles.menuItemContent}>
-              <View style={styles.menuItemHeader}>
-                <Text style={styles.menuItemTitle}>Cold Brew Original</Text>
-                <View style={styles.badgeGreen}>
-                  <Text style={styles.badgeTextGreen}>HIGH MARGIN</Text>
-                </View>
-              </View>
-              <View style={styles.menuItemStats}>
-                <View style={styles.rating}>
-                  <Ionicons name="star" size={14} color="#fb923c" />
-                  <Text style={styles.ratingText}>4.9</Text>
-                </View>
-                <Text style={styles.soldText}>• 850 sold</Text>
-              </View>
-              <View style={styles.profitBarContainer}>
-                <View style={styles.profitBarLabels}>
-                  <Text style={styles.profitLabel}>Profit: 72,000 VND</Text>
-                  <Text style={styles.costLabel}>Cost: 21,000 VND</Text>
-                </View>
-                <View style={styles.profitBar}>
-                  <View style={[styles.profitFill, { width: '70%' }]} />
-                  <View style={[styles.costFill, { width: '30%' }]} />
-                </View>
-              </View>
-            </View>
-          </View>
+          {data?.menuItems && data.menuItems.length > 0 ? (
+            data.menuItems.map((item) => {
+              const badge = getStatusBadge(item.status);
+              const { profitWidth, costWidth } = calculateProfitBarWidth(item);
+              const isLowSales = item.status === 'LOW_SALES';
 
-          {/* Item 2 - Lemon Espresso Tonic */}
-          <View style={styles.menuItem}>
-            <View style={[styles.menuItemImage, { backgroundColor: '#F4C430' }]}>
-              <Ionicons name="water" size={40} color="#FFF" />
+              return (
+                <View
+                  key={item.id}
+                  style={[styles.menuItem, isLowSales && styles.menuItemWarning]}
+                >
+                  <View style={[styles.menuItemImage, { backgroundColor: '#D4A574' }]}>
+                    <Ionicons name="cafe" size={40} color="#FFF" />
+                  </View>
+                  <View style={styles.menuItemContent}>
+                    <View style={styles.menuItemHeader}>
+                      <Text style={styles.menuItemTitle}>{item.name}</Text>
+                      {badge && (
+                        <View style={badge.style}>
+                          <Text
+                            style={
+                              item.status === 'HIGH_MARGIN'
+                                ? styles.badgeTextGreen
+                                : styles.badgeTextRed
+                            }
+                          >
+                            {badge.text}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.menuItemStats}>
+                      {item.rating !== undefined && (
+                        <View style={styles.rating}>
+                          <Ionicons name="star" size={14} color="#fb923c" />
+                          <Text style={styles.ratingText}>{item.rating.toFixed(1)}</Text>
+                        </View>
+                      )}
+                      {item.totalSold !== undefined && (
+                        <Text style={styles.soldText}>• {item.totalSold} sold</Text>
+                      )}
+                    </View>
+                    <View style={styles.profitBarContainer}>
+                      <View style={styles.profitBarLabels}>
+                        <Text style={styles.profitLabel}>
+                          Profit: {formatCurrency(item.profit)}
+                        </Text>
+                        <Text style={styles.costLabel}>
+                          Cost: {formatCurrency(item.cost)}
+                        </Text>
+                      </View>
+                      <View style={styles.profitBar}>
+                        <View style={[styles.profitFill, { width: `${profitWidth}%` }]} />
+                        <View style={[styles.costFill, { width: `${costWidth}%` }]} />
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              );
+            })
+          ) : (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <Ionicons name="restaurant-outline" size={48} color="#847362" />
+              <Text style={{ marginTop: 12, color: '#847362', fontSize: 14 }}>
+                No menu items available
+              </Text>
             </View>
-            <View style={styles.menuItemContent}>
-              <View style={styles.menuItemHeader}>
-                <Text style={styles.menuItemTitle}>Lemon Espresso Tonic</Text>
-                <View style={styles.badgeRed}>
-                  <Text style={styles.badgeTextRed}>HIGH COST</Text>
-                </View>
-              </View>
-              <View style={styles.menuItemStats}>
-                <View style={styles.rating}>
-                  <Ionicons name="star" size={14} color="#fb923c" />
-                  <Text style={styles.ratingText}>4.0</Text>
-                </View>
-                <Text style={styles.soldText}>• 850 sold</Text>
-              </View>
-              <View style={styles.profitBarContainer}>
-                <View style={styles.profitBarLabels}>
-                  <Text style={styles.profitLabel}>Profit: 36,000 VND</Text>
-                  <Text style={styles.costLabel}>Cost: 44,000 VND</Text>
-                </View>
-                <View style={styles.profitBar}>
-                  <View style={[styles.profitFill, { width: '45%' }]} />
-                  <View style={[styles.costFill, { width: '55%' }]} />
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Item 3 - Blended Milk Coffee */}
-          <View style={[styles.menuItem, styles.menuItemWarning]}>
-            <View style={[styles.menuItemImage, { backgroundColor: '#C9A068' }]}>
-              <Ionicons name="ice-cream" size={40} color="#FFF" />
-            </View>
-            <View style={styles.menuItemContent}>
-              <View style={styles.menuItemHeader}>
-                <Text style={styles.menuItemTitle}>Blended Milk Coffee</Text>
-                <View style={styles.badgeRed}>
-                  <Text style={styles.badgeTextRed}>LOW SALES</Text>
-                </View>
-              </View>
-              <View style={styles.menuItemStats}>
-                <View style={styles.rating}>
-                  <Ionicons name="star" size={14} color="#fb923c" />
-                  <Text style={styles.ratingText}>3.4</Text>
-                </View>
-                <Text style={styles.soldText}>• 25 sold</Text>
-              </View>
-              <View style={styles.profitBarContainer}>
-                <View style={styles.profitBarLabels}>
-                  <Text style={styles.profitLabel}>Profit: 42,000 VND</Text>
-                  <Text style={styles.costLabel}>Cost: 18,000 VND</Text>
-                </View>
-                <View style={styles.profitBar}>
-                  <View style={[styles.profitFill, { width: '30%' }]} />
-                  <View style={[styles.costFill, { width: '70%' }]} />
-                </View>
-              </View>
-            </View>
-          </View>
+          )}
 
           {/* AI Suggestions */}
-          <View style={styles.aiSection}>
-            <View style={styles.aiHeader}>
-              <View style={styles.aiIconContainer}>
-                <Ionicons name="bulb" size={24} color="#FFF" />
+          {data?.aiSuggestions && (
+            <View style={styles.aiSection}>
+              <View style={styles.aiHeader}>
+                <View style={styles.aiIconContainer}>
+                  <Ionicons name="bulb" size={24} color="#FFF" />
+                </View>
+                <View style={styles.aiTextContainer}>
+                  <Text style={styles.aiTitle}>AI Suggestions</Text>
+                  <Text style={styles.aiDescription}>
+                    {data.aiSuggestions.description ||
+                      `Found ${data.aiSuggestions.count || 0} versions to improve profit based on current trends.`}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.aiTextContainer}>
-                <Text style={styles.aiTitle}>AI Suggestions</Text>
-                <Text style={styles.aiDescription}>
-                  Found 3 versions to improve profit based on current trends.
-                </Text>
-              </View>
+              <TouchableOpacity style={styles.aiButton}>
+                <Text style={styles.aiButtonText}>Generate Menu</Text>
+                <Ionicons name="rocket" size={16} color="#FFF" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.aiButton}>
-              <Text style={styles.aiButtonText}>Generate Menu</Text>
-              <Ionicons name="rocket" size={16} color="#FFF" />
-            </TouchableOpacity>
-          </View>
+          )}
         </View>
 
         <View style={styles.bottomSpacing} />

@@ -81,4 +81,7 @@ export const API_ENDPOINTS = {
   ai: {
     createMenuSkeleton: () => `${API_BASE_URL}/AI/create-menu-p1-skeleton`,
   },
+  menuPerformance: {
+    getSummary: (menuId: number) => `${API_BASE_URL}/MenuPerformance/${menuId}/summary`,
+  },
 };

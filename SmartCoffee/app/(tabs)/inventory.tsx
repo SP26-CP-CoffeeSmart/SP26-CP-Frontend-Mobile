@@ -9,13 +9,12 @@ import {
   RefreshControl,
   Image,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 
 interface Ingredient {
   ingredientId: number;
@@ -30,10 +29,11 @@ interface ShopRecipeIngredient {
   id: number;
   quantity: number;
   cost: number;
-  measurement?: string | null;
-  ingredient_id?: number;
-  ingredient?: Ingredient;
+  ingredient: Ingredient;
 }
+
+const fallbackIngredientImage =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
 
 const getApiBaseUrl = () => {
   if (process.env.EXPO_PUBLIC_API_BASE_URL) {
@@ -47,14 +47,21 @@ const getApiBaseUrl = () => {
 
   if (hostUri) {
     const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
+    return `http://${host}:5037`;
   }
 
   return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
+    android: 'http://10.0.2.2:5037',
+    ios: 'http://localhost:5037',
+    default: 'http://localhost:5037',
   });
+};
+
+const resolveImageUrl = (baseUrl: string, image?: string) => {
+  if (!image) return null;
+  if (image.startsWith('http://') || image.startsWith('https://')) return image;
+  if (image.startsWith('/')) return `${baseUrl}${image}`;
+  return `${baseUrl}/images/${image}`;
 };
 
 export default function InventoryScreen() {
@@ -76,19 +83,49 @@ export default function InventoryScreen() {
     try {
       setLoading(true);
       setError(null);
+      
+      console.log('Fetching ingredients from API...');
       const baseUrl = getApiBaseUrl();
+      const response = await fetch(`${baseUrl}/api/ShopRecipeIngredients`);
       
-      // Try with includeIngredient parameter
-      const url = `${baseUrl}/api/ShopRecipeIngredients?includeIngredient=true`;
-      console.log('Fetching ingredients from:', url);
-      const response = await axios.get(url);
-      
-      console.log('API Response sample:', response.data[0]); // Log first item to see structure
-      
-      if (Array.isArray(response.data)) {
-        setIngredients(response.data);
-        setFilteredIngredients(response.data);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
       }
+      
+      const result = await response.json();
+      const rawList: any[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.data)
+        ? result.data
+        : Array.isArray(result?.items)
+        ? result.items
+        : [];
+      
+      console.log('API Response sample:', rawList[0]); // Log first item to see structure
+      
+      const mapped: ShopRecipeIngredient[] = rawList.map((item, index) => {
+        const ingredientImage = resolveImageUrl(
+          baseUrl,
+          item?.ingredient?.image || ''
+        );
+        
+        return {
+          id: item?.id ?? index,
+          quantity: item?.quantity ?? 0,
+          cost: item?.cost ?? 0,
+          ingredient: {
+            ingredientId: item?.ingredient?.ingredientId ?? 0,
+            name: item?.ingredient?.name ?? `Ingredient #${item?.id || index}`,
+            image: ingredientImage || fallbackIngredientImage,
+            category: item?.ingredient?.category || 'Unknown Category',
+            createDate: item?.ingredient?.createDate || '',
+            endDate: item?.ingredient?.endDate || '',
+          },
+        };
+      });
+      
+      setIngredients(mapped);
+      setFilteredIngredients(mapped);
     } catch (err) {
       console.error('Error fetching ingredients:', err);
       setError('Failed to load ingredients. Please try again.');
@@ -153,7 +190,7 @@ export default function InventoryScreen() {
     
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
-    const ingredientImage = item.ingredient?.image || null;
+    const ingredientImage = item.ingredient?.image || fallbackIngredientImage;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
 
     return (

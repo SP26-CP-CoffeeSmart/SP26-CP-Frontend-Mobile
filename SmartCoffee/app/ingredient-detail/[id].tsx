@@ -8,33 +8,16 @@ import {
   ActivityIndicator,
   Dimensions,
   Switch,
+  Platform,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import Constants from 'expo-constants';
-import { Platform } from 'react-native';
-import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { LineChart } from 'react-native-chart-kit';
-
-interface Ingredient {
-  ingredientId: number;
-  name: string;
-  image: string;
-  category: string;
-  createDate: string;
-  endDate: string;
-}
-
-interface ShopRecipeIngredient {
-  id: number;
-  quantity: number;
-  cost: number;
-  measurement?: string | null;
-  ingredient_id?: number;
-  ingredient?: Ingredient;
-}
+import shopRecipeIngredientsService, {
+  type ShopRecipeIngredient,
+} from '@/services/shopRecipeIngredientsService';
 
 interface BatchInfo {
   batchId: string;
@@ -44,28 +27,6 @@ interface BatchInfo {
   totalWeight: number;
   remainingPercent: number;
 }
-
-const getApiBaseUrl = () => {
-  if (process.env.EXPO_PUBLIC_API_BASE_URL) {
-    return process.env.EXPO_PUBLIC_API_BASE_URL;
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.manifest?.hostUri ||
-    Constants.manifest2?.extra?.expoClient?.hostUri;
-
-  if (hostUri) {
-    const host = hostUri.split(':')[0];
-    return `http://${host}:5080`;
-  }
-
-  return Platform.select({
-    android: 'http://10.0.2.2:5080',
-    ios: 'http://localhost:5080',
-    default: 'http://localhost:5080',
-  });
-};
 
 export default function IngredientDetailScreen() {
   const colorScheme = useColorScheme() ?? 'light';
@@ -110,12 +71,10 @@ export default function IngredientDetailScreen() {
     try {
       setLoading(true);
       setError(null);
-      const baseUrl = getApiBaseUrl();
-      const url = `${baseUrl}/api/ShopRecipeIngredients/${id}?includeIngredient=true`;
-      console.log('Fetching ingredient detail from:', url);
-      const response = await axios.get(url);
-      console.log('Ingredient detail response:', response.data);
-      setIngredient(response.data);
+      console.log('Fetching ingredient detail for ID:', id);
+      const data = await shopRecipeIngredientsService.getById(Number(id));
+      console.log('Ingredient detail response:', data);
+      setIngredient(data);
     } catch (err) {
       console.error('Error fetching ingredient:', err);
       setError('Failed to load ingredient details');
