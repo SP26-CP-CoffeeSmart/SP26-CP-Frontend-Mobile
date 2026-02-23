@@ -64,13 +64,20 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
   const menuItems = toArray(menu?.menuItems ?? []);
   const menuGroups = toArray(menu?.menuGroups ?? []);
 
+  console.log('=== DEBUG groupMenuItemsByCategory ===');
+  console.log('Total menuGroups:', menuGroups.length);
+  console.log('Total menuItems:', menuItems.length);
+  console.log('menuGroups:', JSON.stringify(menuGroups, null, 2));
+
   const result: MenuItemGrouped[] = [];
 
   // Duyệt qua menuGroups
-  menuGroups.forEach((group) => {
+  menuGroups.forEach((group, groupIdx) => {
     const groupName = group?.name ?? 'Unknown Group';
     const menuGroupId = group?.menuGroupId ?? 0;
     const menuGroupCategory = toArray(group?.menuGroupCategory ?? []);
+
+    console.log(`\n[Group ${groupIdx}] ${groupName}:`);
 
     // Lấy danh sách beverageCategoryIds của group này
     const categoryIds = new Set<number>();
@@ -80,6 +87,7 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
         categoryIds.add(Number(beverageCategoryId));
       }
     });
+    console.log(`  Mapped categoryIds:`, Array.from(categoryIds));
 
     // Lọc menuItems thuộc group này (có beverageCategoryId nằm trong categoryIds)
     const groupItems: MenuItemGrouped['items'] = [];
@@ -103,6 +111,7 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
         });
       }
     });
+    console.log(`  Matched items:`, groupItems.length);
 
     // Chỉ thêm group nếu có items
     if (groupItems.length > 0) {
@@ -113,6 +122,9 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
       });
     }
   });
+
+  console.log('Final result groups:', result.length);
+  console.log('=====================================\n');
 
   return result;
 };
