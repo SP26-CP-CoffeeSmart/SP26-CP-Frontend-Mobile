@@ -115,19 +115,19 @@ export default function ProfileScreen() {
   };
   const profileImageUrl = getProfileImageUrl(
     profile?.imageUrl ??
-      (profile as any)?.avatarUrl ??
-      (profile as any)?.avatar ??
-      (profile as any)?.photoUrl ??
-      (profile as any)?.profileImage ??
-      (profile as any)?.image
+    (profile as any)?.avatarUrl ??
+    (profile as any)?.avatar ??
+    (profile as any)?.photoUrl ??
+    (profile as any)?.profileImage ??
+    (profile as any)?.image
   );
   const profileShopDisplay = profileLoading ? 'Loading...' : profileShop;
   const profileNameDisplay = profileLoading ? 'Loading...' : profileName;
   const profileRoleDisplay = profileLoading
     ? 'Loading profile...'
     : profileError
-    ? profileError
-    : profileRole;
+      ? profileError
+      : profileRole;
   const profileEmailDisplay = profileLoading ? 'Loading...' : profileEmail;
   const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
   const profileHeaderName = profileShopDisplay;
@@ -180,8 +180,8 @@ export default function ProfileScreen() {
     typeof size.id === 'number'
       ? size.id
       : typeof size.beverageSizeId === 'number'
-      ? size.beverageSizeId
-      : null;
+        ? size.beverageSizeId
+        : null;
 
   const getSizeVolume = (size: BeverageSize) => {
     const raw = size.volume ?? size.capacity ?? size.size ?? size.ml;
@@ -717,6 +717,18 @@ export default function ProfileScreen() {
             <View style={styles.listLeft}>
               <Ionicons name="globe-outline" size={18} color="#8B5E3C" />
               <Text style={styles.listText}>Languages</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.listRow}
+            activeOpacity={0.7}
+            onPress={() => router.push('/staff-management' as any)}
+          >
+            <View style={styles.listLeft}>
+              <Ionicons name="people-outline" size={18} color="#8B5E3C" />
+              <Text style={styles.listText}>Staff Management</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
           </TouchableOpacity>
