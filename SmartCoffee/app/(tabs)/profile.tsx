@@ -693,7 +693,7 @@ export default function ProfileScreen() {
           {purchaseStatuses.map((status) => (
             <View key={status.label} style={styles.statusItem}>
               <View style={styles.statusIconWrap}>
-                <Ionicons name={status.icon} size={22} color="#8B5E3C" />
+                <Ionicons name={status.icon as any} size={22} color="#8B5E3C" />
               </View>
               <Text style={styles.statusLabel}>{status.label}</Text>
             </View>
