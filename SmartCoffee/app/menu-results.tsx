@@ -123,6 +123,22 @@ export default function MenuResultsScreen() {
   const payloadSource = data || cachedPayload;
   const parsedPayload = useMemo(() => safeParseJson(payloadSource), [payloadSource]);
   const menus = useMemo(() => pickMenus(parsedPayload), [parsedPayload]);
+  const baseConfig =
+    parsedPayload?.config ??
+    parsedPayload?.request?.config ??
+    parsedPayload?.requestConfig ??
+    parsedPayload?.menuConfig ??
+    null;
+
+  const payloadForDetail = useMemo(() => {
+    if (parsedPayload && Array.isArray((parsedPayload as any)?.menus)) {
+      return parsedPayload;
+    }
+    return {
+      config: baseConfig,
+      menus,
+    };
+  }, [parsedPayload, baseConfig, menus]);
 
   return (
     <View style={styles.container}>
@@ -157,6 +173,16 @@ export default function MenuResultsScreen() {
             const menuId = String(menu?.menuId ?? menu?.id ?? index);
             const menuKey = `${menuId}-${index}`;
 
+            const menuWithConfig = {
+              ...menu,
+              config:
+                menu?.config ??
+                menu?.request?.config ??
+                menu?.requestConfig ??
+                menu?.menuConfig ??
+                baseConfig,
+            };
+
             return (
               <View key={menuKey} style={styles.card}>
                 <View style={styles.cardHeader}>
@@ -174,7 +200,9 @@ export default function MenuResultsScreen() {
                       router.push({
                         pathname: `/menu-detail/${menuId}`,
                         params: {
-                          item: JSON.stringify(menu),
+                          item: JSON.stringify(menuWithConfig),
+                          payload: JSON.stringify(payloadForDetail),
+                          menuIndex: String(index),
                           title,
                         },
                       });
@@ -248,7 +276,9 @@ export default function MenuResultsScreen() {
                     router.push({
                       pathname: `/menu-detail/${menuId}`,
                       params: {
-                        item: JSON.stringify(menu),
+                        item: JSON.stringify(menuWithConfig),
+                        payload: JSON.stringify(payloadForDetail),
+                        menuIndex: String(index),
                         title,
                       },
                     });
