@@ -23,7 +23,7 @@ const getAuthBaseUrl = () => {
 
   return Platform.select({
     android: normalizeApiBaseUrl('http://10.0.2.2:5080'),
-    ios: normalizeApiBaseUrl('http://192.168.1.8:5080'),
+    ios: normalizeApiBaseUrl('http://192.168.1.3:5080'),
     default: normalizeApiBaseUrl('http://localhost:5080'),
   });
 };
@@ -58,8 +58,13 @@ export const API_ENDPOINTS = {
   },
   ai: {
     createMenuSkeleton: () => `${AUTH_BASE_URL}/AI/create-menu-p1-skeleton`,
+    createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
   },
   menuPerformance: {
     getSummary: (menuId: number) => `${AUTH_BASE_URL}/MenuPerformance/${menuId}/summary`,
-  }
+  },
+  shopStaff: {
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopStaff/by-shop/${shopId}`,
+    create: () => `${AUTH_BASE_URL}/Auth/register-staff`,
+  },
 };

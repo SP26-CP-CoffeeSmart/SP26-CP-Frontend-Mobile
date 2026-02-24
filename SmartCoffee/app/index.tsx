@@ -1,24 +1,14 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { ImageBackground, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/context/auth-context';
 
 const heroImage = require('../assets/startedscreen.jpg');
 
 export default function StartScreen() {
   const router = useRouter();
-  const { hasToken, checkingToken } = useAuth();
 
-  useEffect(() => {
-    if (checkingToken) {
-      return;
-    }
-
-    if (hasToken) {
-      router.replace('/(tabs)/menu');
-    }
-  }, [checkingToken, hasToken, router]);
+  // Navigation handled by _layout.tsx, no need to duplicate here
 
   return (
     <View style={styles.container}>

@@ -1,7 +1,19 @@
-import React, { useMemo } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const safeParseJson = (value?: string) => {
   if (!value) return null;
@@ -29,6 +41,7 @@ interface MenuItemGrouped {
     image: string | null;
     shopBeverage: any;
     shopRecipe: any;
+    sourceMenuItem: any;
   }>;
 }
 
@@ -70,8 +83,50 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
   console.log('menuGroups:', JSON.stringify(menuGroups, null, 2));
 
   const result: MenuItemGrouped[] = [];
+  const matchedItemIds = new Set<number>();
 
-  // Duyệt qua menuGroups
+  const getItemCategoryId = (menuItem: any) => {
+    const shopBeverage = menuItem?.shopBeverage || {};
+    const rawId =
+      shopBeverage?.beverageCategoryId ??
+      shopBeverage?.beverageCategory?.beverageCategoryId ??
+      shopBeverage?.beverageCategory?.id ??
+      menuItem?.beverageCategoryId ??
+      menuItem?.beverageCategory?.beverageCategoryId ??
+      menuItem?.beverageCategory?.id ??
+      0;
+
+    if (typeof rawId === 'number') return rawId;
+    if (typeof rawId === 'string' && rawId.trim()) {
+      const parsed = Number(rawId);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  };
+
+  const buildGroupedItem = (menuItem: any) => {
+    const shopBeverage = menuItem?.shopBeverage || {};
+    const shopRecipe = menuItem?.shopRecipe || {};
+    const recipeName =
+      shopRecipe?.recipeName ||
+      shopBeverage?.name ||
+      menuItem?.name ||
+      'Unknown Item';
+    const { text, prices } = splitDescription(menuItem?.description || '');
+
+    return {
+      menuItemId: menuItem?.menuItemId || 0,
+      recipeName,
+      description: text,
+      priceInfo: prices,
+      image: shopRecipe?.image,
+      shopBeverage,
+      shopRecipe,
+      sourceMenuItem: menuItem,
+    };
+  };
+
+  // Duyet qua menuGroups
   menuGroups.forEach((group, groupIdx) => {
     const groupName = group?.name ?? 'Unknown Group';
     const menuGroupId = group?.menuGroupId ?? 0;
@@ -79,7 +134,7 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
     console.log(`\n[Group ${groupIdx}] ${groupName}:`);
 
-    // Lấy danh sách beverageCategoryIds của group này
+    // Lay danh sach beverageCategoryIds cua group nay
     const categoryIds = new Set<number>();
     menuGroupCategory.forEach((categoryMap) => {
       const beverageCategoryId = categoryMap?.beverageCategroupId || categoryMap?.beverageCategoryId;
@@ -89,31 +144,25 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
     });
     console.log(`  Mapped categoryIds:`, Array.from(categoryIds));
 
-    // Lọc menuItems thuộc group này (có beverageCategoryId nằm trong categoryIds)
+    // Loc menuItems thuoc group nay (co beverageCategoryId nam trong categoryIds)
     const groupItems: MenuItemGrouped['items'] = [];
     menuItems.forEach((menuItem) => {
-      const shopBeverage = menuItem?.shopBeverage || {};
-      const beverageCategoryId = shopBeverage?.beverageCategoryId || 0;
+      const beverageCategoryId = getItemCategoryId(menuItem);
+      const menuItemId = menuItem?.menuItemId || 0;
 
       if (categoryIds.has(Number(beverageCategoryId))) {
-        const shopRecipe = menuItem?.shopRecipe || {};
-        const recipeName = shopRecipe?.recipeName || menuItem?.name || 'Unknown Item';
-        const { text, prices } = splitDescription(menuItem?.description || '');
-
-        groupItems.push({
-          menuItemId: menuItem?.menuItemId || 0,
-          recipeName,
-          description: text,
-          priceInfo: prices,
-          image: shopRecipe?.image,
-          shopBeverage,
-          shopRecipe,
-        });
+        if (menuItemId && matchedItemIds.has(menuItemId)) {
+          return;
+        }
+        groupItems.push(buildGroupedItem(menuItem));
+        if (menuItemId) {
+          matchedItemIds.add(menuItemId);
+        }
       }
     });
     console.log(`  Matched items:`, groupItems.length);
 
-    // Chỉ thêm group nếu có items
+    // Chi them group neu co items
     if (groupItems.length > 0) {
       result.push({
         groupName,
@@ -123,6 +172,7 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
     }
   });
 
+
   console.log('Final result groups:', result.length);
   console.log('=====================================\n');
 
@@ -131,9 +181,88 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
 export default function MenuDetailScreen() {
   const router = useRouter();
-  const { item, title } = useLocalSearchParams<{ item?: string; title?: string }>();
+  const { item, title, payload, menuIndex } = useLocalSearchParams<{
+    item?: string;
+    title?: string;
+    payload?: string;
+    menuIndex?: string;
+  }>();
   const parsedItem = useMemo(() => safeParseJson(item), [item]);
-  const groupedItems = useMemo(() => groupMenuItemsByCategory(parsedItem), [parsedItem]);
+  const parsedPayload = useMemo(() => safeParseJson(payload), [payload]);
+  const resolvedMenuIndex = useMemo(() => {
+    if (typeof menuIndex === 'string' && menuIndex.trim()) {
+      const parsed = Number(menuIndex);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+  }, [menuIndex]);
+  const [currentMenu, setCurrentMenu] = useState<any>(null);
+  const [menuDraft, setMenuDraft] = useState<any>(null);
+  const [menuPayload, setMenuPayload] = useState<any>(null);
+  const [menuConfig, setMenuConfig] = useState<any>(null);
+  const [storedMenuItems, setStoredMenuItems] = useState<any[]>([]);
+  const [newItemCount, setNewItemCount] = useState('');
+  const [regenerating, setRegenerating] = useState(false);
+
+  useEffect(() => {
+    if (!parsedItem && !parsedPayload) {
+      setCurrentMenu(null);
+      setMenuDraft(null);
+      setMenuPayload(null);
+      setMenuConfig(null);
+      setStoredMenuItems([]);
+      return;
+    }
+
+    const payloadMenus = toArray(
+      parsedPayload?.menus ??
+        parsedPayload?.data ??
+        parsedPayload?.items ??
+        []
+    );
+    const payloadConfig =
+      parsedPayload?.config ??
+      parsedPayload?.request?.config ??
+      parsedPayload?.requestConfig ??
+      parsedPayload?.menuConfig ??
+      null;
+
+    if (payloadMenus.length > 0 || payloadConfig) {
+      setMenuPayload({
+        ...(parsedPayload ?? {}),
+        menus: payloadMenus,
+        config: payloadConfig,
+      });
+      setMenuConfig(payloadConfig);
+    }
+
+    const selectedFromPayload = payloadMenus[resolvedMenuIndex];
+    const baseMenu = selectedFromPayload ?? parsedItem;
+    setCurrentMenu(baseMenu);
+    setMenuDraft(baseMenu);
+
+    const initialItems = toArray(
+      baseMenu?.menuItems ??
+        baseMenu?.menu?.menuItems ??
+        baseMenu?.items ??
+        []
+    );
+    setStoredMenuItems(initialItems);
+  }, [parsedItem, parsedPayload, resolvedMenuIndex]);
+
+  const menuForDisplay = useMemo(() => {
+    const baseMenu = currentMenu ?? parsedItem;
+    if (!baseMenu) return baseMenu;
+    return {
+      ...baseMenu,
+      menuItems: storedMenuItems,
+    };
+  }, [currentMenu, parsedItem, storedMenuItems]);
+
+  const groupedItems = useMemo(
+    () => groupMenuItemsByCategory(menuForDisplay),
+    [menuForDisplay]
+  );
 
   const handleItemPress = (menuItem: any) => {
     const shopRecipe = menuItem.shopRecipe || {};
@@ -147,6 +276,238 @@ export default function MenuDetailScreen() {
         ingredients: JSON.stringify(shopRecipeIngredients),
       },
     });
+  };
+
+  const handleRemoveItem = (menuItem: any) => {
+    if (!menuItem) return;
+    const menuItemId = menuItem?.menuItemId || menuItem?.id;
+    if (menuItemId) {
+      setStoredMenuItems((prev) => {
+        const next = prev.filter((item) => item?.menuItemId !== menuItemId);
+        const nextSize = next.length;
+        setMenuPayload((current) => {
+          if (!current) return current;
+          const menus = toArray(current?.menus ?? []);
+          if (menus.length > 0) {
+            const menuAtIndex = menus[resolvedMenuIndex] ?? {};
+            menus[resolvedMenuIndex] = {
+              ...menuAtIndex,
+              menuItems: next,
+              menuSizeValue: nextSize,
+              config: {
+                ...(menuAtIndex?.config ?? {}),
+                menuSizeValue: nextSize,
+              },
+            };
+          }
+          return {
+            ...current,
+            menus,
+            config: {
+              ...(current?.config ?? {}),
+              menuSizeValue: nextSize,
+            },
+          };
+        });
+        setMenuConfig((current) => ({
+          ...(current ?? {}),
+          menuSizeValue: nextSize,
+        }));
+        setMenuDraft((current) => ({
+          ...(current ?? {}),
+          menuSizeValue: nextSize,
+        }));
+        setCurrentMenu((current) => ({
+          ...(current ?? {}),
+          menuSizeValue: nextSize,
+        }));
+        return next;
+      });
+      return;
+    }
+    setStoredMenuItems((prev) => {
+      const next = prev.filter((item) => item !== menuItem);
+      const nextSize = next.length;
+      setMenuPayload((current) => {
+        if (!current) return current;
+        const menus = toArray(current?.menus ?? []);
+        if (menus.length > 0) {
+          const menuAtIndex = menus[resolvedMenuIndex] ?? {};
+          menus[resolvedMenuIndex] = {
+            ...menuAtIndex,
+            menuItems: next,
+            menuSizeValue: nextSize,
+            config: {
+              ...(menuAtIndex?.config ?? {}),
+              menuSizeValue: nextSize,
+            },
+          };
+        }
+        return {
+          ...current,
+          menus,
+          config: {
+            ...(current?.config ?? {}),
+            menuSizeValue: nextSize,
+          },
+        };
+      });
+      setMenuConfig((current) => ({
+        ...(current ?? {}),
+        menuSizeValue: nextSize,
+      }));
+      setMenuDraft((current) => ({
+        ...(current ?? {}),
+        menuSizeValue: nextSize,
+      }));
+      setCurrentMenu((current) => ({
+        ...(current ?? {}),
+        menuSizeValue: nextSize,
+      }));
+      return next;
+    });
+  };
+
+  const handleRegenerate = async () => {
+    if (regenerating) return;
+    if (!parsedItem && !parsedPayload) {
+      Alert.alert('Missing data', 'No menu data available to regenerate.');
+      return;
+    }
+
+    const parsedCount = Number.parseInt(newItemCount.trim() || '0', 10);
+    const safeCount = Number.isFinite(parsedCount) ? Math.max(0, parsedCount) : 0;
+
+    const configFromItem = menuConfig ?? {};
+    const baseMenu = menuDraft ?? currentMenu ?? parsedItem;
+
+    const resolvedTitle =
+      configFromItem?.title ??
+      baseMenu?.title ??
+      baseMenu?.menuName ??
+      baseMenu?.name ??
+      (title ? String(title) : '') ??
+      '';
+
+    const baseCount = storedMenuItems.length;
+    const targetMenuSize = Math.max(0, baseCount + safeCount);
+
+    const resolvedConfig = {
+      ...(menuPayload?.config ?? {}),
+      ...(baseMenu?.config ?? {}),
+      ...configFromItem,
+      title: resolvedTitle || 'Menu Regenerate',
+      menuSizeValue: targetMenuSize,
+      layout: configFromItem?.layout ?? baseMenu?.layout ?? 0,
+      topic: configFromItem?.topic ?? baseMenu?.topic ?? 0,
+      shopStyle: configFromItem?.shopStyle ?? baseMenu?.shopStyle ?? '',
+      pricing: configFromItem?.pricing ?? baseMenu?.pricing ?? 0,
+      groups:
+        configFromItem?.groups ??
+        baseMenu?.groups ??
+        baseMenu?.menuGroups ??
+        [],
+    };
+
+    const currentMenuPayload = {
+      ...(baseMenu ?? {}),
+      menuItems: storedMenuItems,
+      menuSizeValue: targetMenuSize,
+      config: resolvedConfig,
+    };
+
+    const payload = {
+      config: resolvedConfig,
+      menus: currentMenuPayload,
+      newItemCount: safeCount,
+    };
+
+    console.log('[Menu Regenerate] Stored menuItems:', JSON.stringify(storedMenuItems, null, 2));
+    console.log('[Menu Regenerate] Request payload:', payload);
+
+    try {
+      setRegenerating(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const responseText = await response.text();
+      let responsePayload: unknown = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      const responseMenus = (() => {
+        if (!responsePayload) return [];
+        if (Array.isArray(responsePayload)) return responsePayload;
+        if ((responsePayload as any)?.menus) return toArray((responsePayload as any).menus);
+        if ((responsePayload as any)?.data) return toArray((responsePayload as any).data);
+        if ((responsePayload as any)?.items) return toArray((responsePayload as any).items);
+        if ((responsePayload as any)?.menu) return toArray((responsePayload as any).menu);
+        if ((responsePayload as any)?.result) return toArray((responsePayload as any).result);
+        return [responsePayload];
+      })();
+
+      const responseMenu = responseMenus[resolvedMenuIndex] ?? responseMenus[0] ?? null;
+      const responseMenuItems = toArray(responseMenu?.menuItems ?? responseMenu?.menu?.menuItems ?? []);
+
+      if (responseMenu) {
+        setCurrentMenu((prev) => ({
+          ...(prev ?? {}),
+          ...responseMenu,
+        }));
+        setMenuDraft((prev) => ({
+          ...(prev ?? {}),
+          ...responseMenu,
+        }));
+      }
+
+      if (responsePayload && (responsePayload as any)?.menus) {
+        const updatedMenus = toArray((responsePayload as any).menus);
+        setMenuPayload((current) => ({
+          ...(current ?? {}),
+          ...(responsePayload as any),
+          menus: updatedMenus,
+        }));
+      }
+
+      if (responseMenuItems.length > 0) {
+        const previousCount = storedMenuItems.length;
+        setStoredMenuItems(responseMenuItems);
+
+        if (safeCount > 0) {
+          const addedCount = responseMenuItems.length - previousCount;
+          if (addedCount < safeCount) {
+            Alert.alert(
+              'Generate Again',
+              `Expected ${safeCount} new items, but received ${Math.max(addedCount, 0)}.`
+            );
+          }
+        }
+      }
+
+      setNewItemCount('');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to regenerate menu items.';
+      Alert.alert('Regenerate failed', message);
+    } finally {
+      setRegenerating(false);
+    }
   };
 
   return (
@@ -177,7 +538,15 @@ export default function MenuDetailScreen() {
                     <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
 
                     <View style={styles.itemContent}>
-                      <Text style={styles.itemName}>{item.recipeName}</Text>
+                      <View style={styles.itemHeaderRow}>
+                        <Text style={styles.itemName}>{item.recipeName}</Text>
+                        <TouchableOpacity
+                          style={styles.removeButton}
+                          onPress={() => handleRemoveItem(item.sourceMenuItem)}
+                        >
+                          <Text style={styles.removeButtonText}>Remove</Text>
+                        </TouchableOpacity>
+                      </View>
 
                       {item.description && (
                         <Text style={styles.itemDescription} numberOfLines={2}>
@@ -196,6 +565,33 @@ export default function MenuDetailScreen() {
           ))
         )}
       </ScrollView>
+
+      <View style={styles.regenerateBar}>
+        <View style={styles.regenerateRow}>
+          <Text style={styles.regenerateLabel}>Quantity</Text>
+          <TextInput
+            style={styles.quantityInput}
+            placeholder="Enter number"
+            placeholderTextColor="#8E7B6F"
+            keyboardType="number-pad"
+            value={newItemCount}
+            onChangeText={setNewItemCount}
+          />
+        </View>
+        <Text style={styles.regenerateHint}>
+          Keep the selected items, recreate other items to meet the menu requirements.
+        </Text>
+        <TouchableOpacity
+          style={[styles.regenerateButton, regenerating && styles.regenerateButtonDisabled]}
+          onPress={handleRegenerate}
+          disabled={regenerating}
+        >
+          <Text style={styles.regenerateButtonText}>
+            {regenerating ? 'Generating...' : 'Generate Again'}
+          </Text>
+          <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -254,6 +650,12 @@ const styles = StyleSheet.create({
   itemList: {
     gap: 12,
   },
+  itemHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   itemCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
@@ -281,7 +683,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#3C2A21',
-    marginBottom: 6,
+    flex: 1,
+    marginRight: 8,
   },
   itemDescription: {
     fontSize: 11,
@@ -293,5 +696,67 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: '#8B5E3C',
+  },
+  removeButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: '#F1E7DC',
+  },
+  removeButtonText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#3C2A21',
+    textTransform: 'uppercase',
+  },
+  regenerateBar: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 1,
+    borderTopColor: '#E6D9CC',
+    gap: 10,
+  },
+  regenerateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  regenerateLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#3C2A21',
+  },
+  quantityInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D7C7B8',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    color: '#3C2A21',
+    backgroundColor: '#FDFBFA',
+  },
+  regenerateHint: {
+    fontSize: 12,
+    color: '#A57C52',
+  },
+  regenerateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#6B3F1D',
+  },
+  regenerateButtonDisabled: {
+    opacity: 0.6,
+  },
+  regenerateButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
