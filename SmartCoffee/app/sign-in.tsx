@@ -56,7 +56,7 @@ export default function SignInScreen() {
       ]);
       await refreshProfile();
       Toast.show({ type: 'success', text1: 'Login successful' });
-      router.replace('/(tabs)/menu');
+      // Navigation will be handled by root layout based on role
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       Toast.show({ type: 'error', text1: 'Login failed', text2: message });

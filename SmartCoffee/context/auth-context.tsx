@@ -12,6 +12,7 @@ import { getProfile, ProfileResponse } from '@/services/authService';
 type AuthContextValue = {
   profile: ProfileResponse | null;
   coffeeShopId: number | null;
+  role: string | null;
   loading: boolean;
   error: string | null;
   hasToken: boolean;
@@ -48,6 +49,7 @@ const getCoffeeShopId = (profile: ProfileResponse | null) => {
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [coffeeShopId, setCoffeeShopId] = useState<number | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hasToken, setHasToken] = useState(false);
@@ -83,6 +85,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const tokenExists = await checkToken();
     if (!tokenExists) {
       setProfile(null);
+      setRole(null);
       setCoffeeShopId(null);
       setLoading(false);
       return;
@@ -93,6 +96,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const data = await getProfile();
       setProfile(data);
+      setRole(data.role ?? null);
       const shopId = getCoffeeShopId(data);
       setCoffeeShopId(shopId ?? null);
       if (shopId) {
@@ -111,8 +115,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [refreshProfile]);
 
   const value = useMemo(
-    () => ({ profile, coffeeShopId, loading, error, hasToken, checkingToken, refreshProfile }),
-    [profile, coffeeShopId, loading, error, hasToken, checkingToken, refreshProfile]
+    () => ({ profile, coffeeShopId, role, loading, error, hasToken, checkingToken, refreshProfile }),
+    [profile, coffeeShopId, role, loading, error, hasToken, checkingToken, refreshProfile]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

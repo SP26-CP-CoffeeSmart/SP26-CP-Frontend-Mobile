@@ -268,7 +268,8 @@ export default function ProfileScreen() {
     try {
       setLogoutSubmitting(true);
       await logoutAccount();
-      await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+      // Refresh profile to clear auth state and trigger navigation to login
+      await refreshProfile();
       router.replace('/sign-in');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Logout failed.';
