@@ -7,6 +7,7 @@ export interface AuthTokens {
 }
 
 export interface ProfileResponse {
+  role?: string;
   [key: string]: unknown;
 }
 
@@ -175,14 +176,18 @@ export const getProfile = async (): Promise<ProfileResponse> => {
 
 export const logoutAccount = async (): Promise<void> => {
   try {
-    const response = await authorizedFetch(API_ENDPOINTS.auth.logout(), {
+    const accessToken = await AsyncStorage.getItem('accessToken');
+
+    // Send logout request with current token, no retry on failure
+    const response = await fetch(API_ENDPOINTS.auth.logout(), {
       method: 'POST',
       headers: {
         Accept: '*/*',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       },
     });
 
-    // Log the response but don't fail on 401 since user is logging out anyway
+    // Log the response but don't fail on error since user is logging out anyway
     if (!response.ok) {
       console.warn('Logout API returned:', response.status);
     }

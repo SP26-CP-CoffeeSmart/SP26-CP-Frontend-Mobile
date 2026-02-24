@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import {
-    SafeAreaView,
     StyleSheet,
     Text,
     TextInput,
@@ -9,6 +8,7 @@ import {
     ScrollView,
     ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';

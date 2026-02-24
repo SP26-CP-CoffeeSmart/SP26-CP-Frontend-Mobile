@@ -23,7 +23,7 @@ const getAuthBaseUrl = () => {
 
   return Platform.select({
     android: normalizeApiBaseUrl('http://10.0.2.2:5080'),
-    ios: normalizeApiBaseUrl('http://192.168.1.8:5080'),
+    ios: normalizeApiBaseUrl('http://192.168.1.3:5080'),
     default: normalizeApiBaseUrl('http://localhost:5080'),
   });
 };
