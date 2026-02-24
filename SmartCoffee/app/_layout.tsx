@@ -27,7 +27,9 @@ function RootLayoutNav() {
 
     const firstSegment = segments[0];
     const authScreens = ['sign-in', 'sign-up', 'forgot-password', 'otp', 'reset-password', 'index', 'loading'];
+    const nestedScreens = ['change-password', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales'];
     const isOnAuthScreen = authScreens.includes(firstSegment);
+    const isOnNestedScreen = nestedScreens.includes(firstSegment);
 
     // Not logged in → must be on auth screen
     if (!hasToken) {
@@ -37,8 +39,8 @@ function RootLayoutNav() {
     } else {
       // Logged in → route based on role
       if (role === 'Staff') {
-        // Staff must use tabs-staff layout
-        if (!firstSegment?.includes('tabs-staff')) {
+        // Staff must use tabs-staff layout OR be on nested screens
+        if (!firstSegment?.includes('tabs-staff') && !isOnNestedScreen) {
           router.replace('/(tabs-staff)/menu-staff');
         }
       } else {
@@ -57,11 +59,13 @@ function RootLayoutNav() {
         <Stack.Screen name="loading" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
         <Stack.Screen name="sign-up" options={{ headerShown: false }} />
+        <Stack.Screen name="daily-sales" options={{ headerShown: false }} />
         <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
         <Stack.Screen name="otp" options={{ headerShown: false }} />
         <Stack.Screen name="reset-password" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs-staff)" options={{ headerShown: false }} />
+        <Stack.Screen name="change-password" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-detail" options={{ headerShown: false }} />
         <Stack.Screen name="coffee-detail" options={{ headerShown: false }} />
         <Stack.Screen name="inventory" options={{ headerShown: false }} />
