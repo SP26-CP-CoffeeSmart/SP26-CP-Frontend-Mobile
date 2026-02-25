@@ -59,6 +59,8 @@ export const API_ENDPOINTS = {
   ai: {
     createMenuSkeleton: () => `${AUTH_BASE_URL}/AI/create-menu-p1-skeleton`,
     createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
+    createMenuDetails: () => `${AUTH_BASE_URL}/AI/create-menu-p2-details`,
+    createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
   },
   menu: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/by-shop/${shopId}`,
