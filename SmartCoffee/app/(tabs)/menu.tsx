@@ -190,7 +190,7 @@ export default function MenuScreen() {
       setBeveragesError(null);
       try {
         const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
-        console.log('Fetching beverages from:', `${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
@@ -218,7 +218,7 @@ export default function MenuScreen() {
           setBeverages(mapped);
           setBeveragePage(1);
           setBeveragesLoadingMore(false);
-          console.log('Fetched Beverages:', mapped);
+          // console.log('Fetched Beverages:', mapped);
         }
       } catch (error) {
         if (isMounted) {

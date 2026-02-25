@@ -25,8 +25,11 @@ interface Recipe {
   prepTimeRange: string;
   flavorNote: string;
   brewingSteps: string | string[];
-  brewingVariablesData: string | Record<string, any>;
-  presentationData: string;
+  brewingVariablesData?: string | Record<string, any>;
+  brewingVariables?: string | Record<string, any>;
+  presentationData?: string | Record<string, any>;
+  presentation?: string | Record<string, any>;
+  ingredients?: Array<Record<string, any>>;
   isHot: boolean;
   isCold: boolean;
   hasIce: boolean;
@@ -174,6 +177,11 @@ export default function AiResultScreen() {
     }
   }
 
+  const ingredientsList =
+    (recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0
+      ? recipe.shopRecipeIngredients
+      : ((recipe as any)?.ingredients as Array<any> | undefined)) ?? [];
+
   const showToast = (message: string) => {
     setToastMessage(message);
     if (toastTimerRef.current) {
@@ -282,7 +290,6 @@ export default function AiResultScreen() {
       };
 
       console.log('========== SAVE RECIPE REQUEST ==========');
-      console.log('API URL:', `${AUTH_BASE_URL}/ShopRecipe/save-ai-recipe`);
       console.log('Request Body:');
       console.log(JSON.stringify(requestBody, null, 2));
       console.log('========================================');
@@ -531,7 +538,7 @@ export default function AiResultScreen() {
             <ThemedText style={styles.sectionTitle}>Brewing Variables</ThemedText>
           </View>
           <ThemedText style={styles.bodyText}>
-            {formatBrewingVariables(recipe?.brewingVariablesData)}
+            {formatBrewingVariables(recipe?.brewingVariablesData ?? recipe?.brewingVariables)}
           </ThemedText>
 
           <View style={styles.sectionSpacing} />
@@ -540,7 +547,9 @@ export default function AiResultScreen() {
             <MaterialIcons name="style" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Presentation</ThemedText>
           </View>
-          <ThemedText style={styles.bodyText}>{recipe?.presentationData || '-'}</ThemedText>
+          <ThemedText style={styles.bodyText}>
+            {formatBrewingVariables(recipe?.presentationData ?? recipe?.presentation)}
+          </ThemedText>
 
           <View style={styles.sectionSpacing} />
 
@@ -548,18 +557,20 @@ export default function AiResultScreen() {
             <MaterialIcons name="shopping-bag" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Ingredients</ThemedText>
           </View>
-          {recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0 ? (
+          {ingredientsList.length > 0 ? (
             <View style={styles.ingredientsList}>
-              {recipe.shopRecipeIngredients.map((item, index) => (
+              {ingredientsList.map((item, index) => (
                 <View
                   key={`${item.id ?? item.ingredient?.ingredientId ?? 'ingredient'}-${index}`}
                   style={styles.ingredientRow}>
                   <View style={styles.ingredientInfo}>
                     <ThemedText style={styles.ingredientName}>
-                      {item.ingredient?.name || 'Unknown Ingredient'}
+                      {item.ingredient?.name || item.name || 'Unknown Ingredient'}
                     </ThemedText>
                     <ThemedText style={styles.ingredientDetail}>
-                      {item.quantity}{item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage' ? 'ml' : 'g'} •{item.cost?.toLocaleString() || '0'} ₫
+                      {(item.quantity ?? item.amount ?? '')}
+                      {item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage' ? 'ml' : 'g'}
+                      {item.cost ? ` •${item.cost.toLocaleString()} ₫` : ''}
                     </ThemedText>
                   </View>
                 </View>

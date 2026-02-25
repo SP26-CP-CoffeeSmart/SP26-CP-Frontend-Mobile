@@ -33,6 +33,51 @@ interface MenuVersion {
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 48;
 
+interface MenuVersionApi {
+    menuId: number;
+    menuHeaderId: number;
+    versionNumber: string;
+    status: string;
+    created: string;
+    isActive: boolean;
+    image?: string | null;
+    menuGroups?: Array<{
+        menuGroupId: number;
+        name: string;
+        orderIndex: number;
+        menuItems?: Array<{
+            menuItemId: number;
+            menuId: number;
+            description?: string | null;
+            sellingPrice: number;
+            addedDate: string;
+            shopBeverage?: {
+                beverageId: number;
+                name: string;
+                status: string;
+                beverageCategoryId: number;
+                beverageCategoryName: string;
+                imageUrl?: string | null;
+            };
+            shopRecipe?: {
+                recipeId: number;
+                recipeName: string;
+                image?: string | null;
+            };
+        }>;
+    }>;
+}
+
+const fallbackMenuImage =
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+
+const resolveImageUrl = (baseUrl: string, image?: string | null) => {
+    if (!image || image === 'null' || image === 'undefined') return null;
+    if (image.startsWith('http://') || image.startsWith('https://')) return image;
+    if (image.startsWith('/')) return `${baseUrl}${image}`;
+    return `${baseUrl}/images/${image}`;
+};
+
 const MenuVersionPage = () => {
     const router = useRouter();
     const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
@@ -42,54 +87,75 @@ const MenuVersionPage = () => {
     const [currentIndex, setCurrentIndex] = useState(0);
 
     useEffect(() => {
-        if (!id) {
-            setError('Menu ID is missing');
-            return;
-        }
-        // TODO: Fetch menu versions when API is ready
-        // Mock data for now
-        const mockVersions: MenuVersion[] = [
-            {
-                id: '1',
-                name: 'Summer Vacation ver 3',
-                image: { uri: 'https://images.unsplash.com/photo-1554866585-c4db4dc59b0f?w=400' },
-                avgDailyRevenue: '15,000,000 vnd',
-                profitMargin: 32,
-                topSeller: 'Caramel Espresso',
-                vsVersion: {
-                    comparedVersion: 'Ver 2',
-                    revenueChange: 9,
-                    profitChange: 2,
-                },
-            },
-            {
-                id: '2',
-                name: 'Summer Vacation ver 2',
-                image: { uri: 'https://images.unsplash.com/photo-1559056199-641a0ac8b3f7?w=400' },
-                avgDailyRevenue: '13,800,000 vnd',
-                profitMargin: 30,
-                topSeller: 'Iced Latte',
-                vsVersion: {
-                    comparedVersion: 'Ver 1',
-                    revenueChange: 5,
-                    profitChange: 3,
-                },
-            },
-            {
-                id: '3',
-                name: 'Summer Vacation ver 1',
-                image: { uri: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=400' },
-                avgDailyRevenue: '13,100,000 vnd',
-                profitMargin: 27,
-                topSeller: 'Vanilla Cappuccino',
-            },
-        ];
-        setVersions(mockVersions);
-    }, [id]);
+        let isMounted = true;
+
+        const mapApiToMenuVersion = (item: MenuVersionApi): MenuVersion => {
+            const groups = item.menuGroups ?? [];
+            const firstItem = groups.flatMap((g) => g.menuItems ?? [])[0];
+
+            const rawImage =
+                item.image ??
+                firstItem?.shopRecipe?.image ??
+                firstItem?.shopBeverage?.imageUrl ??
+                null;
+            const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage) ?? fallbackMenuImage;
+
+            const topSellerName = firstItem?.shopBeverage?.name ?? 'Top seller';
+
+            return {
+                id: String(item.menuId),
+                name: `${name || 'Menu'} ver ${item.versionNumber}`,
+                image: { uri: imageUrl },
+                avgDailyRevenue: '—',
+                profitMargin: 0,
+                topSeller: topSellerName,
+            };
+        };
+
+        const fetchMenuVersions = async () => {
+            if (!id) {
+                setError('Menu ID is missing');
+                return;
+            }
+
+            setLoading(true);
+            setError(null);
+            try {
+                const response = await authorizedFetch(
+                    `${AUTH_BASE_URL}/Menu/by-header/${id}`
+                );
+                if (!response.ok) {
+                    throw new Error(`Request failed: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const rawList: MenuVersionApi[] = Array.isArray(result) ? result : [];
+                const mapped = rawList.map(mapApiToMenuVersion);
+
+                if (isMounted) {
+                    setVersions(mapped);
+                }
+            } catch (err) {
+                if (isMounted) {
+                    setError('Failed to load menu versions');
+                }
+            } finally {
+                if (isMounted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        fetchMenuVersions();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [id, name]);
 
     const handleScroll = (event: any) => {
         const contentOffsetX = event.nativeEvent.contentOffset.x;
-        const currentIndexValue = Math.round(contentOffsetX / (CARD_WIDTH + 48));
+        const currentIndexValue = Math.round(contentOffsetX / width);
         setCurrentIndex(currentIndexValue);
     };
 
@@ -112,7 +178,7 @@ const MenuVersionPage = () => {
                     <View style={styles.centerContainer}>
                         <Text style={styles.errorText}>{error}</Text>
                     </View>
-                ) : versions.length === 0 ? (
+                ) : loading || versions.length === 0 ? (
                     <View style={styles.centerContainer}>
                         <ActivityIndicator size="large" color={stylesVars.primary} />
                     </View>
