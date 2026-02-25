@@ -25,7 +25,6 @@ import { BeverageCategory, useBeverageCategories } from '@/context/beverage-cate
 interface MenuItem {
   id: string;
   name: string;
-  author: string;
   versions: number;
   image: any;
   isApplied?: boolean;
@@ -37,6 +36,18 @@ interface BeverageItem {
   flavor: string;
   time: string;
   image: any;
+}
+
+interface MenuHeaderApiItem {
+  menuHeaderId?: number;
+  name: string;
+  shopId?: number;
+  status?: string;
+  isApplied?: boolean;
+  image?: string;
+  imageUrl?: string;
+  createDate?: string;
+  menuPreferenceJson?: any;
 }
 
 type BeverageApiItem = Record<string, any>;
@@ -108,24 +119,18 @@ export default function MenuScreen() {
       setMenuError(null);
       try {
         const response = await authorizedFetch(
-          `${AUTH_BASE_URL}/Menu/by-shop/${coffeeShopId}`
+          `${AUTH_BASE_URL}/MenuHeader/by-shop/${coffeeShopId}`
         );
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
         const result = await response.json();
-        const rawList: BeverageApiItem[] = Array.isArray(result)
-          ? result
-          : Array.isArray(result?.data)
-            ? result.data
-            : Array.isArray(result?.items)
-              ? result.items
-              : [];
+        const rawList: MenuHeaderApiItem[] = Array.isArray(result) ? result : [];
 
         if (rawList.length === 0) {
           if (isMounted) {
             setMenuItems([]);
-            setMenuError('No menu found for this shop.');
+            setMenuError('No menu header found for this shop.');
           }
           return;
         }
@@ -133,15 +138,14 @@ export default function MenuScreen() {
         const mapped = rawList.map((item, index) => {
           const imageUrl = resolveImageUrl(
             AUTH_BASE_URL,
-            String(item?.image ?? item?.imageUrl ?? item?.thumbnail ?? '')
+            String(item?.image ?? item?.imageUrl ?? '')
           );
           return {
-            id: String(item?.menuId ?? item?.id ?? index),
-            name: String(item?.name ?? item?.menuName ?? 'Unknown'),
-            author: String(item?.author ?? item?.createdBy ?? item?.ownerName ?? 'Unknown'),
-            versions: Number(item?.versions ?? item?.versionCount ?? item?.itemsCount ?? 0),
+            id: String(item?.menuHeaderId ?? index),
+            name: String(item?.name ?? 'Unknown'),
+            versions: Number(0),
             image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
-            isApplied: Boolean(item?.isApplied ?? item?.applied ?? false),
+            isApplied: Boolean(item?.isApplied ?? false),
           } as MenuItem;
         });
 
@@ -264,13 +268,13 @@ export default function MenuScreen() {
   const headerName =
     String(
       profile?.shopName ??
-        (profile as any)?.coffeeShopName ??
-        (profile as any)?.storeName ??
-        profile?.fullName ??
-        profile?.name ??
-        profile?.userName ??
-        profile?.username ??
-        'User'
+      (profile as any)?.coffeeShopName ??
+      (profile as any)?.storeName ??
+      profile?.fullName ??
+      profile?.name ??
+      profile?.userName ??
+      profile?.username ??
+      'User'
     ).trim() || 'User';
 
   const resetCreateForm = () => {
@@ -371,10 +375,10 @@ export default function MenuScreen() {
       console.log('[Upload Image] response:', uploaded);
       const uploadedUrl = String(
         uploaded?.url ??
-          uploaded?.imageUrl ??
-          uploaded?.data?.url ??
-          uploaded?.data?.imageUrl ??
-          ''
+        uploaded?.imageUrl ??
+        uploaded?.data?.url ??
+        uploaded?.data?.imageUrl ??
+        ''
       ).trim();
       if (!uploadedUrl) {
         throw new Error('Missing upload url');
@@ -458,7 +462,7 @@ export default function MenuScreen() {
         name: String(created?.name ?? trimmedName),
         flavor: String(
           created?.beverageCategory?.name ??
-            (createCategoryId ? selectedCategoryName : trimmedCategory)
+          (createCategoryId ? selectedCategoryName : trimmedCategory)
         ),
         time: String(created?.brewingTimeMinutes ?? created?.time ?? created?.prepTime ?? ''),
         image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
@@ -538,16 +542,18 @@ export default function MenuScreen() {
               menuItems.map((item) => (
                 <View key={item.id} style={styles.featureCard}>
                   <View style={styles.featureHeader}>
-                    <View>
-                      <Text style={styles.featureTitle}>{item.name}</Text>
-                      <View style={styles.featureMetaRow}>
-                        <Ionicons name="person-circle-outline" size={16} color={stylesVars.muted} />
-                        <Text style={styles.featureMetaText}>{item.author}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.versionBadge}>
+                    <Text style={styles.featureTitle}>{item.name}</Text>
+                    <TouchableOpacity
+                      style={styles.versionBadge}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/menu-version/[id]',
+                          params: { id: item.id, name: item.name },
+                        })
+                      }
+                    >
                       <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
-                    </View>
+                    </TouchableOpacity>
                   </View>
                   <View style={styles.featureImageWrapper}>
                     <Image source={item.image} style={styles.featureImage} />

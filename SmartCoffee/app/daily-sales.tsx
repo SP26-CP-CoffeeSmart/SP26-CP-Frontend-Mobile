@@ -328,12 +328,15 @@ export default function DailySalesScreen() {
                     const sizeKey = size.sizeName || size.name;
                     const quantity = sale.sizes[sizeKey || ''] || 0;
 
-                    menuItemList.push({
-                        menuItemId: sale.menuItemId,
-                        saleDate: isoDate,
-                        totalCups: quantity,
-                        beverageSizeId: size.beverageSizeId || size.id,
-                    });
+                    // Only add entries with quantity > 0
+                    if (quantity > 0) {
+                        menuItemList.push({
+                            menuItemId: sale.menuItemId,
+                            saleDate: isoDate,
+                            totalCups: quantity,
+                            beverageSizeId: size.beverageSizeId || size.id,
+                        });
+                    }
                 });
             });
 
