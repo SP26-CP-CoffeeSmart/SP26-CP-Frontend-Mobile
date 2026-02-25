@@ -10,11 +10,14 @@ import {
     RefreshControl,
     Image,
     FlatList,
+    Platform,
+    Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import { useRouter } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
@@ -89,6 +92,7 @@ export default function DailySalesScreen() {
     const [salesData, setSalesData] = useState<Map<number, DailySalesItem>>(new Map());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
+    const [showDatePicker, setShowDatePicker] = useState(false);
     const [editingItems, setEditingItems] = useState<Set<number>>(new Set());
     const [originalSalesData, setOriginalSalesData] = useState<
         Map<number, DailySalesItem | null>
@@ -283,7 +287,20 @@ export default function DailySalesScreen() {
         });
     };
 
-    const handleSaveRecords = () => {
+    const handleChangeDate = () => {
+        setShowDatePicker(true);
+    };
+
+    const handleDatePickerChange = (event: any, date?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+        if (date) {
+            setSelectedDate(date);
+        }
+    };
+
+    const handleSaveRecords = async () => {
         if (salesData.size === 0) {
             Toast.show({
                 type: 'error',
@@ -293,11 +310,71 @@ export default function DailySalesScreen() {
             return;
         }
 
-        Toast.show({
-            type: 'success',
-            text1: 'Sales records saved',
-            text2: 'Records saved successfully',
-        });
+        try {
+            // Build request payload
+            const menuItemList: Array<{
+                menuItemId: number;
+                saleDate: string;
+                totalCups: number;
+                beverageSizeId: number | undefined;
+            }> = [];
+
+            const isoDate = selectedDate.toISOString();
+
+            // For each item in salesData
+            salesData.forEach((sale) => {
+                // For each size, create an entry
+                beverageSizes.forEach((size) => {
+                    const sizeKey = size.sizeName || size.name;
+                    const quantity = sale.sizes[sizeKey || ''] || 0;
+
+                    menuItemList.push({
+                        menuItemId: sale.menuItemId,
+                        saleDate: isoDate,
+                        totalCups: quantity,
+                        beverageSizeId: size.beverageSizeId || size.id,
+                    });
+                });
+            });
+
+            // Call API
+            const response = await authorizedFetch(
+                API_ENDPOINTS.dailySale.batch(),
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Accept: '*/*',
+                    },
+                    body: JSON.stringify({ menuItemList }),
+                }
+            );
+
+            console.log('[Daily Sales] Payload sent:', { menuItemList });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            // Clear data and show success
+            setSalesData(new Map());
+            setEditingItems(new Set());
+            setOriginalSalesData(new Map());
+
+            Toast.show({
+                type: 'success',
+                text1: 'Sales records saved',
+                text2: 'Records saved successfully',
+            });
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Failed to save records';
+            Toast.show({
+                type: 'error',
+                text1: 'Save failed',
+                text2: errorMessage,
+            });
+            console.error('[Daily Sales] Save error:', errorMessage);
+        }
     };
 
     const renderSalesItem = (item: MenuItem) => {
@@ -449,7 +526,8 @@ export default function DailySalesScreen() {
     const filteredItems = getFilteredItems();
 
     return (
-        <SafeAreaView style={styles.container}>
+        <>
+            <SafeAreaView style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}>
@@ -478,14 +556,14 @@ export default function DailySalesScreen() {
                     <View style={styles.dateInfo}>
                         <Text style={styles.dateLabel}>DATE</Text>
                         <Text style={styles.dateValue}>
-                            Today, {selectedDate.toLocaleDateString('en-US', {
+                            {selectedDate.toLocaleDateString('en-US', {
                                 month: 'short',
                                 day: '2-digit',
                                 year: 'numeric',
                             })}
                         </Text>
                     </View>
-                    <TouchableOpacity>
+                    <TouchableOpacity onPress={handleChangeDate}>
                         <Text style={styles.changeButton}>Change</Text>
                     </TouchableOpacity>
                 </View>
@@ -554,25 +632,58 @@ export default function DailySalesScreen() {
             </ScrollView>
 
             {/* Total Revenue Footer */}
-            <View style={styles.footerContainer}>
-                {/* Save Button */}
-                <TouchableOpacity
-                    style={[
-                        styles.saveButton,
-                        editingItems.size > 0 && styles.saveButtonDisabled,
-                    ]}
-                    onPress={() => {
-                        if (editingItems.size > 0) return;
-                        handleSaveRecords();
-                    }}
-                    activeOpacity={editingItems.size > 0 ? 1 : 0.8}
-                    disabled={editingItems.size > 0}
+            {!showDatePicker && (
+                <View style={styles.footerContainer}>
+                    {/* Save Button */}
+                    <TouchableOpacity
+                        style={[
+                            styles.saveButton,
+                            editingItems.size > 0 && styles.saveButtonDisabled,
+                        ]}
+                        onPress={() => {
+                            if (editingItems.size > 0) return;
+                            handleSaveRecords();
+                        }}
+                        activeOpacity={editingItems.size > 0 ? 1 : 0.8}
+                        disabled={editingItems.size > 0}
+                    >
+                        <Text style={styles.saveButtonText}>Save Sales Records</Text>
+                        <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
+                    </TouchableOpacity>
+                </View>
+            )}
+
+            {/* Date Time Picker Modal - Outside SafeAreaView */}
+            </SafeAreaView>
+
+            {showDatePicker && (
+                <Modal
+                    visible={showDatePicker}
+                    transparent={true}
+                    animationType="slide"
+                    onRequestClose={() => setShowDatePicker(false)}
                 >
-                    <Text style={styles.saveButtonText}>Save Sales Records</Text>
-                    <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
-                </TouchableOpacity>
-            </View>
-        </SafeAreaView>
+                    <View style={styles.datePickerContainer}>
+                        <View style={styles.datePickerHeader}>
+                            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                <Text style={styles.datePickerCancelBtn}>Cancel</Text>
+                            </TouchableOpacity>
+                            <Text style={styles.datePickerTitle}>Select Date</Text>
+                            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                <Text style={styles.datePickerConfirmBtn}>Done</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <DateTimePicker
+                            value={selectedDate}
+                            mode="date"
+                            display="spinner"
+                            onChange={handleDatePickerChange}
+                            textColor={COLORS.text}
+                        />
+                    </View>
+                </Modal>
+            )}
+        </>
     );
 }
 
@@ -898,5 +1009,35 @@ const styles = StyleSheet.create({
         color: COLORS.white,
         fontWeight: '600',
         fontSize: 14,
+    },
+    datePickerContainer: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    },
+    datePickerHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    datePickerTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: COLORS.text,
+    },
+    datePickerCancelBtn: {
+        fontSize: 16,
+        color: '#999',
+        fontWeight: '500',
+    },
+    datePickerConfirmBtn: {
+        fontSize: 16,
+        color: COLORS.accent,
+        fontWeight: '600',
     },
 });

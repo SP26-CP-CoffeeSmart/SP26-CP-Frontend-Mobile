@@ -71,4 +71,7 @@ export const API_ENDPOINTS = {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopStaff/by-shop/${shopId}`,
     create: () => `${AUTH_BASE_URL}/Auth/register-staff`,
   },
+  dailySale: {
+    batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
+  },
 };
