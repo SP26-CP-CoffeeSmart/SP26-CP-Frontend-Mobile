@@ -253,6 +253,7 @@ export default function MenuRecommendationsScreen() {
 
     try {
       setSubmitting(true);
+      router.push('/ai-loading');
       console.log('[Menu Create] Request payload:', payload);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuSkeleton(), {
         method: 'POST',
@@ -286,7 +287,7 @@ export default function MenuRecommendationsScreen() {
       }
 
       Toast.show({ type: 'success', text1: 'Menu skeleton created.' });
-      router.push({
+      router.replace({
         pathname: '/menu-results',
         params: {
           data: responsePayload ? JSON.stringify(responsePayload) : '',
@@ -295,6 +296,7 @@ export default function MenuRecommendationsScreen() {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to create menu skeleton.';
+      router.back();
       Toast.show({ type: 'error', text1: 'Create menu failed', text2: message });
     } finally {
       setSubmitting(false);

@@ -16,6 +16,7 @@ interface RecipeVariant {
     name: string;
     tags: string[];
     prepTime: string;
+    method: string;
     difficulty: string;
     caffeine: string;
     flavor: string;
@@ -38,13 +39,17 @@ interface RecipeData {
     containsMilk: boolean;
     proposedSellingPrice: number;
     profitMarginPercent: number;
-    prepTimeRange: string;
-    brewingMethod: string;
-    brewingSteps: string;
-    brewingVariablesData: string;
-    presentationData: string;
+    prepTimeRange?: string | null;
+    brewingMethod?: string | null;
+    brewingSteps?: string | string[] | null;
+    brewingVariables?: Record<string, any> | string | null;
+    brewingVariablesData?: Record<string, any> | string | null;
+    presentation?: Record<string, any> | string | null;
+    presentationData?: Record<string, any> | string | null;
     suggestedOccasions?: string;
     hasIce: boolean;
+    difficultyLevel?: string | null;
+    ingredients?: Ingredient[];
 }
 
 interface Ingredient {
@@ -103,6 +108,8 @@ export default function RecipeDetailScreen() {
                         const parsedIngredients = safeParseJson(ingredientsParam as string);
                         if (Array.isArray(parsedIngredients)) {
                             setIngredients(parsedIngredients);
+                        } else if (Array.isArray(parsed?.ingredients)) {
+                            setIngredients(parsed.ingredients);
                         }
                         setError(null);
                         setLoading(false);
@@ -141,6 +148,11 @@ export default function RecipeDetailScreen() {
     useEffect(() => {
         // Nếu đã có ingredients từ params, không cần fetch
         if (ingredientsParam) {
+            return;
+        }
+
+        if (Array.isArray(recipeData?.ingredients)) {
+            setIngredients(recipeData.ingredients);
             return;
         }
 
@@ -222,6 +234,7 @@ export default function RecipeDetailScreen() {
                 name: '',
                 tags: [],
                 prepTime: '',
+                method: '',
                 difficulty: '',
                 caffeine: '',
                 flavor: '',
@@ -244,7 +257,8 @@ export default function RecipeDetailScreen() {
             name: recipeData.recipeName || '',
             tags: tags.length > 0 ? tags : [],
             prepTime: recipeData.prepTimeRange || '',
-            difficulty: recipeData.brewingMethod || '',
+            method: recipeData.brewingMethod || '',
+            difficulty: recipeData.difficultyLevel || '',
             caffeine: recipeData.caffeineStrength?.toString() || '',
             flavor: recipeData.flavorNote || '',
             milkIce: recipeData.containsMilk ? 'Có Sữa' : 'Không Sữa',
@@ -256,7 +270,7 @@ export default function RecipeDetailScreen() {
         };
     };
 
-    const parseJSON = (jsonString: string) => {
+    const parseJSON = (jsonString: any) => {
         try {
             return typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
         } catch {
@@ -265,19 +279,29 @@ export default function RecipeDetailScreen() {
     };
 
     const getBrewingSteps = () => {
-        if (!recipeData?.brewingSteps) return [];
-        const steps = parseJSON(recipeData.brewingSteps);
-        return Array.isArray(steps) ? steps : [];
+        const rawSteps = recipeData?.brewingSteps;
+        if (!rawSteps) return [];
+        if (Array.isArray(rawSteps)) return rawSteps;
+        const parsed = parseJSON(rawSteps);
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof rawSteps === 'string' && rawSteps.trim()) {
+            return [rawSteps.trim()];
+        }
+        return [];
     };
 
     const getBrewingVariables = () => {
-        if (!recipeData?.brewingVariablesData) return null;
-        return parseJSON(recipeData.brewingVariablesData);
+        const rawVariables = recipeData?.brewingVariables ?? recipeData?.brewingVariablesData;
+        if (!rawVariables) return null;
+        const parsed = parseJSON(rawVariables);
+        return parsed || null;
     };
 
     const getPresentationData = () => {
-        if (!recipeData?.presentationData) return null;
-        return parseJSON(recipeData.presentationData);
+        const rawPresentation = recipeData?.presentation ?? recipeData?.presentationData;
+        if (!rawPresentation) return null;
+        const parsed = parseJSON(rawPresentation);
+        return parsed || null;
     };
 
     const getFallbackImage = () => require('../../assets/1.jpg');
@@ -399,18 +423,23 @@ export default function RecipeDetailScreen() {
                             </View>
 
                             {/* Info Grid */}
-                            <View className="flex-row gap-3 mb-6">
-                                <View className={`flex-1 rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                            <View className="flex-row flex-wrap gap-3 mb-6">
+                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
                                     <Text className="text-2xl mb-2">⏱️</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>PREP TIME</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.prepTime || ''}</Text>
                                 </View>
-                                <View className={`flex-1 rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
                                     <Text className="text-2xl mb-2">📊</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>METHOD</Text>
+                                    <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.method || ''}</Text>
+                                </View>
+                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                    <Text className="text-2xl mb-2">🏋️</Text>
+                                    <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>DIFFICULTY</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.difficulty || ''}</Text>
                                 </View>
-                                <View className={`flex-1 rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
                                     <Text className="text-2xl mb-2">⚡</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>CAFFEINE</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.caffeine || ''}</Text>
@@ -500,7 +529,9 @@ export default function RecipeDetailScreen() {
                                             <View key={index} className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-100 border-gray-200'}`}>
                                                 <Text className="text-3xl mb-1">{getEmojiForIngredient(item.ingredient?.category || '', item.ingredient?.name || '')}</Text>
                                                 <Text className={`text-xs font-bold text-center ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{item.ingredient?.name || 'empty name'}</Text>
-                                                <Text className={`text-xs mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{item.quantity}kg</Text>
+                                                <Text className={`text-xs mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                                    {item.quantity}{item.measurement ? ` ${item.measurement}` : ''}
+                                                </Text>
                                                 <Text className={`text-xs mt-1 font-semibold text-orange-400`}>{item.cost?.toLocaleString()} VNĐ</Text>
                                             </View>
                                         ))}

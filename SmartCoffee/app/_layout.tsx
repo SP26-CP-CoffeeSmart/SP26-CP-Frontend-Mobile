@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import 'react-native-reanimated';
 import "../global.css";
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import Toast from 'react-native-toast-message';
 import { AuthProvider, useAuth } from '@/context/auth-context';
@@ -89,10 +90,12 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <BeverageCategoryProvider>
-        <RootLayoutNav />
-      </BeverageCategoryProvider>
-    </AuthProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AuthProvider>
+        <BeverageCategoryProvider>
+          <RootLayoutNav />
+        </BeverageCategoryProvider>
+      </AuthProvider>
+    </GestureHandlerRootView>
   );
 }
