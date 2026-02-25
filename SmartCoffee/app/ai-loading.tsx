@@ -53,7 +53,13 @@ export default function AiLoadingScreen() {
                   }),
                 },
               ]}>
-              <ThemedText style={styles.title}>AI is creating your results.</ThemedText>
+              <ThemedText
+                style={styles.title}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}>
+                AI is creating your results.
+              </ThemedText>
             </Animated.View>
             <Animated.View
               style={[
@@ -65,7 +71,13 @@ export default function AiLoadingScreen() {
                   }),
                 },
               ]}>
-              <ThemedText style={styles.title}>Please be patient while we finish the menu.</ThemedText>
+              <ThemedText
+                style={styles.title}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.85}>
+                Please be patient while we finish the menu.
+              </ThemedText>
             </Animated.View>
           </View>
         </View>
