@@ -14,6 +14,13 @@ import { logoutAccount } from '@/services/authService';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 
+const purchaseStatuses = [
+    { label: 'Pending confirmation', icon: 'wallet-outline' },
+    { label: 'Awaiting pickup', icon: 'cube-outline' },
+    { label: 'Awaiting delivery', icon: 'car-outline' },
+    { label: 'Delivered', icon: 'checkmark-done-outline' },
+];
+
 export default function StaffProfileScreen() {
     const router = useRouter();
     const {
@@ -53,6 +60,7 @@ export default function StaffProfileScreen() {
         profile?.phoneNumber ?? profile?.phone ?? profile?.mobile,
         '-'
     );
+    const profileImageUrl = profile?.profileImageUrl ?? profile?.avatar ?? profile?.image ?? null;
 
     const showToast = (message: string) => {
         setToastMessage(message);
@@ -115,11 +123,15 @@ export default function StaffProfileScreen() {
                 <View style={styles.header}>
                     <View style={styles.avatarWrap}>
                         <View style={styles.avatar}>
-                            <Ionicons name="person-outline" size={36} color="#5C4634" />
+                            {profileImageUrl ? (
+                                <Image source={{ uri: profileImageUrl as string }} style={styles.avatarImage} />
+                            ) : (
+                                <Ionicons name="person-outline" size={36} color="#5C4634" />
+                            )}
                         </View>
                     </View>
                     <Text style={styles.name}>{profileName}</Text>
-                    <Text style={styles.role}>{profileRole}</Text>
+                    {profileRole ? <Text style={styles.role}>{profileRole}</Text> : null}
                 </View>
 
                 {/* Account Information Card */}
@@ -138,10 +150,44 @@ export default function StaffProfileScreen() {
                     </View>
                 </View>
 
-                {/* Settings Card */}
+                {/* Purchase Order Section */}
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionHeading}>Purchase Order</Text>
+                    <TouchableOpacity activeOpacity={0.7}>
+                        <Text style={styles.sectionAction}>View purchase history</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.statusGrid}>
+                    {purchaseStatuses.map((status) => (
+                        <View key={status.label} style={styles.statusItem}>
+                            <View style={styles.statusIconWrap}>
+                                <Ionicons name={status.icon as any} size={22} color="#8B5E3C" />
+                            </View>
+                            <Text style={styles.statusLabel}>{status.label}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                {/* Settings Section */}
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionHeading}>Settings</Text>
+                </View>
+
                 <View style={styles.listCard}>
+                    <TouchableOpacity style={styles.listRow} activeOpacity={0.7}>
+                        <View style={styles.listLeft}>
+                            <Ionicons name="notifications" size={18} color="#8B5E3C" />
+                            <Text style={styles.listText}>Notifications</Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
+                    </TouchableOpacity>
+
+
+                    <View style={styles.divider} />
                     <TouchableOpacity
-                        style={styles.listItem}
+                        style={styles.listRow}
+                        activeOpacity={0.7}
                         onPress={() => router.push('/change-password')}
                     >
                         <View style={styles.listLeft}>
@@ -203,24 +249,34 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFF8F0',
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    avatarImage: {
+        width: 86,
+        height: 86,
+        borderRadius: 43,
     },
     name: {
         fontSize: 22,
         fontWeight: '700',
-        color: '#3C2A21',
-        marginBottom: 6,
+        color: '#3C2B20',
     },
     role: {
         fontSize: 14,
-        fontWeight: '600',
-        color: '#8B7355',
+        color: '#C48C2D',
+        marginTop: 2,
     },
     card: {
-        backgroundColor: '#FFFAF5',
-        borderRadius: 16,
-        padding: 16,
+        backgroundColor: '#FFF',
+        borderRadius: 14,
+        padding: 14,
         borderWidth: 1,
-        borderColor: '#F1E2D3',
+        borderColor: '#E8E1D9',
+        shadowColor: '#3C2B20',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
         marginBottom: 14,
     },
     sectionTitle: {
@@ -252,19 +308,72 @@ const styles = StyleSheet.create({
         backgroundColor: '#EFE7DD',
         marginVertical: 8,
     },
-    listCard: {
-        backgroundColor: '#FFFAF5',
-        borderRadius: 16,
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+        marginTop: 6,
+    },
+    sectionHeading: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#3C2A21',
+    },
+    sectionAction: {
+        fontSize: 12,
+        color: '#C89A5B',
+        fontWeight: '600',
+    },
+    statusGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginBottom: 20,
+    },
+    statusItem: {
+        flex: 1,
+        minWidth: '45%',
+        backgroundColor: '#FFF',
+        borderRadius: 12,
+        padding: 12,
+        alignItems: 'center',
         borderWidth: 1,
-        borderColor: '#F1E2D3',
+        borderColor: '#E8E1D9',
+    },
+    statusIconWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#FFF4E6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 8,
+    },
+    statusLabel: {
+        fontSize: 12,
+        color: '#6B4D35',
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    listCard: {
+        backgroundColor: '#FFF',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#E8E1D9',
         overflow: 'hidden',
         marginBottom: 16,
+        shadowColor: '#3C2B20',
+        shadowOpacity: 0.08,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
     },
-    listItem: {
+    listRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
+        paddingHorizontal: 14,
         paddingVertical: 14,
     },
     listLeft: {
@@ -280,8 +389,9 @@ const styles = StyleSheet.create({
     logoutButton: {
         backgroundColor: '#C51B1B',
         borderRadius: 20,
-        paddingVertical: 10,
+        paddingVertical: 12,
         alignItems: 'center',
+        marginTop: 8,
     },
     logoutText: {
         color: '#FFF',
