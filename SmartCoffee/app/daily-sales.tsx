@@ -528,132 +528,132 @@ export default function DailySalesScreen() {
     return (
         <>
             <SafeAreaView style={styles.container}>
-            {/* Header */}
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()}>
-                    <Ionicons name="chevron-back" size={28} color={COLORS.text} />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Daily Sales Input</Text>
-                <View style={{ width: 28 }} />
-            </View>
-
-            {/* Main Content ScrollView */}
-            <ScrollView
-                style={styles.mainScroll}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        colors={[COLORS.accent]}
-                        tintColor={COLORS.accent}
-                    />
-                }
-            >
-                {/* Date Picker */}
-                <View style={styles.dateSection}>
-                    <Ionicons name="calendar" size={20} color={COLORS.accent} />
-                    <View style={styles.dateInfo}>
-                        <Text style={styles.dateLabel}>DATE</Text>
-                        <Text style={styles.dateValue}>
-                            {selectedDate.toLocaleDateString('en-US', {
-                                month: 'short',
-                                day: '2-digit',
-                                year: 'numeric',
-                            })}
-                        </Text>
-                    </View>
-                    <TouchableOpacity onPress={handleChangeDate}>
-                        <Text style={styles.changeButton}>Change</Text>
+                {/* Header */}
+                <View style={styles.header}>
+                    <TouchableOpacity onPress={() => router.back()}>
+                        <Ionicons name="chevron-back" size={28} color={COLORS.text} />
                     </TouchableOpacity>
+                    <Text style={styles.headerTitle}>Daily Sales Input</Text>
+                    <View style={{ width: 28 }} />
                 </View>
 
-                {/* Category Tabs */}
-                <View style={styles.categoryTabsWrapper}>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.categoryTabsContent}
-                    >
-                        <TouchableOpacity
-                            style={[
-                                styles.categoryTab,
-                                selectedGroupId === null && styles.categoryTabActive,
-                            ]}
-                            onPress={() => setSelectedGroupId(null)}
-                        >
-                            <Text
-                                numberOfLines={1}
-                                style={[
-                                    styles.categoryTabText,
-                                    selectedGroupId === null && styles.categoryTabTextActive,
-                                ]}
-                            >
-                                All Items
+                {/* Main Content ScrollView */}
+                <ScrollView
+                    style={styles.mainScroll}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            colors={[COLORS.accent]}
+                            tintColor={COLORS.accent}
+                        />
+                    }
+                >
+                    {/* Date Picker */}
+                    <View style={styles.dateSection}>
+                        <Ionicons name="calendar" size={20} color={COLORS.accent} />
+                        <View style={styles.dateInfo}>
+                            <Text style={styles.dateLabel}>DATE</Text>
+                            <Text style={styles.dateValue}>
+                                {selectedDate.toLocaleDateString('en-US', {
+                                    month: 'short',
+                                    day: '2-digit',
+                                    year: 'numeric',
+                                })}
                             </Text>
+                        </View>
+                        <TouchableOpacity onPress={handleChangeDate}>
+                            <Text style={styles.changeButton}>Change</Text>
                         </TouchableOpacity>
-                        {menuData?.menuGroups.map((group) => (
+                    </View>
+
+                    {/* Category Tabs */}
+                    <View style={styles.categoryTabsWrapper}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.categoryTabsContent}
+                        >
                             <TouchableOpacity
-                                key={group.menuGroupId}
                                 style={[
                                     styles.categoryTab,
-                                    selectedGroupId === group.menuGroupId && styles.categoryTabActive,
+                                    selectedGroupId === null && styles.categoryTabActive,
                                 ]}
-                                onPress={() => setSelectedGroupId(group.menuGroupId)}
+                                onPress={() => setSelectedGroupId(null)}
                             >
                                 <Text
                                     numberOfLines={1}
                                     style={[
                                         styles.categoryTabText,
-                                        selectedGroupId === group.menuGroupId && styles.categoryTabTextActive,
+                                        selectedGroupId === null && styles.categoryTabTextActive,
                                     ]}
                                 >
-                                    {group.name}
+                                    All Items
                                 </Text>
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                </View>
-
-                {/* Items List */}
-                {filteredItems.length === 0 ? (
-                    <View style={styles.emptyContent}>
-                        <Ionicons name="list" size={48} color={COLORS.textSecondary} />
-                        <Text style={styles.emptyTitle}>No items available</Text>
-                        <Text style={styles.emptyText}>
-                            No items found in this category
-                        </Text>
+                            {menuData?.menuGroups.map((group) => (
+                                <TouchableOpacity
+                                    key={group.menuGroupId}
+                                    style={[
+                                        styles.categoryTab,
+                                        selectedGroupId === group.menuGroupId && styles.categoryTabActive,
+                                    ]}
+                                    onPress={() => setSelectedGroupId(group.menuGroupId)}
+                                >
+                                    <Text
+                                        numberOfLines={1}
+                                        style={[
+                                            styles.categoryTabText,
+                                            selectedGroupId === group.menuGroupId && styles.categoryTabTextActive,
+                                        ]}
+                                    >
+                                        {group.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
                     </View>
-                ) : (
-                    <View style={styles.itemsContent}>
-                        {filteredItems.map((item) => renderSalesItem(item))}
+
+                    {/* Items List */}
+                    {filteredItems.length === 0 ? (
+                        <View style={styles.emptyContent}>
+                            <Ionicons name="list" size={48} color={COLORS.textSecondary} />
+                            <Text style={styles.emptyTitle}>No items available</Text>
+                            <Text style={styles.emptyText}>
+                                No items found in this category
+                            </Text>
+                        </View>
+                    ) : (
+                        <View style={styles.itemsContent}>
+                            {filteredItems.map((item) => renderSalesItem(item))}
+                        </View>
+                    )}
+                </ScrollView>
+
+                {/* Total Revenue Footer */}
+                {!showDatePicker && (
+                    <View style={styles.footerContainer}>
+                        {/* Save Button */}
+                        <TouchableOpacity
+                            style={[
+                                styles.saveButton,
+                                editingItems.size > 0 && styles.saveButtonDisabled,
+                            ]}
+                            onPress={() => {
+                                if (editingItems.size > 0) return;
+                                handleSaveRecords();
+                            }}
+                            activeOpacity={editingItems.size > 0 ? 1 : 0.8}
+                            disabled={editingItems.size > 0}
+                        >
+                            <Text style={styles.saveButtonText}>Save Sales Records</Text>
+                            <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
+                        </TouchableOpacity>
                     </View>
                 )}
-            </ScrollView>
 
-            {/* Total Revenue Footer */}
-            {!showDatePicker && (
-                <View style={styles.footerContainer}>
-                    {/* Save Button */}
-                    <TouchableOpacity
-                        style={[
-                            styles.saveButton,
-                            editingItems.size > 0 && styles.saveButtonDisabled,
-                        ]}
-                        onPress={() => {
-                            if (editingItems.size > 0) return;
-                            handleSaveRecords();
-                        }}
-                        activeOpacity={editingItems.size > 0 ? 1 : 0.8}
-                        disabled={editingItems.size > 0}
-                    >
-                        <Text style={styles.saveButtonText}>Save Sales Records</Text>
-                        <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
-                    </TouchableOpacity>
-                </View>
-            )}
-
-            {/* Date Time Picker Modal - Outside SafeAreaView */}
+                {/* Date Time Picker Modal - Outside SafeAreaView */}
             </SafeAreaView>
 
             {showDatePicker && (
