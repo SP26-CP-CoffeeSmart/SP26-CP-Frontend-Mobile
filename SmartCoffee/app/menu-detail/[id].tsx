@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Toast from 'react-native-toast-message';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -206,6 +207,7 @@ export default function MenuDetailScreen() {
   const [menuConfig, setMenuConfig] = useState<any>(null);
   const [storedMenuItems, setStoredMenuItems] = useState<any[]>([]);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsReady, setDetailsReady] = useState(false);
   const [newItemCount, setNewItemCount] = useState('');
   const [regenerating, setRegenerating] = useState(false);
   const [renderingMenu, setRenderingMenu] = useState(false);
@@ -228,6 +230,7 @@ export default function MenuDetailScreen() {
       setMenuPayload(null);
       setMenuConfig(null);
       setStoredMenuItems([]);
+      setDetailsReady(false);
       return;
     }
 
@@ -257,6 +260,7 @@ export default function MenuDetailScreen() {
     const baseMenu = selectedFromPayload ?? parsedItem;
     setCurrentMenu(baseMenu);
     setMenuDraft(baseMenu);
+    setDetailsReady(false);
 
     const initialItems = toArray(
       baseMenu?.menuItems ??
@@ -331,6 +335,7 @@ export default function MenuDetailScreen() {
 
     try {
       setDetailsLoading(true);
+      setDetailsReady(false);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuDetails(), {
         method: 'POST',
         headers: {
@@ -414,6 +419,13 @@ export default function MenuDetailScreen() {
       if (responseMenuItems.length > 0) {
         setStoredMenuItems(responseMenuItems);
       }
+
+      Toast.show({
+        type: 'success',
+        text1: 'Recipe details generated',
+        text2: 'You can now save and render the menu.',
+      });
+      setDetailsReady(true);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to generate menu details.';
@@ -430,6 +442,7 @@ export default function MenuDetailScreen() {
       setStoredMenuItems((prev) => {
         const next = prev.filter((item) => item?.menuItemId !== menuItemId);
         const nextSize = next.length;
+        setDetailsReady(false);
         setMenuPayload((current) => {
           if (!current) return current;
           const menus = toArray(current?.menus ?? []);
@@ -576,6 +589,7 @@ export default function MenuDetailScreen() {
 
     try {
       setRegenerating(true);
+      setDetailsReady(false);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
         method: 'POST',
         headers: {
@@ -757,6 +771,39 @@ export default function MenuDetailScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
+
+        {!detailsLoading && !detailsReady && !renderedMenuUrl ? (
+          <View style={styles.actionCard}>
+            <View style={styles.regenerateRow}>
+              <Text style={styles.regenerateLabel}>Quantity</Text>
+              <TextInput
+                style={styles.quantityInput}
+                placeholder="Enter number"
+                placeholderTextColor="#8E7B6F"
+                keyboardType="number-pad"
+                value={newItemCount}
+                onChangeText={setNewItemCount}
+              />
+            </View>
+            <Text style={styles.regenerateHint}>
+              Keep the selected items, recreate other items to meet the menu requirements.
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.regenerateButton,
+                (regenerating || !canRegenerate) && styles.regenerateButtonDisabled,
+              ]}
+              onPress={handleRegenerate}
+              disabled={regenerating || !canRegenerate}
+            >
+              <Text style={styles.regenerateButtonText}>
+                {regenerating ? 'Generating...' : 'Generate Again'}
+              </Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {groupedItems.length === 0 ? (
           <Text style={styles.emptyText}>No menu items found in this menu.</Text>
         ) : (
@@ -802,57 +849,35 @@ export default function MenuDetailScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.regenerateBar}>
+      <View style={styles.bottomBar}>
+        {!renderedMenuUrl ? (
+          <TouchableOpacity
+            style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
+            onPress={detailsReady ? handleRenderMenu : handleGenerateDetails}
+            disabled={detailsLoading || (detailsReady && renderingMenu)}
+          >
+            <Text style={styles.detailButtonText}>
+              {detailsReady
+                ? renderingMenu
+                  ? 'Rendering...'
+                  : 'Save and Render Menu'
+                : detailsLoading
+                  ? 'Generating Details...'
+                  : 'Generate Recipe Details'}
+            </Text>
+            <Ionicons
+              name={detailsReady ? 'image' : 'sparkles'}
+              size={16}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
-          style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
-          onPress={handleGenerateDetails}
-          disabled={detailsLoading}
+          style={styles.goBackButton}
+          onPress={() => router.replace('/(tabs)/menu')}
         >
-          <Text style={styles.detailButtonText}>
-            {detailsLoading ? 'Generating Details...' : 'Generate Recipe Details'}
-          </Text>
-          <Ionicons name="sparkles" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-        <View style={styles.regenerateRow}>
-          <Text style={styles.regenerateLabel}>Quantity</Text>
-          <TextInput
-            style={styles.quantityInput}
-            placeholder="Enter number"
-            placeholderTextColor="#8E7B6F"
-            keyboardType="number-pad"
-            value={newItemCount}
-            onChangeText={setNewItemCount}
-          />
-        </View>
-        <Text style={styles.regenerateHint}>
-          Keep the selected items, recreate other items to meet the menu requirements.
-        </Text>
-        <TouchableOpacity
-          style={[
-            styles.regenerateButton,
-            (regenerating || !canRegenerate) && styles.regenerateButtonDisabled,
-          ]}
-          onPress={handleRegenerate}
-          disabled={regenerating || !canRegenerate}
-        >
-          <Text style={styles.regenerateButtonText}>
-            {regenerating ? 'Generating...' : 'Generate Again'}
-          </Text>
-          <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.renderButton,
-            (renderingMenu || !storedMenuItems.length) && styles.regenerateButtonDisabled,
-          ]}
-          onPress={handleRenderMenu}
-          disabled={renderingMenu || !storedMenuItems.length}
-        >
-          <Text style={styles.renderButtonText}>
-            {renderingMenu ? 'Rendering...' : 'Render Menu'}
-          </Text>
-          <Ionicons name="image" size={16} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+          <Text style={styles.goBackButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
 
@@ -1035,7 +1060,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  regenerateBar: {
+  actionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E6D9CC',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    gap: 10,
+    marginBottom: 18,
+  },
+  bottomBar: {
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 20,
@@ -1085,19 +1124,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  renderButton: {
+  goBackButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
+    gap: 6,
+    paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#2F5D50',
+    backgroundColor: '#F1E7DC',
   },
-  renderButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+  goBackButtonText: {
+    fontSize: 13,
     fontWeight: '700',
+    color: '#3C2A21',
   },
   renderedSection: {
     marginBottom: 20,
