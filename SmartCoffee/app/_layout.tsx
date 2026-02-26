@@ -60,6 +60,7 @@ function RootLayoutNav() {
         <Stack.Screen name="loading" options={{ headerShown: false }} />
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
         <Stack.Screen name="sign-up" options={{ headerShown: false }} />
+        <Stack.Screen name="menu-version-detail/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="menu-version/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="daily-sales" options={{ headerShown: false }} />
         <Stack.Screen name="forgot-password" options={{ headerShown: false }} />

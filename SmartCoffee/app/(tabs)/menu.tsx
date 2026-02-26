@@ -28,6 +28,7 @@ interface MenuItem {
   versions: number;
   image: any;
   isApplied?: boolean;
+  createDate?: string;
 }
 
 interface BeverageItem {
@@ -53,6 +54,7 @@ interface MenuHeaderApiItem {
 type BeverageApiItem = Record<string, any>;
 
 const { width } = Dimensions.get('window');
+const MENU_CARD_WIDTH = width - 48;
 const BEVERAGE_PAGE_SIZE = 4;
 
 const fallbackMenuImage =
@@ -127,7 +129,17 @@ export default function MenuScreen() {
         const result = await response.json();
         const rawList: MenuHeaderApiItem[] = Array.isArray(result) ? result : [];
 
-        if (rawList.length === 0) {
+        const parseCreateDate = (value?: string) => {
+          if (!value) return 0;
+          const parsed = Date.parse(value);
+          return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const sortedList = [...rawList].sort(
+          (a, b) => parseCreateDate(b.createDate) - parseCreateDate(a.createDate)
+        );
+
+        if (sortedList.length === 0) {
           if (isMounted) {
             setMenuItems([]);
             setMenuError('No menu header found for this shop.');
@@ -135,7 +147,7 @@ export default function MenuScreen() {
           return;
         }
 
-        const mapped = rawList.map((item, index) => {
+        const mapped = sortedList.map((item, index) => {
           const imageUrl = resolveImageUrl(
             AUTH_BASE_URL,
             String(item?.image ?? item?.imageUrl ?? '')
@@ -146,6 +158,7 @@ export default function MenuScreen() {
             versions: Number(0),
             image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
             isApplied: Boolean(item?.isApplied ?? false),
+            createDate: item?.createDate,
           } as MenuItem;
         });
 
@@ -262,6 +275,23 @@ export default function MenuScreen() {
     const reachedEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 40;
     if (reachedEnd) {
       handleLoadMoreBeverages();
+    }
+  };
+
+  const formatMenuCreateDate = (value?: string) => {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    try {
+      return date.toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return date.toISOString();
     }
   };
 
@@ -539,43 +569,70 @@ export default function MenuScreen() {
             ) : menuItems.length === 0 ? (
               <Text style={styles.menuStateText}>No menu found</Text>
             ) : (
-              menuItems.map((item) => (
-                <View key={item.id} style={styles.featureCard}>
-                  <View style={styles.featureHeader}>
-                    <Text style={styles.featureTitle}>{item.name}</Text>
-                    <TouchableOpacity
-                      style={styles.versionBadge}
-                      onPress={() =>
-                        router.push({
-                          pathname: '/menu-version/[id]',
-                          params: { id: item.id, name: item.name },
-                        })
-                      }
-                    >
-                      <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.featureImageWrapper}>
-                    <Image source={item.image} style={styles.featureImage} />
-                  </View>
-                  <View style={styles.featureActions}>
-                    {item.isApplied && (
-                      <View style={styles.appliedBadge}>
-                        <Ionicons name="checkmark-circle" size={14} color={stylesVars.primary} />
-                        <Text style={styles.appliedText}>Applied</Text>
+              <FlatList
+                horizontal
+                pagingEnabled
+                data={menuItems}
+                keyExtractor={(item) => item.id}
+                showsHorizontalScrollIndicator={false}
+                decelerationRate="fast"
+                snapToAlignment="center"
+                contentContainerStyle={styles.menuCarouselContent}
+                renderItem={({ item }) => (
+                  <View style={styles.menuCardWrapper}>
+                    <View style={styles.featureCard}>
+                      <View style={styles.featureHeader}>
+                        <View style={styles.featureHeaderLeft}>
+                          <Text style={styles.featureTitle}>{item.name}</Text>
+                          {!!item.createDate && (
+                            <Text style={styles.featureSubtitle}>
+                              Created: {formatMenuCreateDate(item.createDate)}
+                            </Text>
+                          )}
+                        </View>
+                        <TouchableOpacity
+                          style={styles.versionBadge}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/menu-version/[id]',
+                              params: { id: item.id, name: item.name },
+                            })
+                          }
+                        >
+                          <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
+                        </TouchableOpacity>
                       </View>
-                    )}
-                    <TouchableOpacity style={styles.featureActionButton}>
-                      <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
-                      <Text style={styles.featureActionText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.featureActionButton}>
-                      <Ionicons name="bookmark-outline" size={16} color={stylesVars.espresso} />
-                      <Text style={styles.featureActionText}>Rating</Text>
-                    </TouchableOpacity>
+                      <View style={styles.featureImageWrapper}>
+                        <Image source={item.image} style={styles.featureImage} />
+                      </View>
+                      <View style={styles.featureActions}>
+                        {item.isApplied && (
+                          <View style={styles.appliedBadge}>
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={14}
+                              color={stylesVars.primary}
+                            />
+                            <Text style={styles.appliedText}>Applied</Text>
+                          </View>
+                        )}
+                        <TouchableOpacity style={styles.featureActionButton}>
+                          <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
+                          <Text style={styles.featureActionText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.featureActionButton}>
+                          <Ionicons
+                            name="bookmark-outline"
+                            size={16}
+                            color={stylesVars.espresso}
+                          />
+                          <Text style={styles.featureActionText}>Rating</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
                   </View>
-                </View>
-              ))
+                )}
+              />
             )}
           </View>
         </View>
@@ -995,6 +1052,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   featureCard: {
+    width: MENU_CARD_WIDTH,
     padding: 20,
     borderRadius: 28,
     borderWidth: 1,
@@ -1006,16 +1064,37 @@ const styles = StyleSheet.create({
     shadowRadius: 15,
     elevation: 3,
   },
+  menuCarouselContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  menuCardWrapper: {
+    width: width - 24 * 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   featureHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 14,
   },
+  featureHeaderLeft: {
+    flex: 1,
+  },
   featureTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: stylesVars.espresso,
+    flex: 1,
+    flexShrink: 1,
+    marginRight: 12,
+  },
+  featureSubtitle: {
+    marginTop: 4,
+    fontSize: 11,
+    color: stylesVars.muted,
   },
   featureMetaRow: {
     flexDirection: 'row',
