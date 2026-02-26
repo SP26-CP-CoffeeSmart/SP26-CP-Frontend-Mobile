@@ -203,8 +203,19 @@ const MenuVersionPage = () => {
                                             {/* Image Section */}
                                             <View style={styles.imageWrapper}>
                                                 <Image source={item.image} style={styles.image} />
-                                                <TouchableOpacity style={styles.editButton}>
-                                                    <Text style={styles.editButtonText}>Edit</Text>
+                                                <TouchableOpacity
+                                                    style={styles.editButton}
+                                                    onPress={() =>
+                                                        router.push({
+                                                            pathname: '/menu-version-detail/[id]' as any,
+                                                            params: {
+                                                                id: item.id,
+                                                                title: item.name,
+                                                            },
+                                                        })
+                                                    }
+                                                >
+                                                    <Text style={styles.editButtonText}>Detail</Text>
                                                 </TouchableOpacity>
                                             </View>
 
