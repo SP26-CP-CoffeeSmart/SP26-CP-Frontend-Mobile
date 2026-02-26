@@ -19,6 +19,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { Platform } from 'react-native';
+import { useAuth } from '@/context/auth-context';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
 const COFFEE_TYPES = ['Robusta', 'Arabica', 'Blend', 'Cherry', 'Culi'];
@@ -81,7 +82,7 @@ export default function AiCreateScreen() {
     Body: 3,
     Acidity: 2,
   });
-  const coffeeShopId = 1;
+  const { coffeeShopId } = useAuth();
   const [beverages, setBeverages] = useState<Array<{ id: string; name: string; raw: Record<string, any> }>>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
   const [beveragesError, setBeveragesError] = useState<string | null>(null);
@@ -231,8 +232,8 @@ export default function AiCreateScreen() {
         body: JSON.stringify(payload),
       });
       const responseText = await response.text();
-      console.log('AI create response status:', response.status);
-      console.log('AI create response body:', responseText);
+      // console.log('AI create response status:', response.status);
+      // console.log('AI create response body:', responseText);
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}: ${responseText}`);
