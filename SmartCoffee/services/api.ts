@@ -23,7 +23,7 @@ const getAuthBaseUrl = () => {
 
   return Platform.select({
     android: normalizeApiBaseUrl('http://10.0.2.2:5080'),
-    ios: normalizeApiBaseUrl('http://192.168.1.8:5080'),
+    ios: normalizeApiBaseUrl('http://192.168.2.2:5080'),
     default: normalizeApiBaseUrl('http://localhost:5080'),
   });
 };
@@ -65,6 +65,7 @@ export const API_ENDPOINTS = {
   menu: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/by-shop/${shopId}`,
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
+    getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
   },
   menuPerformance: {
     getSummary: (menuId: number) => `${AUTH_BASE_URL}/MenuPerformance/${menuId}/summary`,
