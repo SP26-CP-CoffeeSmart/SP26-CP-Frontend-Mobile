@@ -265,7 +265,10 @@ const MenuVersionPage = () => {
                                                 {/* Insights Button */}
                                                 <TouchableOpacity
                                                     style={styles.insightsButton}
-                                                    onPress={() => router.push('/menu-insights')}
+                                                    onPress={() => router.push({
+                                                        pathname: '/menu-insights',
+                                                        params: { menuId: item.id }
+                                                    })}
                                                 >
                                                     <View style={styles.insightsButtonContent}>
                                                         <Ionicons name="analytics" size={16} color={stylesVars.primary} />
