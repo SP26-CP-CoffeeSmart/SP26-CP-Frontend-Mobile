@@ -3,7 +3,9 @@ import {
   Alert,
   Dimensions,
   Image,
+  Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,8 +16,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -214,12 +218,31 @@ export default function MenuDetailScreen() {
   const [renderingMenu, setRenderingMenu] = useState(false);
   const [renderedMenuUrl, setRenderedMenuUrl] = useState<string | null>(null);
   const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
+  const [isRenderSuccessOpen, setIsRenderSuccessOpen] = useState(false);
+  const [renderSuccessMessage, setRenderSuccessMessage] = useState('');
+  const [downloadingRender, setDownloadingRender] = useState(false);
   const windowHeight = Dimensions.get('window').height;
   const zoomScale = useSharedValue(1);
   const zoomScaleStart = useSharedValue(1);
+  const zoomTranslateX = useSharedValue(0);
+  const zoomTranslateY = useSharedValue(0);
+  const zoomTranslateXStart = useSharedValue(0);
+  const zoomTranslateYStart = useSharedValue(0);
   const zoomStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: zoomScale.value }],
+    transform: [
+      { translateX: zoomTranslateX.value },
+      { translateY: zoomTranslateY.value },
+      { scale: zoomScale.value },
+    ],
   }));
+
+  useEffect(() => {
+    if (!isImageZoomOpen) {
+      zoomScale.value = 1;
+      zoomTranslateX.value = 0;
+      zoomTranslateY.value = 0;
+    }
+  }, [isImageZoomOpen, zoomScale, zoomTranslateX, zoomTranslateY]);
   const trimmedItemCount = newItemCount.trim();
   const parsedItemCount = Number.parseInt(trimmedItemCount || '0', 10);
   const canRegenerate = Number.isFinite(parsedItemCount) && parsedItemCount > 0;
@@ -754,7 +777,8 @@ export default function MenuDetailScreen() {
         setRenderedMenuUrl(finalUrl);
       }
 
-      Alert.alert('Render success', finalUrl ? 'Menu image is ready.' : 'Menu render completed.');
+      setRenderSuccessMessage(finalUrl ? 'Menu image is ready.' : 'Menu render completed.');
+      setIsRenderSuccessOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to render menu.';
       Alert.alert('Render failed', message);
@@ -763,13 +787,116 @@ export default function MenuDetailScreen() {
     }
   };
 
+  const handleDownloadRenderedMenu = async () => {
+    if (!renderedMenuUrl) {
+      Toast.show({ type: 'info', text1: 'No render available yet' });
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      Linking.openURL(renderedMenuUrl);
+      return;
+    }
+
+    if (typeof MediaLibrary.requestPermissionsAsync !== 'function') {
+      Toast.show({
+        type: 'error',
+        text1: 'Download unavailable',
+        text2: 'Please rebuild the app to enable photo saving.',
+      });
+      Linking.openURL(renderedMenuUrl);
+      return;
+    }
+
+    try {
+      setDownloadingRender(true);
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        Toast.show({ type: 'error', text1: 'Permission denied', text2: 'Allow access to save the image.' });
+        return;
+      }
+
+      const safeExtension = (() => {
+        const cleanUrl = renderedMenuUrl.split('?')[0];
+        const parts = cleanUrl.split('.');
+        const last = parts[parts.length - 1];
+        return last && last.length <= 4 ? last : 'jpg';
+      })();
+
+      const targetUri = `${FileSystem.cacheDirectory}menu-render-${Date.now()}.${safeExtension}`;
+      const downloadResult = await FileSystem.downloadAsync(renderedMenuUrl, targetUri);
+      const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+      await MediaLibrary.createAlbumAsync('SmartCoffee', asset, false);
+
+      Toast.show({ type: 'success', text1: 'Saved to Photos', text2: 'Menu image downloaded successfully.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Download failed.';
+      Toast.show({ type: 'error', text1: 'Download failed', text2: message });
+    } finally {
+      setDownloadingRender(false);
+    }
+  };
+
+  const pinchGesture = Gesture.Pinch()
+    .onBegin(() => {
+      zoomScaleStart.value = zoomScale.value;
+    })
+    .onUpdate((event) => {
+      const nextScale = zoomScaleStart.value * event.scale;
+      zoomScale.value = Math.min(3, Math.max(1, nextScale));
+    })
+    .onEnd(() => {
+      if (zoomScale.value <= 1) {
+        zoomScale.value = 1;
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      zoomTranslateXStart.value = zoomTranslateX.value;
+      zoomTranslateYStart.value = zoomTranslateY.value;
+    })
+    .onUpdate((event) => {
+      if (zoomScale.value <= 1) {
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+        return;
+      }
+      zoomTranslateX.value = zoomTranslateXStart.value + event.translationX;
+      zoomTranslateY.value = zoomTranslateYStart.value + event.translationY;
+    })
+    .onEnd(() => {
+      if (zoomScale.value <= 1) {
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+      }
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      zoomScale.value = 1;
+      zoomTranslateX.value = 0;
+      zoomTranslateY.value = 0;
+    });
+
+  const zoomGesture = Gesture.Simultaneous(
+    pinchGesture,
+    panGesture,
+    doubleTapGesture
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color="#3C2A21" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{title || 'Menu Detail'}</Text>
+        <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
+          {title || 'Menu Detail'}
+        </Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -902,7 +1029,7 @@ export default function MenuDetailScreen() {
         animationType="fade"
         onRequestClose={() => setIsImageZoomOpen(false)}
       >
-        <View style={styles.zoomOverlay}>
+        <GestureHandlerRootView style={styles.zoomOverlay}>
           <TouchableOpacity
             style={styles.zoomBackdrop}
             activeOpacity={1}
@@ -916,31 +1043,66 @@ export default function MenuDetailScreen() {
               <Text style={styles.zoomCloseText}>Close</Text>
             </TouchableOpacity>
             {renderedMenuUrl ? (
-              <GestureDetector
-                gesture={Gesture.Pinch()
-                  .onBegin(() => {
-                    zoomScaleStart.value = zoomScale.value;
-                  })
-                  .onUpdate((event) => {
-                    zoomScale.value = Math.max(1, zoomScaleStart.value * event.scale);
-                  })
-                  .onEnd(() => {
-                    if (zoomScale.value < 1) {
-                      zoomScale.value = 1;
-                    }
-                  })}
-              >
-                <Animated.Image
-                  source={{ uri: renderedMenuUrl }}
+              <GestureDetector gesture={zoomGesture}>
+                <Animated.View
+                  collapsable={false}
                   style={[
-                    styles.zoomImage,
+                    styles.zoomImageContainer,
                     { height: Math.min(windowHeight * 0.7, 620) },
                     zoomStyle,
                   ]}
-                  resizeMode="contain"
-                />
+                >
+                  <Image
+                    source={{ uri: renderedMenuUrl }}
+                    style={styles.zoomImage}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
               </GestureDetector>
             ) : null}
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
+
+      <Modal
+        visible={isRenderSuccessOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsRenderSuccessOpen(false)}
+      >
+        <View style={styles.renderSuccessOverlay}>
+          <TouchableOpacity
+            style={styles.renderSuccessBackdrop}
+            activeOpacity={1}
+            onPress={() => setIsRenderSuccessOpen(false)}
+          />
+          <View style={styles.renderSuccessCard}>
+            <View style={styles.renderSuccessIcon}>
+              <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+            </View>
+            <Text style={styles.renderSuccessTitle}>Render success</Text>
+            <Text style={styles.renderSuccessText}>{renderSuccessMessage}</Text>
+            <View style={styles.renderSuccessActions}>
+              <TouchableOpacity
+                style={styles.renderSuccessButton}
+                onPress={() => setIsRenderSuccessOpen(false)}
+              >
+                <Text style={styles.renderSuccessButtonText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.renderSuccessButton,
+                  styles.renderSuccessButtonPrimary,
+                  downloadingRender && styles.renderSuccessButtonDisabled,
+                ]}
+                onPress={handleDownloadRenderedMenu}
+                disabled={downloadingRender}
+              >
+                <Text style={styles.renderSuccessButtonPrimaryText}>
+                  {downloadingRender ? 'Saving...' : 'Download'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -974,6 +1136,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#3C2A21',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+    lineHeight: 22,
   },
   headerSpacer: {
     width: 36,
@@ -1189,8 +1355,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 12,
   },
+  zoomImageContainer: {
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   zoomImage: {
     width: '100%',
+    height: '100%',
     borderRadius: 12,
     backgroundColor: '#E8DED3',
   },
@@ -1206,5 +1378,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#3C2A21',
+  },
+  renderSuccessOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 24,
+  },
+  renderSuccessBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  renderSuccessCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    gap: 10,
+  },
+  renderSuccessIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#3C7A57',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renderSuccessTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3C2A21',
+  },
+  renderSuccessText: {
+    fontSize: 13,
+    color: '#6B5B4D',
+    textAlign: 'center',
+  },
+  renderSuccessActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 6,
+  },
+  renderSuccessButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(60, 42, 33, 0.2)',
+    alignItems: 'center',
+  },
+  renderSuccessButtonPrimary: {
+    backgroundColor: '#3C2A21',
+    borderColor: '#3C2A21',
+  },
+  renderSuccessButtonDisabled: {
+    opacity: 0.6,
+  },
+  renderSuccessButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3C2A21',
+  },
+  renderSuccessButtonPrimaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

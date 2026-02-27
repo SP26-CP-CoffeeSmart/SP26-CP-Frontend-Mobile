@@ -212,7 +212,7 @@ const MenuVersionPage = () => {
     );
 
     return (
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
             <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                 {/* Header */}
                 <View style={styles.headerWrapper}>
