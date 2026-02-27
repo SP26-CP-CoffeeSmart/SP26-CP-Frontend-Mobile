@@ -35,6 +35,9 @@ const COLORS = {
     outOfStock: '#FFE6E6',
 };
 
+// Match the deep brown used in menu-staff dailySalesCard (#6B4423)
+const DAILY_SALES_BROWN = '#6B4423';
+
 interface MenuItem {
     menuItemId: number;
     description: string | null;
@@ -111,10 +114,6 @@ export default function DailySalesScreen() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [editingItems, setEditingItems] = useState<Set<number>>(new Set());
-    const [originalSalesData, setOriginalSalesData] = useState<
-        Map<number, DailySalesItem | null>
-    >(new Map());
     const [itemSizeMap, setItemSizeMap] = useState<Map<number, ItemSize[]>>(new Map());
 
     const formatPrice = (value?: number) => {
@@ -234,24 +233,11 @@ export default function DailySalesScreen() {
         fetchMenu();
     }, [coffeeShopId]);
 
-    const onRefresh = () => {
-        setRefreshing(true);
-        setLoading(true);
-        fetchMenu();
-    };
-
-    const getFilteredItems = () => {
-        if (selectedGroupId === null) {
-            return allItems;
-        }
-
-        const group = menuData?.menuGroups.find((g) => g.menuGroupId === selectedGroupId);
-        return group?.menuItems || [];
-    };
-
     const getAvailableSizes = (): string[] => {
         if (beverageSizes.length > 0) {
-            return beverageSizes.map(size => size.sizeName || size.name || '').filter(Boolean);
+            return beverageSizes
+                .map((size) => size.sizeName || (size as any).name || '')
+                .filter((name) => !!name);
         }
         return ['S', 'M', 'L'];
     };
@@ -262,6 +248,7 @@ export default function DailySalesScreen() {
 
         return sizeNames.map((name) => {
             const trimmedName = name.trim();
+
             const matchByName = itemSizesForItem.find(
                 (it) => it.beverageSize?.sizeName?.trim() === trimmedName
             );
@@ -269,9 +256,10 @@ export default function DailySalesScreen() {
             let match = matchByName;
             if (!match) {
                 const beverageSizeDef = beverageSizes.find(
-                    (bs) => (bs.sizeName || bs.name || '').trim() === trimmedName
+                    (bs) => ((bs.sizeName || (bs as any).name || '').trim() === trimmedName)
                 );
-                const bsId = beverageSizeDef?.beverageSizeId || beverageSizeDef?.id;
+                const bsId =
+                    beverageSizeDef?.beverageSizeId || (beverageSizeDef as any)?.id;
                 if (bsId != null) {
                     match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
                 }
@@ -283,6 +271,50 @@ export default function DailySalesScreen() {
                 price: match?.sellingPrice,
             };
         });
+    };
+
+    const updateSalesQuantity = (
+        menuItemId: number,
+        sizeName: string,
+        quantity: number
+    ) => {
+        const item = allItems.find((i) => i.menuItemId === menuItemId);
+        if (!item) return;
+
+        const key = menuItemId;
+        let current = salesData.get(key);
+
+        if (!current) {
+            current = {
+                menuItemId,
+                sizes: {},
+                total: 0,
+                item,
+            };
+
+            const allSizes = getAvailableSizes();
+            allSizes.forEach((size) => {
+                current!.sizes[size] = 0;
+            });
+        }
+
+        if (!(sizeName in current.sizes)) {
+            current.sizes[sizeName] = 0;
+        }
+
+        current.sizes[sizeName] = Math.max(0, quantity);
+        current.total = Object.values(current.sizes).reduce(
+            (sum, val) => sum + (typeof val === 'number' ? val : 0),
+            0
+        );
+
+        const newMap = new Map(salesData);
+        if (current.total === 0) {
+            newMap.delete(key);
+        } else {
+            newMap.set(key, current);
+        }
+        setSalesData(newMap);
     };
 
     const calculateEstimatedTotals = () => {
@@ -304,9 +336,11 @@ export default function DailySalesScreen() {
 
                 if (!match) {
                     const beverageSizeDef = beverageSizes.find(
-                        (bs) => (bs.sizeName || bs.name || '').trim() === trimmedName
+                        (bs) =>
+                            (bs.sizeName || (bs as any).name || '').trim() === trimmedName
                     );
-                    const bsId = beverageSizeDef?.beverageSizeId || beverageSizeDef?.id;
+                    const bsId =
+                        beverageSizeDef?.beverageSizeId || (beverageSizeDef as any)?.id;
                     if (bsId != null) {
                         match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
                     }
@@ -322,102 +356,128 @@ export default function DailySalesScreen() {
         return { totalCups, totalRevenue };
     };
 
-    const updateSalesQuantity = (menuItemId: number, sizeName: string, quantity: number) => {
-        const item = allItems.find((i) => i.menuItemId === menuItemId);
-        if (!item) return;
-
-        const key = menuItemId;
-        let current = salesData.get(key);
-
-        if (!current) {
-            // Initialize new sales item with all (current) beverage sizes
-            current = {
-                menuItemId,
-                sizes: {},
-                total: 0,
-                item,
-            };
-            // Initialize all sizes with 0
-            const allSizes = getAvailableSizes();
-            allSizes.forEach((size) => {
-                current!.sizes[size] = 0;
-            });
+    const getFilteredItems = (): MenuItem[] => {
+        if (selectedGroupId === null) {
+            return allItems;
         }
 
-        // Ensure the size key exists
-        if (!(sizeName in current.sizes)) {
-            current.sizes[sizeName] = 0;
-        }
-
-        current.sizes[sizeName] = Math.max(0, quantity);
-        current.total = Object.values(current.sizes).reduce((sum, val) => sum + (typeof val === 'number' ? val : 0), 0);
-
-        const newMap = new Map(salesData);
-        if (current.total === 0) {
-            newMap.delete(key);
-        } else {
-            newMap.set(key, current);
-        }
-        setSalesData(newMap);
+        const group = menuData?.menuGroups.find(
+            (g) => g.menuGroupId === selectedGroupId
+        );
+        return group?.menuItems || [];
     };
 
-    const handleStartEdit = (menuItemId: number) => {
-        setEditingItems((prev) => {
-            if (prev.has(menuItemId)) return prev;
-            const next = new Set(prev);
-            next.add(menuItemId);
-            return next;
-        });
-
-        setOriginalSalesData((prev) => {
-            if (prev.has(menuItemId)) return prev;
-            const existing = salesData.get(menuItemId);
-            const clone = existing
-                ? { ...existing, sizes: { ...existing.sizes } }
-                : null;
-            const next = new Map(prev);
-            next.set(menuItemId, clone);
-            return next;
-        });
+    const onRefresh = () => {
+        setRefreshing(true);
+        setLoading(true);
+        fetchMenu();
     };
 
-    const handleCancelEdit = (menuItemId: number) => {
-        setSalesData((prev) => {
-            const next = new Map(prev);
-            const original = originalSalesData.get(menuItemId);
-            if (original) {
-                next.set(menuItemId, { ...original, sizes: { ...original.sizes } });
-            } else {
-                next.delete(menuItemId);
-            }
-            return next;
-        });
+    const renderSalesItem = (item: MenuItem) => {
+        const sale = salesData.get(item.menuItemId);
+        const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
+        const sizeInfos = getSizeInfosForItem(item.menuItemId);
 
-        setEditingItems((prev) => {
-            const next = new Set(prev);
-            next.delete(menuItemId);
-            return next;
-        });
+        return (
+            <View key={item.menuItemId} style={styles.salesItemCard}>
+                {/* Card header: image + title */}
+                <View style={styles.salesItemHeader}>
+                    <View style={styles.salesItemHeaderLeft}>
+                        <Image
+                            source={{ uri: imageUrl }}
+                            style={styles.salesItemImage}
+                            defaultSource={{ uri: fallbackMenuImage }}
+                        />
+                        <Text style={styles.salesItemName} numberOfLines={2}>
+                            {item.shopRecipe.recipeName}
+                        </Text>
+                    </View>
+                </View>
 
-        setOriginalSalesData((prev) => {
-            const next = new Map(prev);
-            next.delete(menuItemId);
-            return next;
-        });
-    };
+                {/* Size rows: follow web UI - each size with - qty + */}
+                <View style={styles.sizeQuantityRow}>
+                    {sizeInfos.map((size: SizeInfo, index: number) => {
+                        const isDisabled = !size.hasPrice;
+                        const quantity = sale?.sizes[size.name] || 0;
 
-    const handleConfirmEdit = (menuItemId: number) => {
-        setEditingItems((prev) => {
-            const next = new Set(prev);
-            next.delete(menuItemId);
-            return next;
-        });
-
-        setOriginalSalesData((prev) => {
-            const next = new Map(prev);
-            next.delete(menuItemId);
-            return next;
-        });
+                        return (
+                            <View
+                                key={size.name}
+                                style={[
+                                    styles.sizeQuantityInput,
+                                    index > 0 && styles.sizeQuantityInputDivider,
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.sizeLabel,
+                                        (!size.hasPrice || quantity === 0) &&
+                                        styles.sizeLabelMuted,
+                                    ]}
+                                >
+                                    {size.name}
+                                    {!size.hasPrice ? ' (Chưa có giá)' : ''}
+                                </Text>
+                                <View style={styles.sizeQuantityControls}>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.sizeStepperButton,
+                                            styles.sizeStepperMinus,
+                                            (isDisabled || quantity <= 0) &&
+                                            styles.sizeStepperButtonDisabled,
+                                        ]}
+                                        disabled={isDisabled || quantity <= 0}
+                                        onPress={() =>
+                                            updateSalesQuantity(
+                                                item.menuItemId,
+                                                size.name,
+                                                Math.max(0, quantity - 1)
+                                            )
+                                        }
+                                    >
+                                        <Ionicons
+                                            name="remove"
+                                            size={18}
+                                            color={COLORS.accentDark}
+                                        />
+                                    </TouchableOpacity>
+                                    <Text
+                                        style={[
+                                            styles.sizeQuantityValue,
+                                            (!size.hasPrice || quantity === 0) &&
+                                            styles.sizeQuantityValueMuted,
+                                        ]}
+                                    >
+                                        {quantity}
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.sizeStepperButton,
+                                            styles.sizeStepperPlus,
+                                            isDisabled && styles.sizeStepperButtonDisabled,
+                                        ]}
+                                        disabled={isDisabled}
+                                        onPress={() =>
+                                            updateSalesQuantity(
+                                                item.menuItemId,
+                                                size.name,
+                                                quantity + 1
+                                            )
+                                        }
+                                    >
+                                        <Ionicons
+                                            name="add"
+                                            size={18}
+                                            color={COLORS.white}
+                                        />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        );
+                    })}
+                </View>
+            </View>
+        );
     };
 
     const handleChangeDate = () => {
@@ -494,8 +554,6 @@ export default function DailySalesScreen() {
 
             // Clear data and show success
             setSalesData(new Map());
-            setEditingItems(new Set());
-            setOriginalSalesData(new Map());
 
             Toast.show({
                 type: 'success',
@@ -513,149 +571,7 @@ export default function DailySalesScreen() {
         }
     };
 
-    const renderSalesItem = (item: MenuItem) => {
-        const sale = salesData.get(item.menuItemId);
-        const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
-        const sizeInfos = getSizeInfosForItem(item.menuItemId);
-        const isEditing = editingItems.has(item.menuItemId);
-
-        return (
-            <View key={item.menuItemId} style={styles.salesItemCard}>
-                <View style={styles.salesItemContent}>
-                    {/* Image */}
-                    <Image
-                        source={{ uri: imageUrl }}
-                        style={styles.salesItemImage}
-                        defaultSource={{ uri: fallbackMenuImage }}
-                    />
-
-                    {/* Item Details */}
-                    <View style={styles.salesItemDetails}>
-                        <Text style={styles.salesItemName}>{item.shopRecipe.recipeName}</Text>
-
-                        {/* Size Selector */}
-                        <View style={styles.sizeSelector}>
-                            {sizeInfos.map((size) => {
-                                const isSelected = sale && sale.sizes[size.name] > 0;
-                                const isDisabled = !size.hasPrice;
-                                return (
-                                    <View
-                                        key={size.name}
-                                        style={[
-                                            styles.sizeButton,
-                                            isSelected && styles.sizeButtonActive,
-                                            isDisabled && styles.sizeButtonDisabled,
-                                        ]}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.sizeButtonText,
-                                                isSelected && styles.sizeButtonTextActive,
-                                                isDisabled && styles.sizeButtonTextDisabled,
-                                            ]}
-                                        >
-                                            {size.name}
-                                        </Text>
-                                    </View>
-                                );
-                            })}
-                        </View>
-                    </View>
-
-                    {/* Quantity Input and Add Button */}
-                    {isEditing ? (
-                        <View style={styles.editActionSection}>
-                            <TouchableOpacity
-                                style={styles.cancelEditButton}
-                                onPress={() => handleCancelEdit(item.menuItemId)}
-                            >
-                                <Ionicons name="close" size={18} color="#E94B3C" />
-                            </TouchableOpacity>
-                            <View style={styles.editQuantityDisplay}>
-                                <Text style={styles.editQuantityText}>{(sale?.total || 0).toString()}</Text>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.confirmEditButton}
-                                onPress={() => handleConfirmEdit(item.menuItemId)}
-                            >
-                                <Ionicons name="checkmark" size={20} color={COLORS.white} />
-                            </TouchableOpacity>
-                        </View>
-                    ) : (
-                        <View style={styles.quantitySection}>
-                            <TextInput
-                                style={styles.quantityInput}
-                                placeholder="0"
-                                value={(sale?.total || 0).toString()}
-                                editable={false}
-                                keyboardType="numeric"
-                            />
-                            <TouchableOpacity
-                                style={styles.addButton}
-                                onPress={() => {
-                                    // Start edit mode and increment the first size by default
-                                    handleStartEdit(item.menuItemId);
-                                    const firstPricedSize =
-                                        sizeInfos.find((s) => s.hasPrice)?.name || null;
-
-                                    if (!firstPricedSize) {
-                                        Toast.show({
-                                            type: 'error',
-                                            text1: 'Chưa cấu hình giá',
-                                            text2: 'Vui lòng cấu hình giá cho món này trước khi nhập doanh thu.',
-                                        });
-                                        return;
-                                    }
-
-                                    updateSalesQuantity(
-                                        item.menuItemId,
-                                        firstPricedSize,
-                                        (sale?.sizes[firstPricedSize] || 0) + 1
-                                    );
-                                }}
-                            >
-                                <Ionicons name="add" size={20} color={COLORS.white} />
-                            </TouchableOpacity>
-                        </View>
-                    )}
-                </View>
-
-                {/* Size quantity inputs */}
-                {sale && sale.total > 0 && (
-                    <View style={styles.sizeQuantityRow}>
-                        {sizeInfos.map((size) => {
-                            const isDisabled = !size.hasPrice;
-                            const quantity = sale?.sizes[size.name] || 0;
-                            return (
-                                <View key={size.name} style={styles.sizeQuantityInput}>
-                                    <Text style={styles.sizeLabel}>
-                                        {size.hasPrice
-                                            ? `${size.name} - ${formatPrice(size.price)}`
-                                            : `${size.name} - Chưa có giá`}
-                                    </Text>
-                                    <TextInput
-                                        style={[
-                                            styles.quantitySmallInput,
-                                            isDisabled && styles.quantitySmallInputDisabled,
-                                        ]}
-                                        value={quantity.toString()}
-                                        onChangeText={(text) => {
-                                            if (isDisabled) return;
-                                            const parsed = parseInt(text, 10) || 0;
-                                            updateSalesQuantity(item.menuItemId, size.name, parsed);
-                                        }}
-                                        editable={!isDisabled}
-                                        keyboardType="numeric"
-                                        placeholder={isDisabled ? '-' : '0'}
-                                    />
-                                </View>
-                            );
-                        })}
-                    </View>
-                )}
-            </View>
-        );
-    };
+    // (legacy renderSalesItem implementation removed - using the new UI version above)
 
     if (loading && !refreshing) {
         return (
@@ -793,7 +709,7 @@ export default function DailySalesScreen() {
                         </View>
                     ) : (
                         <View style={styles.itemsContent}>
-                            {filteredItems.map((item) => renderSalesItem(item))}
+                            {filteredItems.map((item: MenuItem) => renderSalesItem(item))}
                         </View>
                     )}
                 </ScrollView>
@@ -817,14 +733,14 @@ export default function DailySalesScreen() {
                         <TouchableOpacity
                             style={[
                                 styles.saveButton,
-                                editingItems.size > 0 && styles.saveButtonDisabled,
+                                salesData.size === 0 && styles.saveButtonDisabled,
                             ]}
                             onPress={() => {
-                                if (editingItems.size > 0) return;
+                                if (salesData.size === 0) return;
                                 handleSaveRecords();
                             }}
-                            activeOpacity={editingItems.size > 0 ? 1 : 0.8}
-                            disabled={editingItems.size > 0}
+                            activeOpacity={salesData.size === 0 ? 1 : 0.8}
+                            disabled={salesData.size === 0}
                         >
                             <Text style={styles.saveButtonText}>Save Sales Records</Text>
                             <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
@@ -843,22 +759,26 @@ export default function DailySalesScreen() {
                     onRequestClose={() => setShowDatePicker(false)}
                 >
                     <View style={styles.datePickerContainer}>
-                        <View style={styles.datePickerHeader}>
-                            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                <Text style={styles.datePickerCancelBtn}>Cancel</Text>
-                            </TouchableOpacity>
-                            <Text style={styles.datePickerTitle}>Select Date</Text>
-                            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                <Text style={styles.datePickerConfirmBtn}>Done</Text>
-                            </TouchableOpacity>
+                        <View style={styles.datePickerSheet}>
+                            <View style={styles.datePickerHeader}>
+                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                    <Text style={styles.datePickerCancelBtn}>Cancel</Text>
+                                </TouchableOpacity>
+                                <Text style={styles.datePickerTitle}>Select Date</Text>
+                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                    <Text style={styles.datePickerConfirmBtn}>Done</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.datePickerBody}>
+                                <DateTimePicker
+                                    value={selectedDate}
+                                    mode="date"
+                                    display="spinner"
+                                    onChange={handleDatePickerChange}
+                                    textColor={COLORS.text}
+                                />
+                            </View>
                         </View>
-                        <DateTimePicker
-                            value={selectedDate}
-                            mode="date"
-                            display="spinner"
-                            onChange={handleDatePickerChange}
-                            textColor={COLORS.text}
-                        />
                     </View>
                 </Modal>
             )}
@@ -893,7 +813,7 @@ const styles = StyleSheet.create({
     headerTitle: {
         fontSize: 24,
         fontWeight: '700',
-        color: COLORS.text,
+        color: DAILY_SALES_BROWN,
         fontStyle: 'italic',
     },
     dateSection: {
@@ -925,7 +845,7 @@ const styles = StyleSheet.create({
     },
     changeButton: {
         fontSize: 13,
-        color: COLORS.accent,
+        color: DAILY_SALES_BROWN,
         fontWeight: '600',
     },
     categoryTabsWrapper: {
@@ -954,8 +874,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     categoryTabActive: {
-        backgroundColor: COLORS.accentDark,
-        borderColor: COLORS.accentDark,
+        backgroundColor: DAILY_SALES_BROWN,
+        borderColor: DAILY_SALES_BROWN,
     },
     categoryTabText: {
         fontSize: 13,
@@ -974,20 +894,31 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         marginBottom: 12,
         overflow: 'hidden',
-        elevation: 2,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        elevation: 1,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.06,
         shadowRadius: 2,
     },
-    salesItemContent: {
+    salesItemHeader: {
         flexDirection: 'row',
-        padding: 12,
         alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: '#F5F2EE',
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    salesItemHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
     },
     salesItemImage: {
-        width: 70,
-        height: 70,
+        width: 50,
+        height: 50,
         borderRadius: 8,
         backgroundColor: '#E8CCBE',
     },
@@ -1001,112 +932,22 @@ const styles = StyleSheet.create({
         color: COLORS.text,
         marginBottom: 4,
     },
-    sizeSelector: {
-        flexDirection: 'row',
-        gap: 8,
-        flexWrap: 'wrap',
-    },
-    sizeButton: {
-        minWidth: 36,
-        height: 28,
-        borderRadius: 14,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        paddingHorizontal: 8,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: COLORS.white,
-    },
-    sizeButtonActive: {
-        backgroundColor: COLORS.accent,
-        borderColor: COLORS.accent,
-    },
-    sizeButtonDisabled: {
-        opacity: 0.5,
-    },
-    sizeButtonText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: COLORS.textSecondary,
-    },
-    sizeButtonTextActive: {
-        color: COLORS.white,
-    },
-    sizeButtonTextDisabled: {
-        color: COLORS.textSecondary,
-    },
-    quantitySection: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    editActionSection: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    cancelEditButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: '#E94B3C',
-        backgroundColor: COLORS.white,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    editQuantityDisplay: {
-        minWidth: 44,
-        height: 32,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        backgroundColor: COLORS.white,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-    },
-    editQuantityText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    confirmEditButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 6,
-        backgroundColor: COLORS.accentDark,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    quantityInput: {
-        width: 45,
-        height: Platform.OS === 'android' ? 44 : 40,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        textAlign: 'center',
-        fontSize: 14,
-        fontWeight: '600',
-        color: COLORS.text,
-    },
-    addButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 6,
-        backgroundColor: COLORS.accentDark,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
+    // legacy quantity / size selector styles removed in favor of new per-size controls
     sizeQuantityRow: {
-        flexDirection: 'row',
         paddingHorizontal: 12,
-        paddingBottom: 12,
-        gap: 10,
+        paddingVertical: 8,
+        gap: 4,
     },
     sizeQuantityInput: {
-        flex: 1,
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    sizeQuantityInputDivider: {
+        borderTopWidth: 1,
+        borderTopColor: COLORS.border,
+        paddingTop: 8,
+        marginTop: 4,
     },
     sizeLabel: {
         fontSize: 11,
@@ -1114,20 +955,41 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         marginBottom: 4,
     },
-    quantitySmallInput: {
-        width: '80%',
-        height: Platform.OS === 'android' ? 40 : 32,
-        borderRadius: 6,
+    sizeLabelMuted: {
+        color: '#B0A79F',
+    },
+    sizeQuantityControls: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    sizeStepperButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.white,
+    },
+    sizeStepperMinus: {
         borderWidth: 1,
         borderColor: COLORS.border,
+    },
+    sizeStepperPlus: {
+        backgroundColor: DAILY_SALES_BROWN,
+    },
+    sizeStepperButtonDisabled: {
+        opacity: 0.4,
+    },
+    sizeQuantityValue: {
+        minWidth: 28,
         textAlign: 'center',
-        fontSize: 13,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
         color: COLORS.text,
     },
-    quantitySmallInputDisabled: {
-        backgroundColor: '#F2F2F2',
-        color: COLORS.textSecondary,
+    sizeQuantityValueMuted: {
+        color: '#C2BAB2',
     },
     emptyContent: {
         justifyContent: 'center',
@@ -1171,7 +1033,7 @@ const styles = StyleSheet.create({
     },
     saveButton: {
         flexDirection: 'row',
-        backgroundColor: COLORS.accentDark,
+        backgroundColor: DAILY_SALES_BROWN,
         borderRadius: 12,
         paddingHorizontal: 16,
         paddingVertical: 16,
@@ -1220,6 +1082,13 @@ const styles = StyleSheet.create({
         justifyContent: 'flex-end',
         backgroundColor: 'rgba(0, 0, 0, 0.3)',
     },
+    datePickerSheet: {
+        backgroundColor: COLORS.white,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        overflow: 'hidden',
+        paddingBottom: 24,
+    },
     datePickerHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -1230,10 +1099,14 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: COLORS.border,
     },
+    datePickerBody: {
+        backgroundColor: COLORS.white,
+        paddingBottom: 8,
+    },
     datePickerTitle: {
         fontSize: 16,
         fontWeight: '600',
-        color: COLORS.text,
+        color: DAILY_SALES_BROWN,
     },
     datePickerCancelBtn: {
         fontSize: 16,
@@ -1242,7 +1115,7 @@ const styles = StyleSheet.create({
     },
     datePickerConfirmBtn: {
         fontSize: 16,
-        color: COLORS.accent,
+        color: DAILY_SALES_BROWN,
         fontWeight: '600',
     },
 });

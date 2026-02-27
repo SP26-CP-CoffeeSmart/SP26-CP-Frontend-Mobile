@@ -175,7 +175,7 @@ export default function MenuStaffScreen() {
 
     const handleDailySales = (item: MenuItem) => {
         router.push({
-            pathname: '/daily-sale-item/[menuItemId]' as any,
+            pathname: '/daily-sale-item/[menuItemId]',
             params: {
                 menuItemId: item.menuItemId.toString(),
                 recipeName: item.shopRecipe.recipeName,
