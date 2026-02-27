@@ -239,18 +239,18 @@ export default function MenuRecommendationsScreen() {
       return;
     }
 
-    const hasAnyCategory = menuGroups.some(
-      (group) => group.selectedBeverageCategories.length > 0
+    const groupsMissingCategories = menuGroups.filter(
+      (group) => group.selectedBeverageCategories.length === 0
     );
-    if (!hasAnyCategory) {
+    if (groupsMissingCategories.length > 0) {
       Alert.alert(
         'Missing categories',
-        'Please add at least one beverage category to a menu group.'
+        'Each menu group must have at least one beverage category.'
       );
       Toast.show({
         type: 'error',
         text1: 'Missing categories',
-        text2: 'Please add at least one beverage category to a menu group.',
+        text2: 'Each menu group must have at least one beverage category.',
       });
       return;
     }

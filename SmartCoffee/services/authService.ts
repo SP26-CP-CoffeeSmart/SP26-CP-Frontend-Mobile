@@ -138,6 +138,15 @@ export const authorizedFetch = async (url: string, options: RequestInit = {}) =>
   }
 
   try {
+    const [accessToken, refreshToken] = await AsyncStorage.multiGet([
+      'accessToken',
+      'refreshToken',
+    ]);
+    const hasAccessToken = Boolean(accessToken?.[1]);
+    const hasRefreshToken = Boolean(refreshToken?.[1]);
+    if (!hasAccessToken || !hasRefreshToken) {
+      return response;
+    }
     const tokens = await refreshTokens();
     const retryOptions = await withAuthHeader(options, tokens.accessToken);
     response = await fetch(url, retryOptions);

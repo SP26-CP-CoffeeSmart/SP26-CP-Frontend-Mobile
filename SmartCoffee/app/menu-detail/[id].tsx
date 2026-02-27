@@ -206,6 +206,7 @@ export default function MenuDetailScreen() {
   const [menuPayload, setMenuPayload] = useState<any>(null);
   const [menuConfig, setMenuConfig] = useState<any>(null);
   const [storedMenuItems, setStoredMenuItems] = useState<any[]>([]);
+  const [menuDetailsPayload, setMenuDetailsPayload] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsReady, setDetailsReady] = useState(false);
   const [newItemCount, setNewItemCount] = useState('');
@@ -230,6 +231,7 @@ export default function MenuDetailScreen() {
       setMenuPayload(null);
       setMenuConfig(null);
       setStoredMenuItems([]);
+      setMenuDetailsPayload(null);
       setDetailsReady(false);
       return;
     }
@@ -260,6 +262,7 @@ export default function MenuDetailScreen() {
     const baseMenu = selectedFromPayload ?? parsedItem;
     setCurrentMenu(baseMenu);
     setMenuDraft(baseMenu);
+    setMenuDetailsPayload(null);
     setDetailsReady(false);
 
     const initialItems = toArray(
@@ -420,6 +423,12 @@ export default function MenuDetailScreen() {
         setStoredMenuItems(responseMenuItems);
       }
 
+      if (responsePayload && typeof responsePayload === 'object') {
+        setMenuDetailsPayload(responsePayload);
+      } else {
+        setMenuDetailsPayload(null);
+      }
+
       Toast.show({
         type: 'success',
         text1: 'Recipe details generated',
@@ -443,6 +452,7 @@ export default function MenuDetailScreen() {
         const next = prev.filter((item) => item?.menuItemId !== menuItemId);
         const nextSize = next.length;
         setDetailsReady(false);
+        setMenuDetailsPayload(null);
         setMenuPayload((current) => {
           if (!current) return current;
           const menus = toArray(current?.menus ?? []);
@@ -522,6 +532,7 @@ export default function MenuDetailScreen() {
         ...(current ?? {}),
         menuSizeValue: nextSize,
       }));
+      setMenuDetailsPayload(null);
       return next;
     });
   };
@@ -590,6 +601,7 @@ export default function MenuDetailScreen() {
     try {
       setRegenerating(true);
       setDetailsReady(false);
+      setMenuDetailsPayload(null);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
         method: 'POST',
         headers: {
@@ -674,6 +686,9 @@ export default function MenuDetailScreen() {
   };
 
   const buildMenuRenderPayload = () => {
+    if (menuDetailsPayload) {
+      return menuDetailsPayload;
+    }
     const menuFromState =
       menuDraft ??
       currentMenu ??
