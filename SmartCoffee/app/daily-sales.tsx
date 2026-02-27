@@ -285,6 +285,43 @@ export default function DailySalesScreen() {
         });
     };
 
+    const calculateEstimatedTotals = () => {
+        let totalCups = 0;
+        let totalRevenue = 0;
+
+        salesData.forEach((sale) => {
+            const itemSizesForItem = itemSizeMap.get(sale.menuItemId) || [];
+
+            Object.entries(sale.sizes).forEach(([sizeName, qty]) => {
+                const quantity = typeof qty === 'number' ? qty : 0;
+                if (quantity <= 0) return;
+
+                const trimmedName = sizeName.trim();
+
+                let match = itemSizesForItem.find(
+                    (it) => it.beverageSize?.sizeName?.trim() === trimmedName
+                );
+
+                if (!match) {
+                    const beverageSizeDef = beverageSizes.find(
+                        (bs) => (bs.sizeName || bs.name || '').trim() === trimmedName
+                    );
+                    const bsId = beverageSizeDef?.beverageSizeId || beverageSizeDef?.id;
+                    if (bsId != null) {
+                        match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
+                    }
+                }
+
+                const price = match?.sellingPrice ?? 0;
+
+                totalCups += quantity;
+                totalRevenue += quantity * price;
+            });
+        });
+
+        return { totalCups, totalRevenue };
+    };
+
     const updateSalesQuantity = (menuItemId: number, sizeName: string, quantity: number) => {
         const item = allItems.find((i) => i.menuItemId === menuItemId);
         if (!item) return;
@@ -653,6 +690,7 @@ export default function DailySalesScreen() {
     }
 
     const filteredItems = getFilteredItems();
+    const { totalCups, totalRevenue } = calculateEstimatedTotals();
 
     return (
         <>
@@ -763,6 +801,18 @@ export default function DailySalesScreen() {
                 {/* Total Revenue Footer */}
                 {!showDatePicker && (
                     <View style={styles.footerContainer}>
+                        <View style={styles.summaryRow}>
+                            <View>
+                                <Text style={styles.summaryLabel}>Estimated total cups</Text>
+                                <Text style={styles.summaryValue}>{totalCups}</Text>
+                            </View>
+                            <View style={{ flex: 1 }} />
+                            <View style={{ alignItems: 'flex-end' }}>
+                                <Text style={styles.summaryLabel}>Estimated revenue</Text>
+                                <Text style={styles.summaryValue}>{formatPrice(totalRevenue)}</Text>
+                            </View>
+                        </View>
+
                         {/* Save Button */}
                         <TouchableOpacity
                             style={[
@@ -1031,7 +1081,7 @@ const styles = StyleSheet.create({
     },
     quantityInput: {
         width: 45,
-        height: 40,
+        height: Platform.OS === 'android' ? 44 : 40,
         borderRadius: 6,
         borderWidth: 1,
         borderColor: COLORS.border,
@@ -1066,7 +1116,7 @@ const styles = StyleSheet.create({
     },
     quantitySmallInput: {
         width: '80%',
-        height: 32,
+        height: Platform.OS === 'android' ? 40 : 32,
         borderRadius: 6,
         borderWidth: 1,
         borderColor: COLORS.border,
@@ -1102,6 +1152,22 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 12,
         paddingBottom: 20,
+    },
+    summaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    summaryLabel: {
+        fontSize: 11,
+        color: COLORS.textSecondary,
+        fontWeight: '600',
+    },
+    summaryValue: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginTop: 4,
     },
     saveButton: {
         flexDirection: 'row',

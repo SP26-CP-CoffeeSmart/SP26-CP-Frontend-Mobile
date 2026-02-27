@@ -174,10 +174,13 @@ export default function MenuStaffScreen() {
     };
 
     const handleDailySales = (item: MenuItem) => {
-        Toast.show({
-            type: 'success',
-            text1: 'Daily Sales',
-            text2: `${item.shopBeverage.name} - ${item.sellingPrice.toLocaleString()} VNĐ`,
+        router.push({
+            pathname: '/daily-sale-item/[menuItemId]' as any,
+            params: {
+                menuItemId: item.menuItemId.toString(),
+                recipeName: item.shopRecipe.recipeName,
+                beverageName: item.shopBeverage.name,
+            },
         });
     };
 
