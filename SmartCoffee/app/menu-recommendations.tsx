@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Image,
+  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -234,6 +235,22 @@ export default function MenuRecommendationsScreen() {
         type: 'error',
         text1: 'Missing title',
         text2: 'Please enter a menu title.',
+      });
+      return;
+    }
+
+    const groupsMissingCategories = menuGroups.filter(
+      (group) => group.selectedBeverageCategories.length === 0
+    );
+    if (groupsMissingCategories.length > 0) {
+      Alert.alert(
+        'Missing categories',
+        'Each menu group must have at least one beverage category.'
+      );
+      Toast.show({
+        type: 'error',
+        text1: 'Missing categories',
+        text2: 'Each menu group must have at least one beverage category.',
       });
       return;
     }

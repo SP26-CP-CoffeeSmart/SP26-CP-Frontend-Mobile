@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -37,6 +37,7 @@ interface BeverageItem {
   flavor: string;
   time: string;
   image: any;
+  createDate?: string;
 }
 
 interface MenuHeaderApiItem {
@@ -56,6 +57,9 @@ type BeverageApiItem = Record<string, any>;
 const { width } = Dimensions.get('window');
 const MENU_CARD_WIDTH = width - 48;
 const BEVERAGE_PAGE_SIZE = 4;
+const BEVERAGE_PAGE_WIDTH = width - 48;
+const BEVERAGE_PAGE_GUTTER = 16;
+const BEVERAGE_PAGE_ITEM_WIDTH = BEVERAGE_PAGE_WIDTH + BEVERAGE_PAGE_GUTTER;
 
 const fallbackMenuImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
@@ -83,9 +87,7 @@ export default function MenuScreen() {
   const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
   const [beverages, setBeverages] = useState<BeverageItem[]>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
-  const [beveragesLoadingMore, setBeveragesLoadingMore] = useState(false);
   const [beveragesError, setBeveragesError] = useState<string | null>(null);
-  const [beveragePage, setBeveragePage] = useState(1);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
@@ -98,6 +100,8 @@ export default function MenuScreen() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createImageUploading, setCreateImageUploading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
+  const [beverageLooping, setBeverageLooping] = useState(false);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
@@ -216,7 +220,22 @@ export default function MenuScreen() {
               ? result.items
               : [];
 
-        const mapped = rawList.map((item, index) => {
+        const parseCreateDate = (value?: string) => {
+          if (!value) return 0;
+          const parsed = Date.parse(value);
+          return Number.isNaN(parsed) ? 0 : parsed;
+        };
+
+        const sortedList = [...rawList].sort((a, b) =>
+          parseCreateDate(
+            b?.createDate ?? b?.createdAt ?? b?.createdDate ?? b?.createdOn ?? ''
+          ) -
+          parseCreateDate(
+            a?.createDate ?? a?.createdAt ?? a?.createdDate ?? a?.createdOn ?? ''
+          )
+        );
+
+        const mapped = sortedList.map((item, index) => {
           const imageUrl = resolveImageUrl(AUTH_BASE_URL, String(item?.image ?? item?.imageUrl ?? ''));
           return {
             id: String(item?.beverageId ?? item?.id ?? index),
@@ -224,13 +243,14 @@ export default function MenuScreen() {
             flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
             time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
             image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+            createDate: String(
+              item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
+            ),
           };
         });
 
         if (isMounted) {
           setBeverages(mapped);
-          setBeveragePage(1);
-          setBeveragesLoadingMore(false);
           // console.log('Fetched Beverages:', mapped);
         }
       } catch (error) {
@@ -250,31 +270,50 @@ export default function MenuScreen() {
     };
   }, [authLoading, coffeeShopId]);
 
-  const totalBeveragePages = Math.ceil(beverages.length / BEVERAGE_PAGE_SIZE);
-  const visibleBeveragePages = Math.min(beveragePage, totalBeveragePages);
-  const beveragePages = Array.from({ length: visibleBeveragePages }, (_, index) =>
-    beverages.slice(index * BEVERAGE_PAGE_SIZE, (index + 1) * BEVERAGE_PAGE_SIZE)
+  const beveragePages = useMemo(
+    () =>
+      Array.from(
+        { length: Math.ceil(beverages.length / BEVERAGE_PAGE_SIZE) },
+        (_, index) => beverages.slice(index * BEVERAGE_PAGE_SIZE, (index + 1) * BEVERAGE_PAGE_SIZE)
+      ),
+    [beverages]
   );
-  const beveragePagerData = beveragesLoadingMore
-    ? [...beveragePages, null]
-    : beveragePages;
 
-  const handleLoadMoreBeverages = () => {
-    if (beveragesLoading || beveragesLoadingMore) return;
-    if (beveragePage >= totalBeveragePages) return;
-
-    setBeveragesLoadingMore(true);
-    setTimeout(() => {
-      setBeveragePage((prev) => Math.min(prev + 1, totalBeveragePages));
-      setBeveragesLoadingMore(false);
-    }, 900);
-  };
+  const beveragePagerData = useMemo(() => {
+    if (beveragePages.length <= 1) {
+      return beveragePages;
+    }
+    const firstPage = beveragePages[0];
+    const lastPage = beveragePages[beveragePages.length - 1];
+    return [lastPage, ...beveragePages, firstPage];
+  }, [beveragePages]);
 
   const handleBeveragePagerScrollEnd = (event: any) => {
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    const reachedEnd = contentOffset.x + layoutMeasurement.width >= contentSize.width - 40;
-    if (reachedEnd) {
-      handleLoadMoreBeverages();
+    if (beveragePages.length <= 1) {
+      return;
+    }
+
+    const { contentOffset } = event.nativeEvent;
+    const rawIndex = Math.round(contentOffset.x / BEVERAGE_PAGE_ITEM_WIDTH);
+
+    if (!beveragePagerRef.current) {
+      return;
+    }
+
+    if (rawIndex === 0) {
+      setBeverageLooping(true);
+      beveragePagerRef.current.scrollToIndex({
+        index: beveragePages.length,
+        animated: false,
+      });
+      setTimeout(() => setBeverageLooping(false), 120);
+    } else if (rawIndex === beveragePages.length + 1) {
+      setBeverageLooping(true);
+      beveragePagerRef.current.scrollToIndex({
+        index: 1,
+        animated: false,
+      });
+      setTimeout(() => setBeverageLooping(false), 120);
     }
   };
 
@@ -496,11 +535,10 @@ export default function MenuScreen() {
         ),
         time: String(created?.brewingTimeMinutes ?? created?.time ?? created?.prepTime ?? ''),
         image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+        createDate: String(created?.createDate ?? created?.createdAt ?? new Date().toISOString()),
       };
 
       setBeverages((prev) => [mapped, ...prev]);
-      setBeveragePage(1);
-      setBeveragesLoadingMore(false);
       resetCreateForm();
       setShowCreateModal(false);
     } catch (error) {
@@ -616,9 +654,17 @@ export default function MenuScreen() {
                             <Text style={styles.appliedText}>Applied</Text>
                           </View>
                         )}
-                        <TouchableOpacity style={styles.featureActionButton}>
+                        <TouchableOpacity
+                          style={styles.featureActionButton}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/menu-version/[id]',
+                              params: { id: item.id, name: item.name },
+                            })
+                          }
+                        >
                           <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
-                          <Text style={styles.featureActionText}>Edit</Text>
+                          <Text style={styles.featureActionText}>Detail</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.featureActionButton}>
                           <Ionicons
@@ -659,24 +705,43 @@ export default function MenuScreen() {
             </TouchableOpacity>
           </View>
 
-          {beveragesLoading ? (
-            <Text style={styles.beverageStateText}>Loading...</Text>
+          {beveragesLoading && beverages.length === 0 ? (
+            <View style={styles.beverageLoadingWrap}>
+              <ActivityIndicator size="small" color={stylesVars.primary} />
+              <Text style={styles.beverageLoadingText}>Loading...</Text>
+            </View>
           ) : beveragesError ? (
             <Text style={styles.beverageStateText}>{beveragesError}</Text>
           ) : beverages.length === 0 ? (
             <Text style={styles.beverageStateText}>No beverages found</Text>
           ) : (
-            <FlatList
-              horizontal
-              data={beveragePagerData}
-              keyExtractor={(_, index) => `beverage-page-${index}`}
-              showsHorizontalScrollIndicator={false}
-              pagingEnabled
-              onMomentumScrollEnd={handleBeveragePagerScrollEnd}
-              contentContainerStyle={styles.beveragePager}
-              renderItem={({ item: pageItems }) => (
-                <View style={styles.beveragePage}>
-                  {pageItems ? (
+            <View style={styles.beveragePagerWrap}>
+              <FlatList
+                ref={(ref) => {
+                  beveragePagerRef.current = ref;
+                }}
+                horizontal
+                data={beveragePagerData}
+                keyExtractor={(_, index) => `beverage-page-${index}`}
+                showsHorizontalScrollIndicator={false}
+                pagingEnabled
+                decelerationRate="fast"
+                snapToInterval={BEVERAGE_PAGE_ITEM_WIDTH}
+                snapToAlignment="start"
+                disableIntervalMomentum
+                initialScrollIndex={beveragePages.length > 1 ? 1 : 0}
+                getItemLayout={(_, index) => ({
+                  length: BEVERAGE_PAGE_ITEM_WIDTH,
+                  offset: BEVERAGE_PAGE_ITEM_WIDTH * index,
+                  index,
+                })}
+                windowSize={3}
+                removeClippedSubviews={false}
+                updateCellsBatchingPeriod={30}
+                contentContainerStyle={styles.beveragePager}
+                onMomentumScrollEnd={handleBeveragePagerScrollEnd}
+                renderItem={({ item: pageItems }) => (
+                  <View style={styles.beveragePage}>
                     <View style={styles.beverageGrid}>
                       {pageItems.map((item) => (
                         <TouchableOpacity
@@ -718,15 +783,15 @@ export default function MenuScreen() {
                         </TouchableOpacity>
                       ))}
                     </View>
-                  ) : (
-                    <View style={styles.beverageLoadingMorePage}>
-                      <ActivityIndicator size="small" color={stylesVars.primary} />
-                      <Text style={styles.beverageLoadingText}>Loading...</Text>
-                    </View>
-                  )}
+                  </View>
+                )}
+              />
+              {beverageLooping ? (
+                <View style={styles.beverageLoopOverlay}>
+                  <ActivityIndicator size="small" color={stylesVars.primary} />
                 </View>
-              )}
-            />
+              ) : null}
+            </View>
           )}
         </View>
 
@@ -1175,11 +1240,41 @@ const styles = StyleSheet.create({
     color: '#8B7355',
     paddingHorizontal: 4,
   },
+  beverageLoadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  beverageLoadingText: {
+    fontSize: 13,
+    color: '#8B7355',
+    fontWeight: '600',
+  },
   beveragePager: {
     paddingRight: 12,
   },
+  beveragePagerWrap: {
+    position: 'relative',
+  },
+  beverageLoopOverlay: {
+    position: 'absolute',
+    right: 12,
+    top: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 2,
+  },
   beveragePage: {
-    width: width - 24 * 2,
+    width: BEVERAGE_PAGE_WIDTH,
     marginRight: 16,
   },
   beverageGrid: {

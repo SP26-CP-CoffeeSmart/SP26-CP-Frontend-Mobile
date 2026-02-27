@@ -322,7 +322,7 @@ export default function ProfileScreen() {
         coffeeShopId: profileCoffeeShopId,
         sizeName: trimmedName,
         volume: parsedVolume,
-        isActive: true,
+        isActive: false,
       });
       setBeverageSizes((prev) => [created, ...prev]);
       setShowAddSizeModal(false);

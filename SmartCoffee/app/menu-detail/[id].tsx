@@ -3,7 +3,9 @@ import {
   Alert,
   Dimensions,
   Image,
+  Linking,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +16,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Toast from 'react-native-toast-message';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -205,18 +210,39 @@ export default function MenuDetailScreen() {
   const [menuPayload, setMenuPayload] = useState<any>(null);
   const [menuConfig, setMenuConfig] = useState<any>(null);
   const [storedMenuItems, setStoredMenuItems] = useState<any[]>([]);
+  const [menuDetailsPayload, setMenuDetailsPayload] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsReady, setDetailsReady] = useState(false);
   const [newItemCount, setNewItemCount] = useState('');
   const [regenerating, setRegenerating] = useState(false);
   const [renderingMenu, setRenderingMenu] = useState(false);
   const [renderedMenuUrl, setRenderedMenuUrl] = useState<string | null>(null);
   const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
+  const [isRenderSuccessOpen, setIsRenderSuccessOpen] = useState(false);
+  const [renderSuccessMessage, setRenderSuccessMessage] = useState('');
+  const [downloadingRender, setDownloadingRender] = useState(false);
   const windowHeight = Dimensions.get('window').height;
   const zoomScale = useSharedValue(1);
   const zoomScaleStart = useSharedValue(1);
+  const zoomTranslateX = useSharedValue(0);
+  const zoomTranslateY = useSharedValue(0);
+  const zoomTranslateXStart = useSharedValue(0);
+  const zoomTranslateYStart = useSharedValue(0);
   const zoomStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: zoomScale.value }],
+    transform: [
+      { translateX: zoomTranslateX.value },
+      { translateY: zoomTranslateY.value },
+      { scale: zoomScale.value },
+    ],
   }));
+
+  useEffect(() => {
+    if (!isImageZoomOpen) {
+      zoomScale.value = 1;
+      zoomTranslateX.value = 0;
+      zoomTranslateY.value = 0;
+    }
+  }, [isImageZoomOpen, zoomScale, zoomTranslateX, zoomTranslateY]);
   const trimmedItemCount = newItemCount.trim();
   const parsedItemCount = Number.parseInt(trimmedItemCount || '0', 10);
   const canRegenerate = Number.isFinite(parsedItemCount) && parsedItemCount > 0;
@@ -228,6 +254,8 @@ export default function MenuDetailScreen() {
       setMenuPayload(null);
       setMenuConfig(null);
       setStoredMenuItems([]);
+      setMenuDetailsPayload(null);
+      setDetailsReady(false);
       return;
     }
 
@@ -257,6 +285,8 @@ export default function MenuDetailScreen() {
     const baseMenu = selectedFromPayload ?? parsedItem;
     setCurrentMenu(baseMenu);
     setMenuDraft(baseMenu);
+    setMenuDetailsPayload(null);
+    setDetailsReady(false);
 
     const initialItems = toArray(
       baseMenu?.menuItems ??
@@ -331,6 +361,7 @@ export default function MenuDetailScreen() {
 
     try {
       setDetailsLoading(true);
+      setDetailsReady(false);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuDetails(), {
         method: 'POST',
         headers: {
@@ -414,6 +445,19 @@ export default function MenuDetailScreen() {
       if (responseMenuItems.length > 0) {
         setStoredMenuItems(responseMenuItems);
       }
+
+      if (responsePayload && typeof responsePayload === 'object') {
+        setMenuDetailsPayload(responsePayload);
+      } else {
+        setMenuDetailsPayload(null);
+      }
+
+      Toast.show({
+        type: 'success',
+        text1: 'Recipe details generated',
+        text2: 'You can now save and render the menu.',
+      });
+      setDetailsReady(true);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to generate menu details.';
@@ -430,6 +474,8 @@ export default function MenuDetailScreen() {
       setStoredMenuItems((prev) => {
         const next = prev.filter((item) => item?.menuItemId !== menuItemId);
         const nextSize = next.length;
+        setDetailsReady(false);
+        setMenuDetailsPayload(null);
         setMenuPayload((current) => {
           if (!current) return current;
           const menus = toArray(current?.menus ?? []);
@@ -509,6 +555,7 @@ export default function MenuDetailScreen() {
         ...(current ?? {}),
         menuSizeValue: nextSize,
       }));
+      setMenuDetailsPayload(null);
       return next;
     });
   };
@@ -576,6 +623,8 @@ export default function MenuDetailScreen() {
 
     try {
       setRegenerating(true);
+      setDetailsReady(false);
+      setMenuDetailsPayload(null);
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
         method: 'POST',
         headers: {
@@ -660,6 +709,9 @@ export default function MenuDetailScreen() {
   };
 
   const buildMenuRenderPayload = () => {
+    if (menuDetailsPayload) {
+      return menuDetailsPayload;
+    }
     const menuFromState =
       menuDraft ??
       currentMenu ??
@@ -725,7 +777,8 @@ export default function MenuDetailScreen() {
         setRenderedMenuUrl(finalUrl);
       }
 
-      Alert.alert('Render success', finalUrl ? 'Menu image is ready.' : 'Menu render completed.');
+      setRenderSuccessMessage(finalUrl ? 'Menu image is ready.' : 'Menu render completed.');
+      setIsRenderSuccessOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to render menu.';
       Alert.alert('Render failed', message);
@@ -734,13 +787,116 @@ export default function MenuDetailScreen() {
     }
   };
 
+  const handleDownloadRenderedMenu = async () => {
+    if (!renderedMenuUrl) {
+      Toast.show({ type: 'info', text1: 'No render available yet' });
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      Linking.openURL(renderedMenuUrl);
+      return;
+    }
+
+    if (typeof MediaLibrary.requestPermissionsAsync !== 'function') {
+      Toast.show({
+        type: 'error',
+        text1: 'Download unavailable',
+        text2: 'Please rebuild the app to enable photo saving.',
+      });
+      Linking.openURL(renderedMenuUrl);
+      return;
+    }
+
+    try {
+      setDownloadingRender(true);
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        Toast.show({ type: 'error', text1: 'Permission denied', text2: 'Allow access to save the image.' });
+        return;
+      }
+
+      const safeExtension = (() => {
+        const cleanUrl = renderedMenuUrl.split('?')[0];
+        const parts = cleanUrl.split('.');
+        const last = parts[parts.length - 1];
+        return last && last.length <= 4 ? last : 'jpg';
+      })();
+
+      const targetUri = `${FileSystem.cacheDirectory}menu-render-${Date.now()}.${safeExtension}`;
+      const downloadResult = await FileSystem.downloadAsync(renderedMenuUrl, targetUri);
+      const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+      await MediaLibrary.createAlbumAsync('SmartCoffee', asset, false);
+
+      Toast.show({ type: 'success', text1: 'Saved to Photos', text2: 'Menu image downloaded successfully.' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Download failed.';
+      Toast.show({ type: 'error', text1: 'Download failed', text2: message });
+    } finally {
+      setDownloadingRender(false);
+    }
+  };
+
+  const pinchGesture = Gesture.Pinch()
+    .onBegin(() => {
+      zoomScaleStart.value = zoomScale.value;
+    })
+    .onUpdate((event) => {
+      const nextScale = zoomScaleStart.value * event.scale;
+      zoomScale.value = Math.min(3, Math.max(1, nextScale));
+    })
+    .onEnd(() => {
+      if (zoomScale.value <= 1) {
+        zoomScale.value = 1;
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      zoomTranslateXStart.value = zoomTranslateX.value;
+      zoomTranslateYStart.value = zoomTranslateY.value;
+    })
+    .onUpdate((event) => {
+      if (zoomScale.value <= 1) {
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+        return;
+      }
+      zoomTranslateX.value = zoomTranslateXStart.value + event.translationX;
+      zoomTranslateY.value = zoomTranslateYStart.value + event.translationY;
+    })
+    .onEnd(() => {
+      if (zoomScale.value <= 1) {
+        zoomTranslateX.value = 0;
+        zoomTranslateY.value = 0;
+      }
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      zoomScale.value = 1;
+      zoomTranslateX.value = 0;
+      zoomTranslateY.value = 0;
+    });
+
+  const zoomGesture = Gesture.Simultaneous(
+    pinchGesture,
+    panGesture,
+    doubleTapGesture
+  );
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={20} color="#3C2A21" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{title || 'Menu Detail'}</Text>
+        <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
+          {title || 'Menu Detail'}
+        </Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -757,6 +913,39 @@ export default function MenuDetailScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
+
+        {!detailsLoading && !detailsReady && !renderedMenuUrl ? (
+          <View style={styles.actionCard}>
+            <View style={styles.regenerateRow}>
+              <Text style={styles.regenerateLabel}>Quantity</Text>
+              <TextInput
+                style={styles.quantityInput}
+                placeholder="Enter number"
+                placeholderTextColor="#8E7B6F"
+                keyboardType="number-pad"
+                value={newItemCount}
+                onChangeText={setNewItemCount}
+              />
+            </View>
+            <Text style={styles.regenerateHint}>
+              Keep the selected items, recreate other items to meet the menu requirements.
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.regenerateButton,
+                (regenerating || !canRegenerate) && styles.regenerateButtonDisabled,
+              ]}
+              onPress={handleRegenerate}
+              disabled={regenerating || !canRegenerate}
+            >
+              <Text style={styles.regenerateButtonText}>
+                {regenerating ? 'Generating...' : 'Generate Again'}
+              </Text>
+              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {groupedItems.length === 0 ? (
           <Text style={styles.emptyText}>No menu items found in this menu.</Text>
         ) : (
@@ -802,57 +991,35 @@ export default function MenuDetailScreen() {
         )}
       </ScrollView>
 
-      <View style={styles.regenerateBar}>
+      <View style={styles.bottomBar}>
+        {!renderedMenuUrl ? (
+          <TouchableOpacity
+            style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
+            onPress={detailsReady ? handleRenderMenu : handleGenerateDetails}
+            disabled={detailsLoading || (detailsReady && renderingMenu)}
+          >
+            <Text style={styles.detailButtonText}>
+              {detailsReady
+                ? renderingMenu
+                  ? 'Rendering...'
+                  : 'Save and Render Menu'
+                : detailsLoading
+                  ? 'Generating Details...'
+                  : 'Generate Recipe Details'}
+            </Text>
+            <Ionicons
+              name={detailsReady ? 'image' : 'sparkles'}
+              size={16}
+              color="#FFFFFF"
+            />
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
-          style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
-          onPress={handleGenerateDetails}
-          disabled={detailsLoading}
+          style={styles.goBackButton}
+          onPress={() => router.replace('/(tabs)/menu')}
         >
-          <Text style={styles.detailButtonText}>
-            {detailsLoading ? 'Generating Details...' : 'Generate Recipe Details'}
-          </Text>
-          <Ionicons name="sparkles" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-        <View style={styles.regenerateRow}>
-          <Text style={styles.regenerateLabel}>Quantity</Text>
-          <TextInput
-            style={styles.quantityInput}
-            placeholder="Enter number"
-            placeholderTextColor="#8E7B6F"
-            keyboardType="number-pad"
-            value={newItemCount}
-            onChangeText={setNewItemCount}
-          />
-        </View>
-        <Text style={styles.regenerateHint}>
-          Keep the selected items, recreate other items to meet the menu requirements.
-        </Text>
-        <TouchableOpacity
-          style={[
-            styles.regenerateButton,
-            (regenerating || !canRegenerate) && styles.regenerateButtonDisabled,
-          ]}
-          onPress={handleRegenerate}
-          disabled={regenerating || !canRegenerate}
-        >
-          <Text style={styles.regenerateButtonText}>
-            {regenerating ? 'Generating...' : 'Generate Again'}
-          </Text>
-          <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.renderButton,
-            (renderingMenu || !storedMenuItems.length) && styles.regenerateButtonDisabled,
-          ]}
-          onPress={handleRenderMenu}
-          disabled={renderingMenu || !storedMenuItems.length}
-        >
-          <Text style={styles.renderButtonText}>
-            {renderingMenu ? 'Rendering...' : 'Render Menu'}
-          </Text>
-          <Ionicons name="image" size={16} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+          <Text style={styles.goBackButtonText}>Go Back</Text>
         </TouchableOpacity>
       </View>
 
@@ -862,7 +1029,7 @@ export default function MenuDetailScreen() {
         animationType="fade"
         onRequestClose={() => setIsImageZoomOpen(false)}
       >
-        <View style={styles.zoomOverlay}>
+        <GestureHandlerRootView style={styles.zoomOverlay}>
           <TouchableOpacity
             style={styles.zoomBackdrop}
             activeOpacity={1}
@@ -876,31 +1043,66 @@ export default function MenuDetailScreen() {
               <Text style={styles.zoomCloseText}>Close</Text>
             </TouchableOpacity>
             {renderedMenuUrl ? (
-              <GestureDetector
-                gesture={Gesture.Pinch()
-                  .onBegin(() => {
-                    zoomScaleStart.value = zoomScale.value;
-                  })
-                  .onUpdate((event) => {
-                    zoomScale.value = Math.max(1, zoomScaleStart.value * event.scale);
-                  })
-                  .onEnd(() => {
-                    if (zoomScale.value < 1) {
-                      zoomScale.value = 1;
-                    }
-                  })}
-              >
-                <Animated.Image
-                  source={{ uri: renderedMenuUrl }}
+              <GestureDetector gesture={zoomGesture}>
+                <Animated.View
+                  collapsable={false}
                   style={[
-                    styles.zoomImage,
+                    styles.zoomImageContainer,
                     { height: Math.min(windowHeight * 0.7, 620) },
                     zoomStyle,
                   ]}
-                  resizeMode="contain"
-                />
+                >
+                  <Image
+                    source={{ uri: renderedMenuUrl }}
+                    style={styles.zoomImage}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
               </GestureDetector>
             ) : null}
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
+
+      <Modal
+        visible={isRenderSuccessOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsRenderSuccessOpen(false)}
+      >
+        <View style={styles.renderSuccessOverlay}>
+          <TouchableOpacity
+            style={styles.renderSuccessBackdrop}
+            activeOpacity={1}
+            onPress={() => setIsRenderSuccessOpen(false)}
+          />
+          <View style={styles.renderSuccessCard}>
+            <View style={styles.renderSuccessIcon}>
+              <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+            </View>
+            <Text style={styles.renderSuccessTitle}>Render success</Text>
+            <Text style={styles.renderSuccessText}>{renderSuccessMessage}</Text>
+            <View style={styles.renderSuccessActions}>
+              <TouchableOpacity
+                style={styles.renderSuccessButton}
+                onPress={() => setIsRenderSuccessOpen(false)}
+              >
+                <Text style={styles.renderSuccessButtonText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.renderSuccessButton,
+                  styles.renderSuccessButtonPrimary,
+                  downloadingRender && styles.renderSuccessButtonDisabled,
+                ]}
+                onPress={handleDownloadRenderedMenu}
+                disabled={downloadingRender}
+              >
+                <Text style={styles.renderSuccessButtonPrimaryText}>
+                  {downloadingRender ? 'Saving...' : 'Download'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -934,6 +1136,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#3C2A21',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+    lineHeight: 22,
   },
   headerSpacer: {
     width: 36,
@@ -1035,7 +1241,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  regenerateBar: {
+  actionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#E6D9CC',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    gap: 10,
+    marginBottom: 18,
+  },
+  bottomBar: {
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 20,
@@ -1085,19 +1305,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  renderButton: {
+  goBackButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
+    gap: 6,
+    paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: '#2F5D50',
+    backgroundColor: '#F1E7DC',
   },
-  renderButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+  goBackButtonText: {
+    fontSize: 13,
     fontWeight: '700',
+    color: '#3C2A21',
   },
   renderedSection: {
     marginBottom: 20,
@@ -1135,8 +1355,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 12,
   },
+  zoomImageContainer: {
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   zoomImage: {
     width: '100%',
+    height: '100%',
     borderRadius: 12,
     backgroundColor: '#E8DED3',
   },
@@ -1152,5 +1378,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#3C2A21',
+  },
+  renderSuccessOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 24,
+  },
+  renderSuccessBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  renderSuccessCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    gap: 10,
+  },
+  renderSuccessIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#3C7A57',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renderSuccessTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3C2A21',
+  },
+  renderSuccessText: {
+    fontSize: 13,
+    color: '#6B5B4D',
+    textAlign: 'center',
+  },
+  renderSuccessActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 6,
+  },
+  renderSuccessButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(60, 42, 33, 0.2)',
+    alignItems: 'center',
+  },
+  renderSuccessButtonPrimary: {
+    backgroundColor: '#3C2A21',
+    borderColor: '#3C2A21',
+  },
+  renderSuccessButtonDisabled: {
+    opacity: 0.6,
+  },
+  renderSuccessButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3C2A21',
+  },
+  renderSuccessButtonPrimaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

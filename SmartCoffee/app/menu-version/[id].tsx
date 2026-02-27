@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     StyleSheet,
     View,
     Text,
@@ -85,6 +86,27 @@ const MenuVersionPage = () => {
     const [error, setError] = useState<string | null>(null);
     const [versions, setVersions] = useState<MenuVersion[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
+    const pulse = useRef(new Animated.Value(0.25)).current;
+
+    useEffect(() => {
+        const loop = Animated.loop(
+            Animated.sequence([
+                Animated.timing(pulse, {
+                    toValue: 1,
+                    duration: 700,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(pulse, {
+                    toValue: 0.25,
+                    duration: 700,
+                    useNativeDriver: true,
+                }),
+            ])
+        );
+
+        loop.start();
+        return () => loop.stop();
+    }, [pulse]);
 
     useEffect(() => {
         let isMounted = true;
@@ -159,16 +181,45 @@ const MenuVersionPage = () => {
         setCurrentIndex(currentIndexValue);
     };
 
+    const renderSkeleton = () => (
+        <View style={styles.cardContainer}>
+            <Animated.View
+                style={[
+                    styles.skeletonCard,
+                    {
+                        transform: [
+                            {
+                                scale: pulse.interpolate({
+                                    inputRange: [0.25, 1],
+                                    outputRange: [0.98, 1.02],
+                                }),
+                            },
+                        ],
+                    },
+                ]}
+            >
+                <Animated.View style={[styles.skeletonImage, { opacity: pulse }]} />
+                <View style={styles.skeletonBody}>
+                    <Animated.View style={[styles.skeletonLine, styles.skeletonTitle, { opacity: pulse }]} />
+                    <Animated.View style={[styles.skeletonLine, styles.skeletonLineWide, { opacity: pulse }]} />
+                    <View style={styles.skeletonRow}>
+                        <Animated.View style={[styles.skeletonLine, styles.skeletonLineShort, { opacity: pulse }]} />
+                        <Animated.View style={[styles.skeletonLine, styles.skeletonLineShort, { opacity: pulse }]} />
+                    </View>
+                </View>
+            </Animated.View>
+        </View>
+    );
+
     return (
-        <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
             <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
                 {/* Header */}
                 <View style={styles.headerWrapper}>
                     <View style={styles.header}>
                         <TouchableOpacity onPress={() => router.back()}>
-                            <Ionicons name="chevron-back" size={24} color={stylesVars.espresso} />
+                            <Ionicons name="chevron-back" size={40} color={stylesVars.espresso} />
                         </TouchableOpacity>
-                        <Text style={styles.title}>{name || 'Menu Versions'}</Text>
                         <View style={{ width: 24 }} />
                     </View>
                 </View>
@@ -178,9 +229,13 @@ const MenuVersionPage = () => {
                     <View style={styles.centerContainer}>
                         <Text style={styles.errorText}>{error}</Text>
                     </View>
-                ) : loading || versions.length === 0 ? (
+                ) : loading ? (
                     <View style={styles.centerContainer}>
-                        <ActivityIndicator size="large" color={stylesVars.primary} />
+                        {renderSkeleton()}
+                    </View>
+                ) : versions.length === 0 ? (
+                    <View style={styles.centerContainer}>
+                        <Text style={styles.errorText}>No menu versions.</Text>
                     </View>
                 ) : (
                     <>
@@ -332,7 +387,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 24,
-        marginTop: 12,
+        marginTop: 30,
     },
     headerWrapper: {
         paddingHorizontal: 24,
@@ -350,6 +405,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         minHeight: 300,
         paddingHorizontal: 24,
+        gap: 16,
     },
     errorText: {
         fontSize: 14,
@@ -369,6 +425,42 @@ const styles = StyleSheet.create({
         width,
         justifyContent: 'center',
         alignItems: 'center',
+    },
+    skeletonCard: {
+        width: CARD_WIDTH,
+        borderRadius: 28,
+        backgroundColor: '#EFEAE4',
+        overflow: 'hidden',
+        marginBottom: 8,
+    },
+    skeletonImage: {
+        width: '100%',
+        height: 220,
+        backgroundColor: '#E3DCD4',
+    },
+    skeletonBody: {
+        padding: 16,
+        gap: 12,
+    },
+    skeletonRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    skeletonLine: {
+        height: 12,
+        borderRadius: 8,
+        backgroundColor: '#E3DCD4',
+    },
+    skeletonTitle: {
+        height: 18,
+        width: '70%',
+    },
+    skeletonLineWide: {
+        width: '85%',
+    },
+    skeletonLineShort: {
+        width: '40%',
     },
     cardWrapper: {
         width: CARD_WIDTH + 24,
