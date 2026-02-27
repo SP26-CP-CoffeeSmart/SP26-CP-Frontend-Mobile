@@ -316,6 +316,21 @@ const MenuVersionPage = () => {
                                                         </View>
                                                     </View>
                                                 )}
+
+                                                {/* Insights Button */}
+                                                <TouchableOpacity
+                                                    style={styles.insightsButton}
+                                                    onPress={() => router.push({
+                                                        pathname: '/menu-insights',
+                                                        params: { menuId: item.id }
+                                                    })}
+                                                >
+                                                    <View style={styles.insightsButtonContent}>
+                                                        <Ionicons name="analytics" size={16} color={stylesVars.primary} />
+                                                        <Text style={styles.insightsButtonText}>View Insights</Text>
+                                                    </View>
+                                                    <Ionicons name="chevron-forward" size={16} color={stylesVars.primary} />
+                                                </TouchableOpacity>
                                             </View>
 
 
@@ -581,6 +596,28 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: stylesVars.secondary,
         marginLeft: 6,
+    },
+    insightsButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginTop: 16,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+        backgroundColor: 'rgba(139, 111, 78, 0.08)',
+        borderWidth: 1,
+        borderColor: 'rgba(139, 111, 78, 0.15)',
+    },
+    insightsButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    insightsButtonText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: stylesVars.primary,
     },
     swipeIndicator: {
         position: 'absolute',

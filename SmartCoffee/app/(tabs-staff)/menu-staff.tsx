@@ -76,6 +76,7 @@ export default function MenuStaffScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
+    const [menuHeaderName, setMenuHeaderName] = useState<string | null>(null);
 
     const fetchMenu = async () => {
         if (!coffeeShopId) {
@@ -107,6 +108,31 @@ export default function MenuStaffScreen() {
             const data = await response.json();
             setMenuData(data);
             setAllMenuItems([]);
+
+            // Fetch menu header to get menu name
+            if (data?.menuHeaderId) {
+                try {
+                    const headerResponse = await authorizedFetch(
+                        API_ENDPOINTS.menuHeader.getById(data.menuHeaderId),
+                        {
+                            headers: {
+                                Accept: '*/*',
+                            },
+                        }
+                    );
+
+                    if (headerResponse.ok) {
+                        const headerData = await headerResponse.json();
+                        setMenuHeaderName(headerData?.name ?? null);
+                    } else {
+                        console.error('[Menu Staff] Failed to fetch MenuHeader:', headerResponse.status);
+                    }
+                } catch (headerError) {
+                    console.error('[Menu Staff] Error fetching MenuHeader:', headerError);
+                }
+            } else {
+                setMenuHeaderName(null);
+            }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load menu';
             setError(errorMessage);
@@ -248,8 +274,9 @@ export default function MenuStaffScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                <Text style={styles.headerTitle}>Menu List</Text>
-                <Text style={styles.headerManagement}>MANAGEMENT CONSOLE</Text>
+                {menuHeaderName && (<Text style={styles.headerTitle}>{menuHeaderName}</Text>)}
+                <Text style={styles.headerManagement}>Menu List</Text>
+
             </View>
 
             <ScrollView

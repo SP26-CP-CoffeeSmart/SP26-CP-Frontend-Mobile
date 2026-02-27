@@ -78,6 +78,24 @@ interface DailySalesItem {
     item: MenuItem;
 }
 
+interface ItemSize {
+    itemSizeId: number;
+    beverageSizeId: number;
+    menuItemId: number;
+    sellingPrice: number;
+    beverageSize?: {
+        beverageSizeId: number;
+        sizeName?: string;
+        volume?: number;
+    };
+}
+
+interface SizeInfo {
+    name: string;
+    hasPrice: boolean;
+    price?: number;
+}
+
 const fallbackMenuImage = 'https://via.placeholder.com/60';
 
 export default function DailySalesScreen() {
@@ -97,6 +115,16 @@ export default function DailySalesScreen() {
     const [originalSalesData, setOriginalSalesData] = useState<
         Map<number, DailySalesItem | null>
     >(new Map());
+    const [itemSizeMap, setItemSizeMap] = useState<Map<number, ItemSize[]>>(new Map());
+
+    const formatPrice = (value?: number) => {
+        if (value == null) return '';
+        try {
+            return `${value.toLocaleString('vi-VN')} đ`;
+        } catch {
+            return `${value} đ`;
+        }
+    };
 
     const fetchMenu = async () => {
         if (!coffeeShopId) {
@@ -140,6 +168,45 @@ export default function DailySalesScreen() {
                 });
             }
             setAllItems(items);
+
+            // Fetch item sizes (prices per size for each menu item in this menu)
+            try {
+                const itemSizeResponse = await authorizedFetch(
+                    API_ENDPOINTS.itemSize.getByMenu(menuData.menuId),
+                    {
+                        headers: {
+                            Accept: '*/*',
+                        },
+                    }
+                );
+
+                if (itemSizeResponse.ok) {
+                    const data: ItemSize[] = await itemSizeResponse.json();
+                    console.log('[Daily Sales] ItemSize by menu response:', data);
+                    if (Array.isArray(data)) {
+                        const map = new Map<number, ItemSize[]>();
+                        data.forEach((item) => {
+                            const key = item.menuItemId;
+                            if (!key) return;
+                            const list = map.get(key) || [];
+                            list.push(item);
+                            map.set(key, list);
+                        });
+                        console.log('[Daily Sales] ItemSize mapping (menuItemId -> sizes):',
+                            Array.from(map.entries()).map(([menuItemId, sizes]) => ({ menuItemId, sizes }))
+                        );
+                        setItemSizeMap(map);
+                    }
+                } else {
+                    console.error(
+                        '[Daily Sales] Error fetching item sizes:',
+                        itemSizeResponse.status
+                    );
+                }
+            } catch (itemSizeError) {
+                console.error('[Daily Sales] Error fetching item sizes:', itemSizeError);
+                // Continue without item sizes; price mapping will be unavailable
+            }
 
             // Fetch beverage sizes for this shop
             try {
@@ -187,6 +254,35 @@ export default function DailySalesScreen() {
             return beverageSizes.map(size => size.sizeName || size.name || '').filter(Boolean);
         }
         return ['S', 'M', 'L'];
+    };
+
+    const getSizeInfosForItem = (menuItemId: number): SizeInfo[] => {
+        const sizeNames = getAvailableSizes();
+        const itemSizesForItem = itemSizeMap.get(menuItemId) || [];
+
+        return sizeNames.map((name) => {
+            const trimmedName = name.trim();
+            const matchByName = itemSizesForItem.find(
+                (it) => it.beverageSize?.sizeName?.trim() === trimmedName
+            );
+
+            let match = matchByName;
+            if (!match) {
+                const beverageSizeDef = beverageSizes.find(
+                    (bs) => (bs.sizeName || bs.name || '').trim() === trimmedName
+                );
+                const bsId = beverageSizeDef?.beverageSizeId || beverageSizeDef?.id;
+                if (bsId != null) {
+                    match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
+                }
+            }
+
+            return {
+                name: trimmedName,
+                hasPrice: !!match,
+                price: match?.sellingPrice,
+            };
+        });
     };
 
     const updateSalesQuantity = (menuItemId: number, sizeName: string, quantity: number) => {
@@ -383,7 +479,7 @@ export default function DailySalesScreen() {
     const renderSalesItem = (item: MenuItem) => {
         const sale = salesData.get(item.menuItemId);
         const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
-        const sizes = getAvailableSizes();
+        const sizeInfos = getSizeInfosForItem(item.menuItemId);
         const isEditing = editingItems.has(item.menuItemId);
 
         return (
@@ -402,24 +498,30 @@ export default function DailySalesScreen() {
 
                         {/* Size Selector */}
                         <View style={styles.sizeSelector}>
-                            {sizes.map((size) => (
-                                <TouchableOpacity
-                                    key={size}
-                                    style={[
-                                        styles.sizeButton,
-                                        sale && sale.sizes[size] > 0 && styles.sizeButtonActive,
-                                    ]}
-                                >
-                                    <Text
+                            {sizeInfos.map((size) => {
+                                const isSelected = sale && sale.sizes[size.name] > 0;
+                                const isDisabled = !size.hasPrice;
+                                return (
+                                    <View
+                                        key={size.name}
                                         style={[
-                                            styles.sizeButtonText,
-                                            sale && sale.sizes[size] > 0 && styles.sizeButtonTextActive,
+                                            styles.sizeButton,
+                                            isSelected && styles.sizeButtonActive,
+                                            isDisabled && styles.sizeButtonDisabled,
                                         ]}
                                     >
-                                        {size}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
+                                        <Text
+                                            style={[
+                                                styles.sizeButtonText,
+                                                isSelected && styles.sizeButtonTextActive,
+                                                isDisabled && styles.sizeButtonTextDisabled,
+                                            ]}
+                                        >
+                                            {size.name}
+                                        </Text>
+                                    </View>
+                                );
+                            })}
                         </View>
                     </View>
 
@@ -456,11 +558,22 @@ export default function DailySalesScreen() {
                                 onPress={() => {
                                     // Start edit mode and increment the first size by default
                                     handleStartEdit(item.menuItemId);
-                                    const firstSize = sizes[0] || 'S';
+                                    const firstPricedSize =
+                                        sizeInfos.find((s) => s.hasPrice)?.name || null;
+
+                                    if (!firstPricedSize) {
+                                        Toast.show({
+                                            type: 'error',
+                                            text1: 'Chưa cấu hình giá',
+                                            text2: 'Vui lòng cấu hình giá cho món này trước khi nhập doanh thu.',
+                                        });
+                                        return;
+                                    }
+
                                     updateSalesQuantity(
                                         item.menuItemId,
-                                        firstSize,
-                                        (sale?.sizes[firstSize] || 0) + 1
+                                        firstPricedSize,
+                                        (sale?.sizes[firstPricedSize] || 0) + 1
                                     );
                                 }}
                             >
@@ -473,21 +586,34 @@ export default function DailySalesScreen() {
                 {/* Size quantity inputs */}
                 {sale && sale.total > 0 && (
                     <View style={styles.sizeQuantityRow}>
-                        {sizes.map((size) => (
-                            <View key={size} style={styles.sizeQuantityInput}>
-                                <Text style={styles.sizeLabel}>{size}</Text>
-                                <TextInput
-                                    style={styles.quantitySmallInput}
-                                    value={(sale?.sizes[size] || 0).toString()}
-                                    onChangeText={(text) => {
-                                        const quantity = parseInt(text) || 0;
-                                        updateSalesQuantity(item.menuItemId, size, quantity);
-                                    }}
-                                    keyboardType="numeric"
-                                    placeholder="0"
-                                />
-                            </View>
-                        ))}
+                        {sizeInfos.map((size) => {
+                            const isDisabled = !size.hasPrice;
+                            const quantity = sale?.sizes[size.name] || 0;
+                            return (
+                                <View key={size.name} style={styles.sizeQuantityInput}>
+                                    <Text style={styles.sizeLabel}>
+                                        {size.hasPrice
+                                            ? `${size.name} - ${formatPrice(size.price)}`
+                                            : `${size.name} - Chưa có giá`}
+                                    </Text>
+                                    <TextInput
+                                        style={[
+                                            styles.quantitySmallInput,
+                                            isDisabled && styles.quantitySmallInputDisabled,
+                                        ]}
+                                        value={quantity.toString()}
+                                        onChangeText={(text) => {
+                                            if (isDisabled) return;
+                                            const parsed = parseInt(text, 10) || 0;
+                                            updateSalesQuantity(item.menuItemId, size.name, parsed);
+                                        }}
+                                        editable={!isDisabled}
+                                        keyboardType="numeric"
+                                        placeholder={isDisabled ? '-' : '0'}
+                                    />
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
             </View>
@@ -845,6 +971,9 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.accent,
         borderColor: COLORS.accent,
     },
+    sizeButtonDisabled: {
+        opacity: 0.5,
+    },
     sizeButtonText: {
         fontSize: 11,
         fontWeight: '600',
@@ -852,6 +981,9 @@ const styles = StyleSheet.create({
     },
     sizeButtonTextActive: {
         color: COLORS.white,
+    },
+    sizeButtonTextDisabled: {
+        color: COLORS.textSecondary,
     },
     quantitySection: {
         flexDirection: 'row',
@@ -942,6 +1074,10 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '600',
         color: COLORS.text,
+    },
+    quantitySmallInputDisabled: {
+        backgroundColor: '#F2F2F2',
+        color: COLORS.textSecondary,
     },
     emptyContent: {
         justifyContent: 'center',

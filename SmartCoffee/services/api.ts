@@ -56,6 +56,9 @@ export const API_ENDPOINTS = {
     getAll: () => `${AUTH_BASE_URL}/BeverageCategory`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/BeverageCategory/shop/${shopId}`,
   },
+  itemSize: {
+    getByMenu: (menuId: number) => `${AUTH_BASE_URL}/ItemSize/by-menu/${menuId}`,
+  },
   ai: {
     createMenuSkeleton: () => `${AUTH_BASE_URL}/AI/create-menu-p1-skeleton`,
     createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
@@ -66,6 +69,9 @@ export const API_ENDPOINTS = {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/by-shop/${shopId}`,
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
+  },
+  menuHeader: {
+    getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,
   },
   menuPerformance: {
     getSummary: (menuId: number) => `${AUTH_BASE_URL}/MenuPerformance/${menuId}/summary`,

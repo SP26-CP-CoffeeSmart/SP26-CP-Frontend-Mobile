@@ -12,12 +12,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
 } from '../../services/menuPerformanceService';
 
 export default function MenuInsightsScreen() {
+  const { menuId } = useLocalSearchParams<{ menuId?: string }>();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,13 +29,14 @@ export default function MenuInsightsScreen() {
 
   useEffect(() => {
     fetchMenuPerformance();
-  }, []);
+  }, [menuId]);
 
   const fetchMenuPerformance = async () => {
     try {
       setLoading(true);
       setError(null);
-      const result = await menuPerformanceService.getSummary(1);
+      const id = menuId ? Number(menuId) : 1;
+      const result = await menuPerformanceService.getSummary(id);
       setData(result);
       // Set to latest date by default
       if (result.chartData && result.chartData.length > 0) {
