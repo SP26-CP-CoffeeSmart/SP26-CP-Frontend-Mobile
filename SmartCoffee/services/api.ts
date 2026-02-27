@@ -82,5 +82,6 @@ export const API_ENDPOINTS = {
   },
   dailySale: {
     batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
+    getByMenuItem: (menuItemId: number) => `${AUTH_BASE_URL}/DailySale/by-menu-item/${menuItemId}`,
   },
 };
