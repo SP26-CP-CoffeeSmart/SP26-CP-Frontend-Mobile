@@ -76,6 +76,10 @@ export const API_ENDPOINTS = {
   menuPerformance: {
     getSummary: (menuId: number) => `${AUTH_BASE_URL}/MenuPerformance/${menuId}/summary`,
   },
+  menuItem: {
+    getAll: () => `${AUTH_BASE_URL}/MenuItem`,
+    getById: (id: number) => `${AUTH_BASE_URL}/MenuItem/${id}`,
+  },
   shopStaff: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopStaff/by-shop/${shopId}`,
     create: () => `${AUTH_BASE_URL}/Auth/register-staff`,
