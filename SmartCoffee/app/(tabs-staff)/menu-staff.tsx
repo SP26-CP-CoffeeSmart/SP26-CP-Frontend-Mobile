@@ -9,6 +9,7 @@ import {
     TouchableOpacity,
     RefreshControl,
     Image,
+    Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
+import QRCode from 'react-native-qrcode-svg';
 
 const COLORS = {
     bg: '#F7F3EF',
@@ -29,6 +31,8 @@ const COLORS = {
     status: '#E3F7E6',
     outOfStock: '#FFE6E6',
 };
+
+const DOMAIN_WEB = 'http:/192.168.2.2:5173/feedback';
 
 interface MenuItem {
     menuItemId: number;
@@ -77,6 +81,7 @@ export default function MenuStaffScreen() {
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [menuHeaderName, setMenuHeaderName] = useState<string | null>(null);
+    const [qrItem, setQrItem] = useState<MenuItem | null>(null);
 
     const fetchMenu = async () => {
         if (!coffeeShopId) {
@@ -184,6 +189,10 @@ export default function MenuStaffScreen() {
         });
     };
 
+    const handleGenerateQr = (item: MenuItem) => {
+        setQrItem(item);
+    };
+
     const renderMenuGroupHeader = (groupName: string) => {
         return (
             <View key={`group-header-${groupName}`} style={styles.menuGroupHeader}>
@@ -231,6 +240,13 @@ export default function MenuStaffScreen() {
                     >
                         <Ionicons name="document-text" size={16} color={COLORS.text} />
                         <Text style={styles.actionButtonText}>View Recipe</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.actionButton}
+                        onPress={() => handleGenerateQr(item)}
+                    >
+                        <Ionicons name="qr-code" size={16} color={COLORS.text} />
+                        <Text style={styles.actionButtonText}>QR</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={[styles.actionButton, styles.actionButtonDark]}
@@ -336,6 +352,36 @@ export default function MenuStaffScreen() {
                     </View>
                 )}
             </ScrollView>
+
+            {/* QR Modal for customer scanning */}
+            <Modal
+                visible={!!qrItem}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setQrItem(null)}
+            >
+                <View style={styles.qrModalBackdrop}>
+                    <View style={styles.qrModalContent}>
+                        <Text style={styles.qrTitle}>Scan to give feedback</Text>
+                        {qrItem && (
+                            <View style={styles.qrWrapper}>
+                                <QRCode
+                                    value={`${DOMAIN_WEB}/${qrItem.menuItemId}`}
+                                    size={220}
+                                    backgroundColor={COLORS.white}
+                                    color={COLORS.text}
+                                />
+                            </View>
+                        )}
+                        <TouchableOpacity
+                            style={styles.qrCloseButton}
+                            onPress={() => setQrItem(null)}
+                        >
+                            <Text style={styles.qrCloseButtonText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -584,5 +630,42 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: COLORS.textSecondary,
         marginTop: 8,
+    },
+    qrModalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    qrModalContent: {
+        width: '80%',
+        backgroundColor: COLORS.white,
+        borderRadius: 16,
+        padding: 20,
+        alignItems: 'center',
+    },
+    qrTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    qrWrapper: {
+        padding: 16,
+        borderRadius: 16,
+        backgroundColor: COLORS.bg,
+        marginBottom: 20,
+    },
+    qrCloseButton: {
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 8,
+        backgroundColor: COLORS.accent,
+    },
+    qrCloseButtonText: {
+        color: COLORS.white,
+        fontWeight: '600',
+        fontSize: 14,
     },
 });
