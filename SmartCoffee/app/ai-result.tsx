@@ -53,6 +53,16 @@ interface Recipe {
   [key: string]: any;
 }
 
+interface UniquenessInfo {
+  maxJaccardSimilarity?: number;
+  uniquenessScore?: number;
+  mostSimilarRecipeId?: number;
+  mostSimilarRecipeName?: string;
+  isUnique?: boolean;
+  existingRecipesCompared?: number;
+  newIngredientCount?: number;
+}
+
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -104,6 +114,20 @@ export default function AiResultScreen() {
       return Object.entries(parsed)
         .map(([key, val]) => `${key}: ${val}`)
         .join('\n') || '-';
+    }
+    return '-';
+  };
+
+  const formatPercent = (value: unknown, digits = 0): string => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return `${(value * 100).toFixed(digits)}%`;
+    }
+    return '-';
+  };
+
+  const formatCount = (value: unknown): string => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
     }
     return '-';
   };
@@ -165,15 +189,18 @@ export default function AiResultScreen() {
 
   let recipe: Recipe | null = null;
   let imageGeneration: any = null;
+  let uniqueness: UniquenessInfo | null = null;
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
       console.log('AI Recipe Result raw payload:', parsed);
       recipe = parsed?.recipe ?? parsed;
       imageGeneration = parsed?.imageGeneration ?? null;
+      uniqueness = parsed?.uniqueness ?? parsed?.recipe?.uniqueness ?? null;
     } catch {
       recipe = null;
       imageGeneration = null;
+      uniqueness = null;
     }
   }
 
@@ -462,6 +489,59 @@ export default function AiResultScreen() {
               </ThemedText>
             </View>
           </View>
+
+          <View style={styles.sectionSpacing} />
+
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="insights" size={16} color="#8B5E3C" />
+            <ThemedText style={styles.sectionTitle}>Uniqueness</ThemedText>
+          </View>
+          {uniqueness ? (
+            <>
+              <View style={styles.factsGrid}>
+                <View style={styles.factCard}>
+                  <ThemedText style={styles.factLabel}>Status</ThemedText>
+                  <ThemedText style={styles.factValue}>
+                    {uniqueness.isUnique ? 'Unique' : 'Not unique'}
+                  </ThemedText>
+                </View>
+                <View style={styles.factCard}>
+                  <ThemedText style={styles.factLabel}>Score</ThemedText>
+                  <ThemedText style={styles.factValue}>
+                    {formatPercent(uniqueness.uniquenessScore, 0)}
+                  </ThemedText>
+                </View>
+                <View style={styles.factCard}>
+                  <ThemedText style={styles.factLabel}>Max Similarity</ThemedText>
+                  <ThemedText style={styles.factValue}>
+                    {formatPercent(uniqueness.maxJaccardSimilarity, 0)}
+                  </ThemedText>
+                </View>
+                <View style={styles.factCard}>
+                  <ThemedText style={styles.factLabel}>Compared</ThemedText>
+                  <ThemedText style={styles.factValue}>
+                    {formatCount(uniqueness.existingRecipesCompared)}
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.sectionSpacing} />
+              <View style={styles.row}>
+                <View style={styles.labelRow}>
+                  <MaterialIcons name="compare" size={16} color="#8B5E3C" />
+                  <ThemedText style={styles.label}>Most Similar</ThemedText>
+                </View>
+                <ThemedText style={styles.value}>
+                  {uniqueness.mostSimilarRecipeName
+                    ? `${uniqueness.mostSimilarRecipeName}${
+                      uniqueness.mostSimilarRecipeId ? ` (#${uniqueness.mostSimilarRecipeId})` : ''
+                    }`
+                    : 'None'}
+                </ThemedText>
+              </View>
+            </>
+          ) : (
+            <ThemedText style={styles.bodyText}>-</ThemedText>
+          )}
 
           <View style={styles.sectionSpacing} />
 

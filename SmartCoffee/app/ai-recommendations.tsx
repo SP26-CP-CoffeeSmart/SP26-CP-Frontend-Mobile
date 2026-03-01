@@ -43,6 +43,13 @@ export default function AIRecommendationsScreen() {
     return trimmed;
   };
 
+  const formatPercent = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return `${Math.round(value * 100)}%`;
+    }
+    return '-';
+  };
+
   let recipes: any[] = [];
   let beverageName = 'AI Recommendations';
   if (data) {
@@ -84,7 +91,8 @@ export default function AIRecommendationsScreen() {
                     params: {
                       data: JSON.stringify({
                         recipe: item.recipe,
-                        imageGeneration: item.imageGeneration
+                        imageGeneration: item.imageGeneration,
+                        uniqueness: item.uniqueness,
                       }),
                       beverageId,
                       beverage,
@@ -112,6 +120,15 @@ export default function AIRecommendationsScreen() {
                     <Ionicons name="flame-outline" size={14} color="#D97706" />
                     <Text style={styles.difficultyText}>{item?.recipe?.difficultyLevel || '-'}</Text>
                   </View>
+                  {item?.uniqueness ? (
+                    <View style={styles.uniquenessRow}>
+                      <Ionicons name="sparkles-outline" size={14} color="#16A34A" />
+                      <Text style={styles.uniquenessText}>
+                        {item.uniqueness?.isUnique ? 'Unique' : 'Not unique'} · Score{' '}
+                        {formatPercent(item.uniqueness?.uniquenessScore)}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             </View>
@@ -245,6 +262,15 @@ const styles = StyleSheet.create({
   difficultyText: {
     fontSize: 11,
     color: '#D97706',
+  },
+  uniquenessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  uniquenessText: {
+    fontSize: 11,
+    color: '#15803D',
   },
   levelText: {
     fontSize: 11,
