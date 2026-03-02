@@ -24,6 +24,7 @@ interface MenuVersion {
     avgDailyRevenue: string;
     profitMargin: number;
     topSeller: string;
+    isActive: boolean;
     vsVersion?: {
         comparedVersion: string;
         revenueChange: number;
@@ -86,6 +87,7 @@ const MenuVersionPage = () => {
     const [error, setError] = useState<string | null>(null);
     const [versions, setVersions] = useState<MenuVersion[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
+    const [activatingId, setActivatingId] = useState<string | null>(null);
     const pulse = useRef(new Animated.Value(0.25)).current;
 
     useEffect(() => {
@@ -131,6 +133,7 @@ const MenuVersionPage = () => {
                 avgDailyRevenue: '—',
                 profitMargin: 0,
                 topSeller: topSellerName,
+                isActive: item.isActive,
             };
         };
 
@@ -179,6 +182,36 @@ const MenuVersionPage = () => {
         const contentOffsetX = event.nativeEvent.contentOffset.x;
         const currentIndexValue = Math.round(contentOffsetX / width);
         setCurrentIndex(currentIndexValue);
+    };
+
+    const handleActivate = async (menuId: string) => {
+        try {
+            setActivatingId(menuId);
+            console.log(`Activating menu ${menuId}`);
+            setError(null);
+            const response = await authorizedFetch(
+                `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
+                {
+                    method: 'PATCH',
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`Request failed: ${response.status}`);
+            }
+
+            // Optimistically update local state: mark this version active, others inactive
+            setVersions((prev) =>
+                prev.map((v) => ({
+                    ...v,
+                    isActive: v.id === menuId,
+                }))
+            );
+        } catch (err) {
+            setError('Failed to activate menu');
+        } finally {
+            setActivatingId(null);
+        }
     };
 
     const renderSkeleton = () => (
@@ -272,6 +305,24 @@ const MenuVersionPage = () => {
                                                 >
                                                     <Text style={styles.editButtonText}>Detail</Text>
                                                 </TouchableOpacity>
+
+                                                {item.isActive ? (
+                                                    <View style={styles.activeBadge}>
+                                                        <Text style={styles.activeBadgeText}>Active</Text>
+                                                    </View>
+                                                ) : (
+                                                    <TouchableOpacity
+                                                        style={styles.activateButton}
+                                                        onPress={() => handleActivate(item.id)}
+                                                        disabled={activatingId === item.id}
+                                                    >
+                                                        {activatingId === item.id ? (
+                                                            <ActivityIndicator size="small" color={stylesVars.cardBg} />
+                                                        ) : (
+                                                            <Text style={styles.activateButtonText}>Activate</Text>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                )}
                                             </View>
 
                                             {/* Info Section */}
@@ -508,6 +559,40 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontWeight: '700',
         color: stylesVars.primary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    activeBadge: {
+        position: 'absolute',
+        top: 48,
+        right: 12,
+        paddingVertical: 4,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        backgroundColor: 'rgba(45, 106, 79, 0.95)',
+    },
+    activeBadgeText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#FFFFFF',
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+    },
+    activateButton: {
+        position: 'absolute',
+        top: 48,
+        right: 12,
+        paddingVertical: 6,
+        paddingHorizontal: 14,
+        borderRadius: 20,
+        backgroundColor: stylesVars.primary,
+        borderWidth: 1,
+        borderColor: 'rgba(139, 111, 78, 0.2)',
+    },
+    activateButtonText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#FFFFFF',
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
