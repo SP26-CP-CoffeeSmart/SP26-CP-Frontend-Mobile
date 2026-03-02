@@ -19,12 +19,9 @@ import menuPerformanceService, {
   ChartDataItem,
 } from '../../services/menuPerformanceService';
 import menuItemService, { MenuItem } from '../../services/menuItemService';
-import shopBeverageService, { ShopBeverage } from '../../services/shopBeverageService';
-import { useAuth } from '../../context/auth-context';
 
 export default function MenuInsightsScreen() {
   const { menuId } = useLocalSearchParams<{ menuId?: string }>();
-  const { coffeeShopId } = useAuth();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,14 +30,11 @@ export default function MenuInsightsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
-  const [beverages, setBeverages] = useState<ShopBeverage[]>([]);
 
   useEffect(() => {
     fetchMenuPerformance();
-    if (coffeeShopId) {
-      fetchMenuItems();
-    }
-  }, [menuId, coffeeShopId]);
+    fetchMenuItems();
+  }, [menuId]);
 
   const fetchMenuPerformance = async () => {
     try {
@@ -65,33 +59,18 @@ export default function MenuInsightsScreen() {
     try {
       setLoadingItems(true);
       const id = menuId ? Number(menuId) : 1;
-      
-      // Fetch menu items and beverages in parallel
-      const [items, beveragesData] = await Promise.all([
-        menuItemService.getByMenuId(id),
-        coffeeShopId ? shopBeverageService.getByShopId(coffeeShopId) : Promise.resolve([])
-      ]);
-      
-      setBeverages(beveragesData);
-      
-      // Merge beverage data into menu items
-      const enrichedItems = items.map(item => {
-        const beverage = beveragesData.find(b => b.beverageId === item.beverageId);
-        return {
-          ...item,
-          shopBeverage: beverage || item.shopBeverage
-        };
-      });
-      
-      setMenuItems(enrichedItems);
-      console.log('[Menu Insights] Enriched menu items with beverage data:', enrichedItems.length);
+      const items = await menuItemService.getByMenuId(id);
+      setMenuItems(items);
     } catch (err) {
       console.error('Error fetching menu items:', err);
     } finally {
       setLoadingItems(false);
     }
   };
-
+  let i  = 0;
+  for(i = 0; i < menuItems.length; i++) {
+    console.log('Menu Item:', menuItems[i]);
+  }
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
@@ -136,15 +115,12 @@ export default function MenuInsightsScreen() {
   const getFilteredMenuItems = () => {
     if (!searchQuery) return menuItems;
     const query = searchQuery.toLowerCase();
-    console.log(`[Menu Insights] Filtering menu items with query: "${query}"`);
     return menuItems.filter(item => 
       item.shopBeverage?.name?.toLowerCase().includes(query) ||
       item.description?.toLowerCase().includes(query) ||
       item.shopBeverage?.beverageCategory?.name?.toLowerCase().includes(query)
     );
   };
-
-  console.log(getFilteredMenuItems());
 
   if (loading) {
     return (
