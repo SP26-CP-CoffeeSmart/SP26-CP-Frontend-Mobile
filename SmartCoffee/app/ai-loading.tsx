@@ -1,82 +1,101 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { Colors, Fonts } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Fonts } from '@/constants/theme';
 
 export default function AiLoadingScreen() {
-  const colorScheme = useColorScheme();
-  const colors = Colors[colorScheme ?? 'light'];
-  const fade = useRef(new Animated.Value(0)).current;
+  const [messageIndex, setMessageIndex] = useState(0);
+  const textOpacity = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const messages = [
+    'AI is creating your results.',
+    'Please be patient while we finish the menu.',
+  ];
 
   useEffect(() => {
-    const animation = Animated.loop(
+    let isMounted = true;
+
+    const runTextCycle = () => {
+      textOpacity.setValue(0);
       Animated.sequence([
-        Animated.timing(fade, {
+        Animated.timing(textOpacity, {
           toValue: 1,
-          duration: 900,
+          duration: 700,
           useNativeDriver: true,
         }),
-        Animated.delay(1600),
-        Animated.timing(fade, {
+        Animated.delay(1800),
+        Animated.timing(textOpacity, {
           toValue: 0,
-          duration: 900,
+          duration: 700,
           useNativeDriver: true,
         }),
-        Animated.delay(1600),
+        Animated.delay(200),
+      ]).start(({ finished }) => {
+        if (!finished || !isMounted) return;
+        setMessageIndex((prev) => (prev + 1) % messages.length);
+        runTextCycle();
+      });
+    };
+
+    runTextCycle();
+
+    const pulseAnimation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
       ])
     );
 
-    animation.start();
-    return () => animation.stop();
-  }, [fade]);
+    pulseAnimation.start();
+
+    return () => {
+      isMounted = false;
+      pulseAnimation.stop();
+    };
+  }, [messages.length, pulse, textOpacity]);
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View style={styles.root}>
       <View style={styles.centerWrap}>
         <View style={styles.card}>
-          <Image
-            source={require('../assets/loadingscreenai.png')}
-            resizeMode="contain"
-            style={styles.heroImage}
-          />
+          <Animated.View
+            style={[
+              styles.heroImageWrap,
+              {
+                transform: [
+                  {
+                    scale: pulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1.03],
+                    }),
+                  },
+                ],
+              },
+            ]}>
+            <Image
+              source={require('../assets/loadingscreenai.png')}
+              resizeMode="contain"
+              style={styles.heroImage}
+            />
+          </Animated.View>
 
           <View style={styles.messageWrap}>
-            <Animated.View
-              style={[
-                styles.messageBlock,
-                {
-                  opacity: fade.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [1, 0],
-                  }),
-                },
-              ]}>
+            <Animated.View style={[styles.messageBlock, { opacity: textOpacity }]}>
               <ThemedText
                 style={styles.title}
                 numberOfLines={1}
                 adjustsFontSizeToFit
                 minimumFontScale={0.85}>
-                AI is creating your results.
-              </ThemedText>
-            </Animated.View>
-            <Animated.View
-              style={[
-                styles.messageBlock,
-                {
-                  opacity: fade.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0, 1],
-                  }),
-                },
-              ]}>
-              <ThemedText
-                style={styles.title}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.85}>
-                Please be patient while we finish the menu.
+                {messages[messageIndex]}
               </ThemedText>
             </Animated.View>
           </View>
@@ -89,6 +108,7 @@ export default function AiLoadingScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    backgroundColor: '#F2E6DA',
   },
   centerWrap: {
     flex: 1,
@@ -97,7 +117,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   card: {
-    backgroundColor: '#F7EFE8',
+    backgroundColor: '#F2E2D3',
     borderRadius: 28,
     paddingHorizontal: 22,
     paddingVertical: 26,
@@ -110,7 +130,11 @@ const styles = StyleSheet.create({
     width: '100%',
     alignSelf: 'center',
     borderWidth: 1,
-    borderColor: '#E9D7C7',
+    borderColor: '#E1CDBB',
+  },
+  heroImageWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   heroImage: {
     width: 220,

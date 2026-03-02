@@ -12,6 +12,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { verifyOtp } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -25,6 +26,7 @@ const COLORS = {
 export default function OtpScreen() {
   const router = useRouter();
   const { email } = useLocalSearchParams<{ email?: string }>();
+  const { refreshProfile } = useAuth();
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const inputsRef = useRef<Array<TextInput | null>>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -53,11 +55,13 @@ export default function OtpScreen() {
 
     try {
       setSubmitting(true);
-      const tokens = await verifyOtp(email, otp);
+      let role = 'ShopOwner';
+      const tokens = await verifyOtp(email, otp, role);
       await AsyncStorage.multiSet([
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],
       ]);
+      await refreshProfile();
       Toast.show({ type: 'success', text1: 'Verified and logged in' });
       router.replace('/(tabs)/menu');
     } catch (error) {

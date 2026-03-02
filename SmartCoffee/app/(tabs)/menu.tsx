@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -12,9 +12,12 @@ import {
   RefreshControl,
   Modal,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_BASE_URL } from '@/services/api';
@@ -54,7 +57,7 @@ interface MenuHeaderApiItem {
 
 type BeverageApiItem = Record<string, any>;
 
-const { width } = Dimensions.get('window');
+const { width, height: windowHeight } = Dimensions.get('window');
 const MENU_CARD_WIDTH = width - 48;
 const BEVERAGE_PAGE_SIZE = 4;
 const BEVERAGE_PAGE_WIDTH = width - 48;
@@ -100,175 +103,160 @@ export default function MenuScreen() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createImageUploading, setCreateImageUploading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const [scrollY, setScrollY] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [suggestionLayoutY, setSuggestionLayoutY] = useState<number | null>(null);
   const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
   const [beverageLooping, setBeverageLooping] = useState(false);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
+  const fetchMenus = useCallback(async () => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setMenuItems([]);
+      setMenuError("Your shop doesn't have any menus yet.");
+      setMenuLoading(false);
+      return;
+    }
+
+    setMenuLoading(true);
+    setMenuError(null);
+    try {
+      const response = await authorizedFetch(
+        `${AUTH_BASE_URL}/MenuHeader/by-shop/${coffeeShopId}`
+      );
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const result = await response.json();
+      const rawList: MenuHeaderApiItem[] = Array.isArray(result) ? result : [];
+
+      const parseCreateDate = (value?: string) => {
+        if (!value) return 0;
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      };
+
+      const sortedList = [...rawList].sort(
+        (a, b) => parseCreateDate(b.createDate) - parseCreateDate(a.createDate)
+      );
+
+      if (sortedList.length === 0) {
+        setMenuItems([]);
+        setMenuError("Your shop doesn't have any menus yet.");
+        return;
+      }
+
+      const mapped = sortedList.map((item, index) => {
+        const imageUrl = resolveImageUrl(
+          AUTH_BASE_URL,
+          String(item?.image ?? item?.imageUrl ?? '')
+        );
+        return {
+          id: String(item?.menuHeaderId ?? index),
+          name: String(item?.name ?? 'Unknown'),
+          versions: Number(0),
+          image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
+          isApplied: Boolean(item?.isApplied ?? false),
+          createDate: item?.createDate,
+        } as MenuItem;
+      });
+
+      setMenuItems(mapped);
+      console.log('[Menu List] menuItems (detailed):', JSON.stringify(mapped, null, 2));
+    } catch (error) {
+      setMenuError('Failed to load menu list');
+    } finally {
+      setMenuLoading(false);
+    }
+  }, [authLoading, coffeeShopId]);
+
   useEffect(() => {
-    let isMounted = true;
-    const fetchMenus = async () => {
-      if (authLoading) {
-        return;
-      }
-
-      if (!coffeeShopId) {
-        if (isMounted) {
-          setMenuItems([]);
-          setMenuError('Missing coffee shop id.');
-          setMenuLoading(false);
-        }
-        return;
-      }
-
-      setMenuLoading(true);
-      setMenuError(null);
-      try {
-        const response = await authorizedFetch(
-          `${AUTH_BASE_URL}/MenuHeader/by-shop/${coffeeShopId}`
-        );
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        const result = await response.json();
-        const rawList: MenuHeaderApiItem[] = Array.isArray(result) ? result : [];
-
-        const parseCreateDate = (value?: string) => {
-          if (!value) return 0;
-          const parsed = Date.parse(value);
-          return Number.isNaN(parsed) ? 0 : parsed;
-        };
-
-        const sortedList = [...rawList].sort(
-          (a, b) => parseCreateDate(b.createDate) - parseCreateDate(a.createDate)
-        );
-
-        if (sortedList.length === 0) {
-          if (isMounted) {
-            setMenuItems([]);
-            setMenuError('No menu header found for this shop.');
-          }
-          return;
-        }
-
-        const mapped = sortedList.map((item, index) => {
-          const imageUrl = resolveImageUrl(
-            AUTH_BASE_URL,
-            String(item?.image ?? item?.imageUrl ?? '')
-          );
-          return {
-            id: String(item?.menuHeaderId ?? index),
-            name: String(item?.name ?? 'Unknown'),
-            versions: Number(0),
-            image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
-            isApplied: Boolean(item?.isApplied ?? false),
-            createDate: item?.createDate,
-          } as MenuItem;
-        });
-
-        if (isMounted) {
-          setMenuItems(mapped);
-          console.log('[Menu List] menuItems (detailed):', JSON.stringify(mapped, null, 2));
-        }
-      } catch (error) {
-        if (isMounted) {
-          setMenuError('Failed to load menu list');
-        }
-      } finally {
-        if (isMounted) {
-          setMenuLoading(false);
-        }
-      }
-    };
-
     fetchMenus();
-    return () => {
-      isMounted = false;
-    };
+  }, [fetchMenus]);
+
+  const fetchBeverages = useCallback(async () => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setBeverages([]);
+      setBeveragesError("Your shop doesn't have any beverages yet.");
+      setBeveragesLoading(false);
+      return;
+    }
+
+    setBeveragesLoading(true);
+    setBeveragesError(null);
+    try {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const result = await response.json();
+      const rawList: BeverageApiItem[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.data)
+          ? result.data
+          : Array.isArray(result?.items)
+            ? result.items
+            : [];
+
+      const parseCreateDate = (value?: string) => {
+        if (!value) return 0;
+        const parsed = Date.parse(value);
+        return Number.isNaN(parsed) ? 0 : parsed;
+      };
+
+      const sortedList = [...rawList].sort((a, b) =>
+        parseCreateDate(
+          b?.createDate ?? b?.createdAt ?? b?.createdDate ?? b?.createdOn ?? ''
+        ) -
+        parseCreateDate(
+          a?.createDate ?? a?.createdAt ?? a?.createdDate ?? a?.createdOn ?? ''
+        )
+      );
+
+      if (sortedList.length === 0) {
+        setBeverages([]);
+        setBeveragesError("Your shop doesn't have any beverages yet.");
+        setBeveragesLoading(false);
+        return;
+      }
+
+      const mapped = sortedList.map((item, index) => {
+        const imageUrl = resolveImageUrl(AUTH_BASE_URL, String(item?.image ?? item?.imageUrl ?? ''));
+        return {
+          id: String(item?.beverageId ?? item?.id ?? index),
+          name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
+          flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
+          time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
+          image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+          createDate: String(
+            item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
+          ),
+        };
+      });
+
+      setBeverages(mapped);
+      // console.log('Fetched Beverages:', mapped);
+    } catch (error) {
+      setBeveragesError('Failed to load beverages');
+    } finally {
+      setBeveragesLoading(false);
+    }
   }, [authLoading, coffeeShopId]);
 
   useEffect(() => {
-    let isMounted = true;
-    const fetchBeverages = async () => {
-      if (authLoading) {
-        return;
-      }
-
-      if (!coffeeShopId) {
-        if (isMounted) {
-          setBeverages([]);
-          setBeveragesError('Missing coffee shop id.');
-          setBeveragesLoading(false);
-        }
-        return;
-      }
-
-      setBeveragesLoading(true);
-      setBeveragesError(null);
-      try {
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
-
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        const result = await response.json();
-        const rawList: BeverageApiItem[] = Array.isArray(result)
-          ? result
-          : Array.isArray(result?.data)
-            ? result.data
-            : Array.isArray(result?.items)
-              ? result.items
-              : [];
-
-        const parseCreateDate = (value?: string) => {
-          if (!value) return 0;
-          const parsed = Date.parse(value);
-          return Number.isNaN(parsed) ? 0 : parsed;
-        };
-
-        const sortedList = [...rawList].sort((a, b) =>
-          parseCreateDate(
-            b?.createDate ?? b?.createdAt ?? b?.createdDate ?? b?.createdOn ?? ''
-          ) -
-          parseCreateDate(
-            a?.createDate ?? a?.createdAt ?? a?.createdDate ?? a?.createdOn ?? ''
-          )
-        );
-
-        const mapped = sortedList.map((item, index) => {
-          const imageUrl = resolveImageUrl(AUTH_BASE_URL, String(item?.image ?? item?.imageUrl ?? ''));
-          return {
-            id: String(item?.beverageId ?? item?.id ?? index),
-            name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
-            flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
-            time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
-            image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
-            createDate: String(
-              item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
-            ),
-          };
-        });
-
-        if (isMounted) {
-          setBeverages(mapped);
-          // console.log('Fetched Beverages:', mapped);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setBeveragesError('Failed to load beverages');
-        }
-      } finally {
-        if (isMounted) {
-          setBeveragesLoading(false);
-        }
-      }
-    };
-
     fetchBeverages();
-    return () => {
-      isMounted = false;
-    };
-  }, [authLoading, coffeeShopId]);
+  }, [fetchBeverages]);
 
   const beveragePages = useMemo(
     () =>
@@ -346,6 +334,18 @@ export default function MenuScreen() {
       'User'
     ).trim() || 'User';
 
+  const effectiveViewportHeight = viewportHeight || windowHeight;
+  const shouldShowSuggestionFab = suggestionLayoutY !== null;
+
+  const handleScrollToSuggestion = () => {
+    if (!scrollViewRef.current || suggestionLayoutY === null) {
+      return;
+    }
+
+    const targetY = Math.max(suggestionLayoutY - 16, 0);
+    scrollViewRef.current.scrollTo({ y: targetY, animated: true });
+  };
+
   const resetCreateForm = () => {
     setCreateName('');
     setCreateImageUrl('');
@@ -358,6 +358,19 @@ export default function MenuScreen() {
     setCreateCategoryName(value);
     if (value.trim()) {
       setCreateCategoryId(null);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (refreshing) {
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+      await Promise.all([fetchMenus(), fetchBeverages(), refreshCategories()]);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -550,7 +563,15 @@ export default function MenuScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollViewRef}
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+        onScroll={(event) => setScrollY(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+      >
         <View style={styles.spacerTop} />
         <View style={styles.header}>
           <View>
@@ -795,12 +816,15 @@ export default function MenuScreen() {
           )}
         </View>
 
-        <View style={styles.suggestionCard}>
+        <View
+          style={styles.suggestionCard}
+          onLayout={(event) => setSuggestionLayoutY(event.nativeEvent.layout.y)}
+        >
           <View style={styles.suggestionGlow} />
           <View style={styles.suggestionContent}>
             <View style={styles.suggestionHeader}>
               <View style={styles.suggestionIconWrap}>
-                <Ionicons name="bulb-outline" size={18} color={stylesVars.primary} />
+                <MaterialIcons name="auto-awesome" size={18} color={stylesVars.primary} />
               </View>
               <Text style={styles.suggestionTitle}>Suggestion:</Text>
             </View>
@@ -826,153 +850,176 @@ export default function MenuScreen() {
         <View style={{ height: 20 }} />
       </ScrollView>
 
+      {shouldShowSuggestionFab ? (
+        <TouchableOpacity
+          style={styles.suggestionFab}
+          onPress={handleScrollToSuggestion}
+          activeOpacity={0.9}
+        >
+          <MaterialIcons name="auto-awesome" size={20} color={stylesVars.espresso} />
+        </TouchableOpacity>
+      ) : null}
+
       <Modal
         visible={showCreateModal}
         transparent
         animationType="fade"
         onRequestClose={() => setShowCreateModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Create Beverage</Text>
-            {createError ? <Text style={styles.modalError}>{createError}</Text> : null}
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+        >
+          <ScrollView
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            nestedScrollEnabled
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Create Beverage</Text>
+              {createError ? <Text style={styles.modalError}>{createError}</Text> : null}
 
-            <Text style={styles.modalLabel}>Name</Text>
-            <TextInput
-              value={createName}
-              onChangeText={setCreateName}
-              placeholder="Beverage name"
-              style={styles.modalInput}
-              autoCapitalize="words"
-            />
+              <Text style={styles.modalLabel}>Name</Text>
+              <TextInput
+                value={createName}
+                onChangeText={setCreateName}
+                placeholder="Beverage name"
+                style={styles.modalInput}
+                autoCapitalize="words"
+              />
 
-            <Text style={styles.modalLabel}>Category</Text>
-            <Text style={styles.modalHint}>Select existing or create a new one.</Text>
-            <View style={styles.categoryListCard}>
-              {categoriesLoading ? (
-                <ActivityIndicator size="small" color={stylesVars.espresso} />
-              ) : categoriesError ? (
-                <Text style={styles.modalError}>{categoriesError}</Text>
-              ) : beverageCategories.length === 0 ? (
-                <Text style={styles.modalMuted}>No categories yet.</Text>
-              ) : (
-                <ScrollView
-                  style={styles.categoryScroll}
-                  contentContainerStyle={styles.categoryScrollContent}
-                >
-                  {beverageCategories.map((category) => {
-                    const id = getCategoryId(category);
-                    const name = getCategoryName(category);
-                    if (id === null) {
-                      return null;
-                    }
-                    const isSelected = id === createCategoryId;
-                    return (
-                      <TouchableOpacity
-                        key={`${id}-${name}`}
-                        style={[
-                          styles.categoryItem,
-                          isSelected && styles.categoryItemSelected,
-                        ]}
-                        onPress={() => handleSelectCategory(category)}
-                      >
-                        <Text
+              <Text style={styles.modalLabel}>Category</Text>
+              <Text style={styles.modalHint}>Select existing or create a new one.</Text>
+              <View style={styles.categoryListCard}>
+                {categoriesLoading ? (
+                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                ) : categoriesError ? (
+                  <Text style={styles.modalError}>{categoriesError}</Text>
+                ) : beverageCategories.length === 0 ? (
+                  <Text style={styles.modalMuted}>No categories yet.</Text>
+                ) : (
+                  <ScrollView
+                    style={styles.categoryScroll}
+                    contentContainerStyle={styles.categoryScrollContent}
+                    nestedScrollEnabled
+                  >
+                    {beverageCategories.map((category) => {
+                      const id = getCategoryId(category);
+                      const name = getCategoryName(category);
+                      if (id === null) {
+                        return null;
+                      }
+                      const isSelected = id === createCategoryId;
+                      return (
+                        <TouchableOpacity
+                          key={`${id}-${name}`}
                           style={[
-                            styles.categoryItemText,
-                            isSelected && styles.categoryItemTextSelected,
+                            styles.categoryItem,
+                            isSelected && styles.categoryItemSelected,
                           ]}
+                          onPress={() => handleSelectCategory(category)}
                         >
-                          {name}
-                        </Text>
-                        {isSelected ? (
-                          <Ionicons
-                            name="checkmark-circle"
-                            size={16}
-                            color={stylesVars.primary}
-                          />
-                        ) : null}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
+                          <Text
+                            style={[
+                              styles.categoryItemText,
+                              isSelected && styles.categoryItemTextSelected,
+                            ]}
+                          >
+                            {name}
+                          </Text>
+                          {isSelected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={16}
+                              color={stylesVars.primary}
+                            />
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
 
-            {createCategoryId ? (
-              <TouchableOpacity
-                style={styles.clearSelectionButton}
-                onPress={() => {
-                  setCreateCategoryId(null);
-                  setCreateCategoryName('');
-                }}
-              >
-                <Text style={styles.clearSelectionText}>Clear selection to type</Text>
-              </TouchableOpacity>
-            ) : null}
-
-            <TextInput
-              value={createCategoryName}
-              onChangeText={handleCategoryInputChange}
-              placeholder={createCategoryId ? 'Clear selection to type' : 'New category name'}
-              style={[
-                styles.modalInput,
-                createCategoryId ? styles.modalInputDisabled : null,
-              ]}
-              editable={!createCategoryId}
-            />
-
-            <Text style={styles.modalLabel}>Image</Text>
-            <TouchableOpacity
-              style={styles.uploadButton}
-              onPress={handlePickAndUploadImage}
-            >
-              {createImageUploading ? (
-                <ActivityIndicator size="small" color={stylesVars.espresso} />
-              ) : (
-                <>
-                  <Ionicons name="image-outline" size={16} color={stylesVars.espresso} />
-                  <Text style={styles.uploadButtonText}>
-                    {createImageUrl ? 'Change image' : 'Upload image'}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
-            {createImageUrl ? (
-              <>
-                <Text style={styles.uploadHint}>Image uploaded</Text>
-                <Image source={{ uri: createImageUrl }} style={styles.uploadPreview} />
+              {createCategoryId ? (
                 <TouchableOpacity
-                  style={styles.removeImageButton}
-                  onPress={() => setCreateImageUrl('')}
+                  style={styles.clearSelectionButton}
+                  onPress={() => {
+                    setCreateCategoryId(null);
+                    setCreateCategoryName('');
+                  }}
                 >
-                  <Ionicons name="trash-outline" size={14} color={stylesVars.espresso} />
-                  <Text style={styles.removeImageText}>Remove image</Text>
+                  <Text style={styles.clearSelectionText}>Clear selection to type</Text>
                 </TouchableOpacity>
-              </>
-            ) : (
-              <Text style={styles.uploadHint}>Image required</Text>
-            )}
+              ) : null}
 
-            <View style={styles.modalActions}>
+              <TextInput
+                value={createCategoryName}
+                onChangeText={handleCategoryInputChange}
+                placeholder={createCategoryId ? 'Clear selection to type' : 'New category name'}
+                style={[
+                  styles.modalInput,
+                  createCategoryId ? styles.modalInputDisabled : null,
+                ]}
+                editable={!createCategoryId}
+              />
+
+              <Text style={styles.modalLabel}>Image</Text>
               <TouchableOpacity
-                style={styles.modalSecondaryButton}
-                onPress={() => setShowCreateModal(false)}
+                style={styles.uploadButton}
+                onPress={handlePickAndUploadImage}
               >
-                <Text style={styles.modalSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalPrimaryButton}
-                onPress={handleCreateBeverage}
-              >
-                {createSubmitting ? (
+                {createImageUploading ? (
                   <ActivityIndicator size="small" color={stylesVars.espresso} />
                 ) : (
-                  <Text style={styles.modalPrimaryText}>Create</Text>
+                  <>
+                    <Ionicons name="image-outline" size={16} color={stylesVars.espresso} />
+                    <Text style={styles.uploadButtonText}>
+                      {createImageUrl ? 'Change image' : 'Upload image'}
+                    </Text>
+                  </>
                 )}
               </TouchableOpacity>
+              {createImageUrl ? (
+                <>
+                  <Text style={styles.uploadHint}>Image uploaded</Text>
+                  <Image source={{ uri: createImageUrl }} style={styles.uploadPreview} />
+                  <TouchableOpacity
+                    style={styles.removeImageButton}
+                    onPress={() => setCreateImageUrl('')}
+                  >
+                    <Ionicons name="trash-outline" size={14} color={stylesVars.espresso} />
+                    <Text style={styles.removeImageText}>Remove image</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <Text style={styles.uploadHint}>Image required</Text>
+              )}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.modalSecondaryButton}
+                  onPress={() => setShowCreateModal(false)}
+                >
+                  <Text style={styles.modalSecondaryText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalPrimaryButton}
+                  onPress={handleCreateBeverage}
+                >
+                  {createSubmitting ? (
+                    <ActivityIndicator size="small" color={stylesVars.espresso} />
+                  ) : (
+                    <Text style={styles.modalPrimaryText}>Create</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1438,12 +1485,38 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+  suggestionFab: {
+    position: 'absolute',
+    right: 18,
+    bottom: 50,
+    width: 50,
+    height: 50,
+    borderRadius: 18,
+    backgroundColor: stylesVars.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    elevation: 8,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+  },
+  modalScroll: {
+    width: '100%',
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
   },
   modalCard: {
     width: '100%',
