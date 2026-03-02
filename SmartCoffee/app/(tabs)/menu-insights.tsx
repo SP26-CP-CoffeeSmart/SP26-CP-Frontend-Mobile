@@ -18,7 +18,60 @@ import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
 } from '../../services/menuPerformanceService';
-import menuItemService, { MenuItem } from '../../services/menuItemService';
+import { API_ENDPOINTS } from '../../services/api';
+import { authorizedFetch } from '../../services/authService';
+
+// Define MenuItem interface similar to daily-sales.tsx for proper data mapping
+interface MenuItem {
+  menuItemId: number;
+  description: string | null;
+  sellingPrice: number;
+  addedDate: string;
+  itemSizeViewModels?: Array<{
+    itemSizeId: number;
+    beverageSizeId?: number;
+    menuItemId?: number;
+    sellingPrice?: number;
+    beverageSize?: {
+      beverageSizeId: number;
+      sizeName?: string;
+      volume?: number;
+    };
+  }>;
+  shopBeverage: {
+    beverageId: number;
+    name: string;
+    status?: string;
+    beverageCategoryId?: number;
+    imageUrl?: string | null;
+    image?: string | null;
+    beverageCategory?: {
+      beverageCategoryId: number;
+      name?: string;
+    };
+  };
+  shopRecipe: {
+    recipeId: number;
+    recipeName: string;
+    image: string | null;
+  };
+}
+
+interface MenuGroup {
+  menuGroupId: number;
+  name: string;
+  orderIndex: number;
+  menuItems: MenuItem[];
+}
+
+interface MenuData {
+  menuId: number;
+  menuHeaderId: number;
+  versionNumber: string;
+  status: string;
+  isActive: boolean;
+  menuGroups: MenuGroup[];
+}
 
 export default function MenuInsightsScreen() {
   const { menuId } = useLocalSearchParams<{ menuId?: string }>();
@@ -59,7 +112,35 @@ export default function MenuInsightsScreen() {
     try {
       setLoadingItems(true);
       const id = menuId ? Number(menuId) : 1;
-      const items = await menuItemService.getByMenuId(id);
+      
+      // Fetch full menu data with populated nested objects (like daily-sales.tsx)
+      const menuResponse = await authorizedFetch(
+        API_ENDPOINTS.menu.getById(id),
+        {
+          headers: {
+            Accept: '*/*',
+          },
+        }
+      );
+
+      if (!menuResponse.ok) {
+        throw new Error(`HTTP error! status: ${menuResponse.status}`);
+      }
+
+      const menuData: MenuData = await menuResponse.json();
+      console.log('[Menu Insights] Full menu data:', menuData);
+
+      // Flatten all menu items from all groups (like daily-sales.tsx)
+      const items: MenuItem[] = [];
+      if (menuData.menuGroups && Array.isArray(menuData.menuGroups)) {
+        menuData.menuGroups.forEach((group: MenuGroup) => {
+          if (group.menuItems && Array.isArray(group.menuItems)) {
+            items.push(...group.menuItems);
+          }
+        });
+      }
+      
+      console.log('[Menu Insights] Flattened menu items:', items);
       setMenuItems(items);
     } catch (err) {
       console.error('Error fetching menu items:', err);
@@ -67,10 +148,7 @@ export default function MenuInsightsScreen() {
       setLoadingItems(false);
     }
   };
-  let i  = 0;
-  for(i = 0; i < menuItems.length; i++) {
-    console.log('Menu Item:', menuItems[i]);
-  }
+  
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
@@ -116,6 +194,7 @@ export default function MenuInsightsScreen() {
     if (!searchQuery) return menuItems;
     const query = searchQuery.toLowerCase();
     return menuItems.filter(item => 
+      item.shopRecipe?.recipeName?.toLowerCase().includes(query) ||
       item.shopBeverage?.name?.toLowerCase().includes(query) ||
       item.description?.toLowerCase().includes(query) ||
       item.shopBeverage?.beverageCategory?.name?.toLowerCase().includes(query)
@@ -229,7 +308,7 @@ export default function MenuInsightsScreen() {
                 {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - (getSelectedDateData()?.cost || 0))}
               </Text>
               <View style={styles.kpiChange}>
-                <Ionicons name="circle" size={12} color="#847362" />
+                <Ionicons name="ellipse" size={12} color="#847362" />
                 <Text style={styles.kpiChangeTextGreen}>—</Text>
               </View>
             </View>
@@ -240,7 +319,7 @@ export default function MenuInsightsScreen() {
                 {formatCurrency(getSelectedDateData()?.cost || 0)}
               </Text>
               <View style={styles.kpiChange}>
-                <Ionicons name="circle" size={12} color="#847362" />
+                <Ionicons name="ellipse" size={12} color="#847362" />
                 <Text style={styles.kpiChangeTextGreen}>—</Text>
               </View>
             </View>
@@ -292,9 +371,9 @@ export default function MenuInsightsScreen() {
             getFilteredMenuItems().map((item) => (
               <View key={item.menuItemId} style={styles.menuItem}>
                 <View style={styles.menuItemImage}>
-                  {item.shopBeverage?.image || item.shopBeverage?.imageUrl ? (
+                  {item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl ? (
                     <Image 
-                      source={{ uri: item.shopBeverage.image || item.shopBeverage.imageUrl }} 
+                      source={{ uri: (item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl) as string }} 
                       style={{ width: 80, height: 80, borderRadius: 12 }}
                       resizeMode="cover"
                     />
@@ -307,7 +386,7 @@ export default function MenuInsightsScreen() {
                 <View style={styles.menuItemContent}>
                   <View style={styles.menuItemHeader}>
                     <Text style={styles.menuItemTitle} numberOfLines={2}>
-                      {item.shopBeverage?.name || 'Unnamed Item'}
+                      {item.shopRecipe?.recipeName || item.shopBeverage?.name || 'Unnamed Item'}
                     </Text>
                   </View>
                   {item.description && (
