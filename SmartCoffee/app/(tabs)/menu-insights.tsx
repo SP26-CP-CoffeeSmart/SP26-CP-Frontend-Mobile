@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Modal,
   FlatList,
+  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +18,60 @@ import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
 } from '../../services/menuPerformanceService';
+import { API_ENDPOINTS } from '../../services/api';
+import { authorizedFetch } from '../../services/authService';
+
+// Define MenuItem interface similar to daily-sales.tsx for proper data mapping
+interface MenuItem {
+  menuItemId: number;
+  description: string | null;
+  sellingPrice: number;
+  addedDate: string;
+  itemSizeViewModels?: Array<{
+    itemSizeId: number;
+    beverageSizeId?: number;
+    menuItemId?: number;
+    sellingPrice?: number;
+    beverageSize?: {
+      beverageSizeId: number;
+      sizeName?: string;
+      volume?: number;
+    };
+  }>;
+  shopBeverage: {
+    beverageId: number;
+    name: string;
+    status?: string;
+    beverageCategoryId?: number;
+    imageUrl?: string | null;
+    image?: string | null;
+    beverageCategory?: {
+      beverageCategoryId: number;
+      name?: string;
+    };
+  };
+  shopRecipe: {
+    recipeId: number;
+    recipeName: string;
+    image: string | null;
+  };
+}
+
+interface MenuGroup {
+  menuGroupId: number;
+  name: string;
+  orderIndex: number;
+  menuItems: MenuItem[];
+}
+
+interface MenuData {
+  menuId: number;
+  menuHeaderId: number;
+  versionNumber: string;
+  status: string;
+  isActive: boolean;
+  menuGroups: MenuGroup[];
+}
 
 export default function MenuInsightsScreen() {
   const { menuId } = useLocalSearchParams<{ menuId?: string }>();
@@ -26,9 +81,12 @@ export default function MenuInsightsScreen() {
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(true);
 
   useEffect(() => {
     fetchMenuPerformance();
+    fetchMenuItems();
   }, [menuId]);
 
   const fetchMenuPerformance = async () => {
@@ -50,6 +108,47 @@ export default function MenuInsightsScreen() {
     }
   };
 
+  const fetchMenuItems = async () => {
+    try {
+      setLoadingItems(true);
+      const id = menuId ? Number(menuId) : 1;
+      
+      // Fetch full menu data with populated nested objects (like daily-sales.tsx)
+      const menuResponse = await authorizedFetch(
+        API_ENDPOINTS.menu.getById(id),
+        {
+          headers: {
+            Accept: '*/*',
+          },
+        }
+      );
+
+      if (!menuResponse.ok) {
+        throw new Error(`HTTP error! status: ${menuResponse.status}`);
+      }
+
+      const menuData: MenuData = await menuResponse.json();
+      console.log('[Menu Insights] Full menu data:', menuData);
+
+      // Flatten all menu items from all groups (like daily-sales.tsx)
+      const items: MenuItem[] = [];
+      if (menuData.menuGroups && Array.isArray(menuData.menuGroups)) {
+        menuData.menuGroups.forEach((group: MenuGroup) => {
+          if (group.menuItems && Array.isArray(group.menuItems)) {
+            items.push(...group.menuItems);
+          }
+        });
+      }
+      
+      console.log('[Menu Insights] Flattened menu items:', items);
+      setMenuItems(items);
+    } catch (err) {
+      console.error('Error fetching menu items:', err);
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+  
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
@@ -89,6 +188,17 @@ export default function MenuInsightsScreen() {
       month: '2-digit', 
       year: 'numeric' 
     });
+  };
+
+  const getFilteredMenuItems = () => {
+    if (!searchQuery) return menuItems;
+    const query = searchQuery.toLowerCase();
+    return menuItems.filter(item => 
+      item.shopRecipe?.recipeName?.toLowerCase().includes(query) ||
+      item.shopBeverage?.name?.toLowerCase().includes(query) ||
+      item.description?.toLowerCase().includes(query) ||
+      item.shopBeverage?.beverageCategory?.name?.toLowerCase().includes(query)
+    );
   };
 
   if (loading) {
@@ -198,7 +308,7 @@ export default function MenuInsightsScreen() {
                 {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - (getSelectedDateData()?.cost || 0))}
               </Text>
               <View style={styles.kpiChange}>
-                <Ionicons name="circle" size={12} color="#847362" />
+                <Ionicons name="ellipse" size={12} color="#847362" />
                 <Text style={styles.kpiChangeTextGreen}>—</Text>
               </View>
             </View>
@@ -209,7 +319,7 @@ export default function MenuInsightsScreen() {
                 {formatCurrency(getSelectedDateData()?.cost || 0)}
               </Text>
               <View style={styles.kpiChange}>
-                <Ionicons name="circle" size={12} color="#847362" />
+                <Ionicons name="ellipse" size={12} color="#847362" />
                 <Text style={styles.kpiChangeTextGreen}>—</Text>
               </View>
             </View>
@@ -236,6 +346,83 @@ export default function MenuInsightsScreen() {
           <TouchableOpacity style={styles.filterButton}>
             <Ionicons name="options" size={20} color="#4a3621" />
           </TouchableOpacity>
+        </View>
+
+        {/* Menu Items Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
+        </View>
+
+        {/* Menu Items List */}
+        <View style={styles.itemsList}>
+          {loadingItems ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#4a3621" />
+              <Text style={{ marginTop: 8, color: '#847362' }}>Loading menu items...</Text>
+            </View>
+          ) : getFilteredMenuItems().length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="restaurant-outline" size={48} color="#847362" />
+              <Text style={styles.emptyStateText}>
+                {searchQuery ? 'No menu items found' : 'No menu items available'}
+              </Text>
+            </View>
+          ) : (
+            getFilteredMenuItems().map((item) => (
+              <View key={item.menuItemId} style={styles.menuItem}>
+                <View style={styles.menuItemImage}>
+                  {item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl ? (
+                    <Image 
+                      source={{ uri: (item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl) as string }} 
+                      style={{ width: 80, height: 80, borderRadius: 12 }}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <View style={{ backgroundColor: '#e1dbd6', width: 80, height: 80, borderRadius: 12, justifyContent: 'center', alignItems: 'center' }}>
+                      <Ionicons name="cafe" size={32} color="#847362" />
+                    </View>
+                  )}
+                </View>
+                <View style={styles.menuItemContent}>
+                  <View style={styles.menuItemHeader}>
+                    <Text style={styles.menuItemTitle} numberOfLines={2}>
+                      {item.shopRecipe?.recipeName || item.shopBeverage?.name || 'Unnamed Item'}
+                    </Text>
+                  </View>
+                  {item.description && (
+                    <Text style={styles.menuItemDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  )}
+                  <View style={styles.menuItemPriceRow}>
+                    <Text style={styles.menuItemPrice}>
+                      {formatCurrency(item.sellingPrice)}
+                    </Text>
+                    {item.shopBeverage?.beverageCategory?.name && (
+                      <View style={styles.categoryBadge}>
+                        <Text style={styles.categoryBadgeText}>
+                          {item.shopBeverage.beverageCategory.name}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                  {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
+                    <View style={styles.sizesContainer}>
+                      <Text style={styles.sizesLabel}>Sizes: </Text>
+                      {item.itemSizeViewModels.map((size, index) => (
+                        <Text key={size.itemSizeId} style={styles.sizeText}>
+                          {size.beverageSize?.sizeName || size.beverageSize?.volume ? 
+                            `${size.beverageSize?.sizeName || ''}${size.beverageSize?.volume ? ` (${size.beverageSize.volume}ml)` : ''}` : 
+                            size.sellingPrice ? formatCurrency(size.sellingPrice) : 'Size'}
+                          {index < item.itemSizeViewModels!.length - 1 ? ', ' : ''}
+                        </Text>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
         {/* AI Suggestions */}
@@ -695,6 +882,65 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: 100,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4a3621',
+    marginBottom: 8,
+  },
+  emptyState: {
+    padding: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#847362',
+    textAlign: 'center',
+  },
+  menuItemDescription: {
+    fontSize: 13,
+    color: '#847362',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  menuItemPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  menuItemPrice: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  categoryBadge: {
+    backgroundColor: 'rgba(74, 54, 33, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  categoryBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  sizesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  sizesLabel: {
+    fontSize: 11,
+    color: '#847362',
+    fontWeight: '600',
+  },
+  sizeText: {
+    fontSize: 11,
+    color: '#847362',
   },
   summaryCard: {
     backgroundColor: '#FFF',
