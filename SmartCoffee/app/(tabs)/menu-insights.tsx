@@ -20,6 +20,7 @@ import menuPerformanceService, {
 } from '../../services/menuPerformanceService';
 import { API_ENDPOINTS } from '../../services/api';
 import { authorizedFetch } from '../../services/authService';
+import { useBeverageCategories } from '../../context/beverage-category-context';
 
 // Define MenuItem interface similar to daily-sales.tsx for proper data mapping
 interface MenuItem {
@@ -57,6 +58,17 @@ interface MenuItem {
   };
 }
 
+interface DailySaleRecord {
+  salesId: number;
+  menuItemId: number;
+  menuId: number;
+  saleDate: string;
+  totalCups: number;
+  totalRevenue: number;
+  cupSize?: string | null;
+  createdAt?: string | null;
+}
+
 interface MenuGroup {
   menuGroupId: number;
   name: string;
@@ -83,11 +95,23 @@ export default function MenuInsightsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
+  const [itemSalesMap, setItemSalesMap] = useState<Map<number, number>>(new Map());
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+  
+  const { categories } = useBeverageCategories();
 
   useEffect(() => {
     fetchMenuPerformance();
     fetchMenuItems();
   }, [menuId]);
+
+  useEffect(() => {
+    // Fetch sales data when selected date changes
+    if (menuItems.length > 0) {
+      fetchItemsSalesData();
+    }
+  }, [selectedDateIndex, menuItems.length]);
 
   const fetchMenuPerformance = async () => {
     try {
@@ -141,11 +165,56 @@ export default function MenuInsightsScreen() {
       }
       
       console.log('[Menu Insights] Flattened menu items:', items);
+      console.log('beverageCategory:', items.map(item => item.shopBeverage.beverageCategoryName));
       setMenuItems(items);
     } catch (err) {
       console.error('Error fetching menu items:', err);
     } finally {
       setLoadingItems(false);
+    }
+  };
+
+  const fetchItemsSalesData = async () => {
+    try {
+      const selectedData = getSelectedDateData();
+      if (!selectedData) return;
+
+      const salesMap = new Map<number, number>();
+      
+      // Fetch sales data for each menu item for the selected date
+      const salesPromises = menuItems.map(async (item) => {
+        try {
+          const response = await authorizedFetch(
+            API_ENDPOINTS.dailySale.getByMenuItem(item.menuItemId),
+            {
+              headers: {
+                Accept: '*/*',
+              },
+            }
+          );
+
+          if (response.ok) {
+            const salesRecords: DailySaleRecord[] = await response.json();
+            
+            // Filter records for the selected date and sum totalCups
+            const selectedDateStr = selectedData.date.split('T')[0];
+            const totalCups = salesRecords
+              .filter(record => record.saleDate.startsWith(selectedDateStr))
+              .reduce((sum, record) => sum + record.totalCups, 0);
+            
+            if (totalCups > 0) {
+              salesMap.set(item.menuItemId, totalCups);
+            }
+          }
+        } catch (err) {
+          console.error(`Error fetching sales for item ${item.menuItemId}:`, err);
+        }
+      });
+
+      await Promise.all(salesPromises);
+      setItemSalesMap(salesMap);
+    } catch (err) {
+      console.error('Error fetching items sales data:', err);
     }
   };
   
@@ -191,14 +260,47 @@ export default function MenuInsightsScreen() {
   };
 
   const getFilteredMenuItems = () => {
-    if (!searchQuery) return menuItems;
-    const query = searchQuery.toLowerCase();
-    return menuItems.filter(item => 
-      item.shopRecipe?.recipeName?.toLowerCase().includes(query) ||
-      item.shopBeverage?.name?.toLowerCase().includes(query) ||
-      item.description?.toLowerCase().includes(query) ||
-      item.shopBeverage?.beverageCategory?.name?.toLowerCase().includes(query)
+    let filtered = menuItems;
+
+    // Filter by search query
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(item => 
+        item.shopRecipe?.recipeName?.toLowerCase().includes(query) ||
+        item.shopBeverage?.name?.toLowerCase().includes(query) ||
+        item.description?.toLowerCase().includes(query) ||
+        item.shopBeverage?.beverageCategory?.name?.toLowerCase().includes(query)
+      );
+    }
+
+    // Filter by selected categories
+    if (selectedCategoryIds.length > 0) {
+      filtered = filtered.filter(item => 
+        selectedCategoryIds.includes(item.shopBeverage?.beverageCategoryId ?? -1)
+      );
+    }
+
+    return filtered;
+  };
+
+  const toggleCategory = (categoryId: number) => {
+    setSelectedCategoryIds(prev => 
+      prev.includes(categoryId)
+        ? prev.filter(id => id !== categoryId)
+        : [...prev, categoryId]
     );
+  };
+
+  const clearFilters = () => {
+    setSelectedCategoryIds([]);
+  };
+
+  const getCategoryName = (cat: any) => {
+    return cat.name || cat.categoryName || 'Unnamed';
+  };
+
+  const getCategoryId = (cat: any) => {
+    return cat.beverageCategoryId ?? cat.id ?? -1;
   };
 
   if (loading) {
@@ -314,13 +416,13 @@ export default function MenuInsightsScreen() {
             </View>
 
             <View style={styles.kpiCard}>
-              <Text style={styles.kpiLabel}>COST</Text>
+              <Text style={styles.kpiLabel}>CUPS</Text>
               <Text style={styles.kpiValue}>
-                {formatCurrency(getSelectedDateData()?.cost || 0)}
+                {getSelectedDateData()?.totalCups || 0}
               </Text>
               <View style={styles.kpiChange}>
-                <Ionicons name="ellipse" size={12} color="#847362" />
-                <Text style={styles.kpiChangeTextGreen}>—</Text>
+                <Ionicons name="cafe" size={12} color="#847362" />
+                <Text style={styles.kpiChangeTextGreen}>Sold</Text>
               </View>
             </View>
           </ScrollView>
@@ -343,8 +445,16 @@ export default function MenuInsightsScreen() {
               </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity style={styles.filterButton}>
-            <Ionicons name="options" size={20} color="#4a3621" />
+          <TouchableOpacity 
+            style={[styles.filterButton, selectedCategoryIds.length > 0 && styles.filterButtonActive]}
+            onPress={() => setShowFilterModal(true)}
+          >
+            <Ionicons name="options" size={20} color={selectedCategoryIds.length > 0 ? "#FFF" : "#4a3621"} />
+            {selectedCategoryIds.length > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{selectedCategoryIds.length}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -389,6 +499,21 @@ export default function MenuInsightsScreen() {
                       {item.shopRecipe?.recipeName || item.shopBeverage?.name || 'Unnamed Item'}
                     </Text>
                   </View>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <View style={styles.cupsBadge}>
+                      <Ionicons name="cafe" size={12} color="#4a3621" />
+                      <Text style={styles.cupsBadgeText}>
+                        {itemSalesMap.get(item.menuItemId) ?? 0} cups sold
+                      </Text>
+                    </View>
+                    {item.shopBeverage?.beverageCategoryName && (
+                      <View style={styles.categoryBadge}>
+                        <Text style={styles.categoryBadgeText}>
+                          {item.shopBeverage?.beverageCategoryName}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                   {item.description && (
                     <Text style={styles.menuItemDescription} numberOfLines={2}>
                       {item.description}
@@ -398,13 +523,6 @@ export default function MenuInsightsScreen() {
                     <Text style={styles.menuItemPrice}>
                       {formatCurrency(item.sellingPrice)}
                     </Text>
-                    {item.shopBeverage?.beverageCategory?.name && (
-                      <View style={styles.categoryBadge}>
-                        <Text style={styles.categoryBadgeText}>
-                          {item.shopBeverage.beverageCategory.name}
-                        </Text>
-                      </View>
-                    )}
                   </View>
                   {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
                     <View style={styles.sizesContainer}>
@@ -508,6 +626,76 @@ export default function MenuInsightsScreen() {
                 </TouchableOpacity>
               )}
             />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter by Category</Text>
+              <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+                <Ionicons name="close" size={24} color="#4a3621" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.filterModalScroll}>
+              <View style={styles.filterTagsContainer}>
+                {categories.map((category) => {
+                  const catId = getCategoryId(category);
+                  const catName = getCategoryName(category);
+                  const isSelected = selectedCategoryIds.includes(catId);
+                  
+                  return (
+                    <TouchableOpacity
+                      key={catId}
+                      style={[
+                        styles.filterTag,
+                        isSelected && styles.filterTagSelected
+                      ]}
+                      onPress={() => toggleCategory(catId)}
+                    >
+                      <Text style={[
+                        styles.filterTagText,
+                        isSelected && styles.filterTagTextSelected
+                      ]}>
+                        {catName}
+                      </Text>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={16} color="#FFF" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+
+            <View style={styles.filterModalFooter}>
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => {
+                  clearFilters();
+                  setShowFilterModal(false);
+                }}
+              >
+                <Text style={styles.clearButtonText}>Clear All</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.applyButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyButtonText}>
+                  Apply {selectedCategoryIds.length > 0 ? `(${selectedCategoryIds.length})` : ''}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -702,6 +890,95 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
+  },
+  filterButtonActive: {
+    backgroundColor: '#4a3621',
+    borderColor: '#4a3621',
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  filterBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  filterModalScroll: {
+    maxHeight: '60%',
+  },
+  filterTagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 20,
+    gap: 12,
+  },
+  filterTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: '#FFF',
+    borderWidth: 2,
+    borderColor: '#e1dbd6',
+  },
+  filterTagSelected: {
+    backgroundColor: '#4a3621',
+    borderColor: '#4a3621',
+  },
+  filterTagText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  filterTagTextSelected: {
+    color: '#FFF',
+  },
+  filterModalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e1dbd6',
+  },
+  clearButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  applyButton: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#4a3621',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFF',
   },
   itemsList: {
     paddingHorizontal: 24,
@@ -925,6 +1202,20 @@ const styles = StyleSheet.create({
   },
   categoryBadgeText: {
     fontSize: 10,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  cupsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(211, 139, 42, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    gap: 4,
+  },
+  cupsBadgeText: {
+    fontSize: 11,
     fontWeight: '600',
     color: '#4a3621',
   },
