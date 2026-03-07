@@ -140,6 +140,13 @@ export default function AIOrderReviewScreen() {
       </ScrollView>
 
       <View style={styles.purchaseBar}>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => router.push('/ai-order-add-ingredients')}
+        >
+          <Ionicons name="add" size={18} color="#2C1B13" />
+          <Text style={styles.addButtonText}>Add ingredients</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.purchaseButton}>
           <Ionicons name="cart-outline" size={18} color="#FFF" />
           <Text style={styles.purchaseButtonText}>Purchase Items</Text>
@@ -319,8 +326,28 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     paddingTop: 12,
     backgroundColor: 'rgba(246, 242, 238, 0.95)',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  addButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D9CFC5',
+    borderRadius: 28,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFF',
+  },
+  addButtonText: {
+    color: '#2C1B13',
+    fontSize: 14,
+    fontWeight: '700',
   },
   purchaseButton: {
+    flex: 1,
     backgroundColor: '#2C1B13',
     borderRadius: 28,
     paddingVertical: 16,
