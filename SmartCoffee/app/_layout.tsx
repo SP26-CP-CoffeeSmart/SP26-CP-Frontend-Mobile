@@ -28,7 +28,7 @@ function RootLayoutNav() {
 
     const firstSegment = segments[0];
     const authScreens = ['sign-in', 'sign-up', 'forgot-password', 'otp', 'reset-password', 'index', 'loading'];
-    const nestedScreens = ['change-password', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales', 'daily-sale-item'];
+    const nestedScreens = ['change-password', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'ai-order-suggestions', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales', 'daily-sale-item'];
     const isOnAuthScreen = authScreens.includes(firstSegment);
     const isOnNestedScreen = nestedScreens.includes(firstSegment);
 
@@ -76,6 +76,7 @@ function RootLayoutNav() {
         <Stack.Screen name="ai-loading" options={{ headerShown: false }} />
         <Stack.Screen name="ai-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="ai-result" options={{ headerShown: false }} />
+        <Stack.Screen name="ai-order-suggestions" options={{ headerShown: false }} />
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="menu-results" options={{ headerShown: false }} />
