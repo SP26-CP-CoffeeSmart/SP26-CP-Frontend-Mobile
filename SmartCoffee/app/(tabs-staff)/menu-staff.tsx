@@ -32,7 +32,7 @@ const COLORS = {
     outOfStock: '#FFE6E6',
 };
 
-const DOMAIN_WEB = 'http://192.168.88.136:5173/feedback';
+const DOMAIN_WEB = 'http://192.168.38.1:5173/feedback';
 
 interface MenuItem {
     menuItemId: number;
