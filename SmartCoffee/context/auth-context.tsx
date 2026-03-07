@@ -69,30 +69,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  const loadCachedShopId = useCallback(async () => {
-    try {
-      const cached = await AsyncStorage.getItem(COFFEE_SHOP_ID_KEY);
-      const cachedId = toNumber(cached);
-      if (cachedId) {
-        setCoffeeShopId(cachedId);
-      }
-    } catch {
-      // Ignore cache read errors.
-    }
-  }, []);
-
   const refreshProfile = useCallback(async () => {
     const tokenExists = await checkToken();
     if (!tokenExists) {
       setProfile(null);
       setRole(null);
       setCoffeeShopId(null);
+      await AsyncStorage.removeItem(COFFEE_SHOP_ID_KEY);
       setLoading(false);
       return;
     }
 
     setLoading(true);
     setError(null);
+    setProfile(null);
+    setRole(null);
+    setCoffeeShopId(null);
     try {
       const data = await getProfile();
       setProfile(data);
@@ -104,11 +96,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     } catch (err) {
       setError('Unable to load profile.');
-      await loadCachedShopId();
+      await AsyncStorage.removeItem(COFFEE_SHOP_ID_KEY);
     } finally {
       setLoading(false);
     }
-  }, [checkToken, loadCachedShopId]);
+  }, [checkToken]);
 
   useEffect(() => {
     refreshProfile();
