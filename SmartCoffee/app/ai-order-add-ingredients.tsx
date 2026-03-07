@@ -95,6 +95,14 @@ export default function AIOrderAddIngredientsScreen() {
     });
   };
 
+  const setQtyValue = (id: string, value: string) => {
+    const parsed = Number.parseInt(value.replace(/\D/g, ''), 10);
+    setQuantities((prev) => ({
+      ...prev,
+      [id]: Number.isNaN(parsed) ? 0 : Math.max(0, parsed),
+    }));
+  };
+
   const totalVnd = useMemo(() => {
     return MOCK_INGREDIENTS.reduce((sum, item) => {
       const qty = quantities[item.id] ?? 0;
@@ -119,7 +127,6 @@ export default function AIOrderAddIngredientsScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTopTitle}>Add Ingredients</Text>
           <TouchableOpacity style={styles.headerIconButton}>
-            <Ionicons name="lock-closed" size={18} color="#FFF" />
           </TouchableOpacity>
         </View>
         <View style={styles.headerTitleBlock}>
@@ -191,7 +198,12 @@ export default function AIOrderAddIngredientsScreen() {
                       >
                         <Ionicons name="remove" size={16} color="#5B4A3F" />
                       </TouchableOpacity>
-                      <Text style={styles.qtyText}>{qty}g</Text>
+                      <TextInput
+                        style={styles.qtyInput}
+                        value={String(qty)}
+                        onChangeText={(value) => setQtyValue(item.id, value)}
+                        keyboardType="number-pad"
+                      />
                       <TouchableOpacity
                         style={styles.qtyButton}
                         onPress={() => updateQty(item.id, 1)}
@@ -221,7 +233,7 @@ export default function AIOrderAddIngredientsScreen() {
           <Text style={styles.totalLabel}>TOTAL CUSTOMIZATION</Text>
           <Text style={styles.totalValue}>{formattedVnd(totalVnd)} VND</Text>
         </View>
-        <TouchableOpacity style={styles.addToOrderButton}>
+        <TouchableOpacity style={styles.addToOrderButton} onPress={() => router.back()}>
           <Text style={styles.addToOrderText}>Add to order</Text>
           <Ionicons name="arrow-forward" size={18} color="#FFF" />
         </TouchableOpacity>
@@ -417,6 +429,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#3E2A22',
+  },
+  qtyInput: {
+    minWidth: 40,
+    textAlign: 'center',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#3E2A22',
+    paddingVertical: 2,
   },
   bottomSpacer: {
     height: 12,
