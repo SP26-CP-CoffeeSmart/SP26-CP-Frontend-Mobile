@@ -219,12 +219,15 @@ export default function AiCreateScreen() {
         selectedColorStyleId: colorStyle,
         selectedCategoryId: category,
       },
+      pricing: {
+        marginPercentage: margin,
+      },
     };
 
     try {
       console.log('AI create payload:', JSON.stringify(payload, null, 2));
 
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/create-ai-recipe`, {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/create-unique-ai-recipe`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

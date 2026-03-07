@@ -108,8 +108,8 @@ export const loginAccount = async (email: string, password: string): Promise<Aut
   return postJson<AuthTokens>(API_ENDPOINTS.auth.login(), { email, password });
 };
 
-export const verifyOtp = async (email: string, otp: string): Promise<AuthTokens> => {
-  return postJson<AuthTokens>(API_ENDPOINTS.auth.verifyOtp(), { email, otp });
+export const verifyOtp = async (email: string, otp: string, role: string): Promise<AuthTokens> => {
+  return postJson<AuthTokens>(API_ENDPOINTS.auth.verifyOtp(), { email, otp, role });
 };
 
 export const refreshTokens = async (): Promise<AuthTokens> => {
@@ -206,7 +206,7 @@ export const logoutAccount = async (): Promise<void> => {
   }
 
   // Always clear tokens from storage regardless of API response
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken']);
+  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'coffeeShopId']);
 };
 
 export const changePassword = async (oldPassword: string, newPassword: string): Promise<void> => {
