@@ -259,7 +259,10 @@ export default function AIOrderSuggestionsScreen() {
           <Text style={styles.selectedCount}>{selectedItems.size} items selected</Text>
           <Text style={styles.selectedTotal}>{formattedVnd(totalVnd)} VND</Text>
         </View>
-        <TouchableOpacity style={styles.reviewButton}>
+        <TouchableOpacity
+          style={styles.reviewButton}
+          onPress={() => router.push('/ai-order-review')}
+        >
           <Text style={styles.reviewButtonText}>Review</Text>
         </TouchableOpacity>
       </View>
