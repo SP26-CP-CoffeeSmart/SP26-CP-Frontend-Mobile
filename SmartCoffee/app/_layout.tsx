@@ -73,6 +73,7 @@ function RootLayoutNav() {
         <Stack.Screen name="recipe-detail" options={{ headerShown: false }} />
         <Stack.Screen name="coffee-detail" options={{ headerShown: false }} />
         <Stack.Screen name="inventory" options={{ headerShown: false }} />
+        <Stack.Screen name="ingredient-detail" options={{ headerShown: false }} />
         <Stack.Screen name="ai-loading" options={{ headerShown: false }} />
         <Stack.Screen name="ai-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="ai-result" options={{ headerShown: false }} />
