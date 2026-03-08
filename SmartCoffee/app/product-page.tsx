@@ -129,10 +129,12 @@ export default function ProductPage() {
         </View>
 
         <View style={styles.suggestionBox}>
+          <TouchableOpacity onPress={() => router.push('/ai-order-suggestions')}>
           <Ionicons name="sparkles" size={14} color={COLORS.text} />
           <Text style={styles.suggestionText}>
             AI suggestion: Helping you make purchases quickly based on inventory analysis.
           </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.grid}>
