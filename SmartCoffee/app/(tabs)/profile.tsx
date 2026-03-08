@@ -14,10 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
-import { logoutAccount } from '@/services/authService';
+import { authorizedFetch, logoutAccount } from '@/services/authService';
+import { AUTH_BASE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
+import { WebView } from 'react-native-webview';
+import * as Linking from 'expo-linking';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -53,7 +56,18 @@ export default function ProfileScreen() {
   const [editSizeSubmitting, setEditSizeSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedTopup, setSelectedTopup] = useState<number | null>(null);
+  const [customTopup, setCustomTopup] = useState('');
+  const [topupSubmitting, setTopupSubmitting] = useState(false);
+  const [payosUrl, setPayosUrl] = useState<string | null>(null);
+  const [showPayosModal, setShowPayosModal] = useState(false);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [walletId, setWalletId] = useState<number | null>(null);
+  const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
+  const [successSubmitting, setSuccessSubmitting] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const successTriggeredRef = useRef(false);
 
   const getSizeName = (size: BeverageSize, index: number) =>
     String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
@@ -131,6 +145,7 @@ export default function ProfileScreen() {
   const profileEmailDisplay = profileLoading ? 'Loading...' : profileEmail;
   const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
   const profileHeaderName = profileShopDisplay;
+  const formattedBalance = walletBalance.toLocaleString('vi-VN');
 
   useEffect(() => {
     let isActive = true;
@@ -175,6 +190,18 @@ export default function ProfileScreen() {
       isActive = false;
     };
   }, [profileCoffeeShopId, profileLoading]);
+
+  useEffect(() => {
+    const balanceValue = Number(
+      (profile as any)?.wallet?.availableBalance ??
+        (profile as any)?.wallet?.balance ??
+        (profile as any)?.walletBalance ??
+        0
+    );
+    setWalletBalance(Number.isFinite(balanceValue) ? balanceValue : 0);
+    const idValue = getNumericId((profile as any)?.wallet?.walletId);
+    setWalletId(idValue);
+  }, [profile]);
 
   const getSizeId = (size: BeverageSize) =>
     typeof size.id === 'number'
@@ -290,6 +317,167 @@ export default function ProfileScreen() {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const topupPresets = [100000, 500000, 1000000, 5000000];
+
+  const handleSelectTopup = (amount: number) => {
+    if (selectedTopup === amount) {
+      setSelectedTopup(null);
+      return;
+    }
+    setSelectedTopup(amount);
+    setCustomTopup('');
+  };
+
+  const handleTopup = () => {
+    const runTopup = async () => {
+      if (topupSubmitting) {
+        return;
+      }
+
+      const customValue = Number(customTopup.replace(/[^0-9]/g, ''));
+      const amount = selectedTopup ?? (Number.isFinite(customValue) ? customValue : 0);
+      if (!amount || amount <= 0) {
+        showToast('Please select or enter a top-up amount.');
+        return;
+      }
+
+      try {
+        setTopupSubmitting(true);
+        if (!walletId) {
+          showToast('Wallet not found. Please refresh and try again.');
+          return;
+        }
+
+        const returnUrl = Linking.createURL('wallet-topup/success');
+        const cancelUrl = Linking.createURL('wallet-topup/cancel');
+
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/Wallet/${walletId}/top-up`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            walletId,
+            amount,
+            returnUrl,
+            cancelUrl,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const checkoutUrl = String(data?.checkoutUrl ?? '').trim();
+        if (!checkoutUrl) {
+          throw new Error('Missing checkout url');
+        }
+
+        setLastTopupAmount(amount);
+        successTriggeredRef.current = false;
+        setPayosUrl(checkoutUrl);
+        setShowPayosModal(true);
+      } catch (error) {
+        showToast('Unable to create top-up checkout.');
+      } finally {
+        setTopupSubmitting(false);
+      }
+    };
+
+    runTopup();
+  };
+
+  const handleTopupSuccess = async () => {
+    if (successSubmitting) {
+      return;
+    }
+
+    if (!walletId || !lastTopupAmount) {
+      showToast('Missing top-up data. Please try again.');
+      return;
+    }
+
+    try {
+      setSuccessSubmitting(true);
+      const response = await authorizedFetch(
+        `${AUTH_BASE_URL}/Wallet/${walletId}/top-up/success?amount=${lastTopupAmount}`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      await refreshProfile();
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+      closeTimerRef.current = setTimeout(() => {
+        setShowPayosModal(false);
+        setPayosUrl(null);
+        setLastTopupAmount(null);
+        closeTimerRef.current = null;
+      }, 3000);
+    } catch (error) {
+      showToast('Unable to confirm top-up.');
+    } finally {
+      setSuccessSubmitting(false);
+    }
+  };
+
+  const handlePayosNavChange = (event: { url?: string }) => {
+    if (successTriggeredRef.current) {
+      return;
+    }
+
+    const url = String(event?.url ?? '').toLowerCase();
+    if (!url) {
+      return;
+    }
+
+    const isSuccessRoute = url.includes('wallet-topup/success');
+    const isPaidStatus = url.includes('status=paid') || url.includes('code=00');
+
+    if (isSuccessRoute || isPaidStatus) {
+      successTriggeredRef.current = true;
+      handleTopupSuccess();
+    }
+  };
+
+  const handlePayosShouldStart = (event: { url?: string }) => {
+    const url = String(event?.url ?? '').toLowerCase();
+    if (!url) {
+      return true;
+    }
+
+    const isSuccessRoute = url.includes('wallet-topup/success');
+    const isCancelRoute = url.includes('wallet-topup/cancel');
+    const isPaidStatus = url.includes('status=paid') || url.includes('code=00');
+
+    if (isSuccessRoute || isPaidStatus) {
+      if (!successTriggeredRef.current) {
+        successTriggeredRef.current = true;
+        handleTopupSuccess();
+      }
+      return false;
+    }
+
+    if (isCancelRoute) {
+      setShowPayosModal(false);
+      setPayosUrl(null);
+      setLastTopupAmount(null);
+      return false;
+    }
+
+    return true;
   };
 
   const handleCreateSize = async () => {
@@ -498,6 +686,94 @@ export default function ProfileScreen() {
             <Text style={styles.infoValue}>{profileShopDisplay}</Text>
           </View>
         </View>
+
+        <View style={styles.card}>
+          <View style={styles.cardRowBetween}>
+            <View style={styles.cardRow}>
+              <Ionicons name="wallet" size={16} color="#8B5E3C" />
+              <Text style={styles.cardTitle}>Wallet balance</Text>
+            </View>
+            <Text style={styles.walletBalance}>{formattedBalance} vnd</Text>
+          </View>
+
+          <Text style={styles.walletHint}>Choose an amount to top up</Text>
+          <View style={styles.walletOptions}>
+            {topupPresets.map((amount) => {
+              const isActive = amount === selectedTopup;
+              return (
+                <TouchableOpacity
+                  key={amount}
+                  style={[styles.walletChip, isActive && styles.walletChipActive]}
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectTopup(amount)}
+                >
+                  <Text style={[styles.walletChipText, isActive && styles.walletChipTextActive]}>
+                    {amount.toLocaleString('vi-VN')} vnd
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={styles.walletHint}>Or enter a custom amount</Text>
+          <TextInput
+            value={customTopup}
+            onChangeText={(value) => {
+              setCustomTopup(value);
+              if (selectedTopup) {
+                setSelectedTopup(null);
+              }
+            }}
+            placeholder="e.g. 250000"
+            keyboardType="numeric"
+            style={styles.walletInput}
+          />
+          <TouchableOpacity
+            style={[styles.walletButton, topupSubmitting && styles.walletButtonDisabled]}
+            onPress={handleTopup}
+            disabled={topupSubmitting}
+          >
+            <Text style={styles.walletButtonText}>
+              {topupSubmitting ? 'Processing...' : 'Top up wallet'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Modal
+          visible={showPayosModal}
+          animationType="slide"
+          onRequestClose={() => setShowPayosModal(false)}
+        >
+          <SafeAreaView style={styles.payosContainer} edges={['top']}>
+            <View style={styles.payosHeader}>
+              <Text style={styles.payosTitle}>PayOS Checkout</Text>
+              <TouchableOpacity
+                style={styles.payosCloseButton}
+                onPress={() => {
+                  setShowPayosModal(false);
+                  if (closeTimerRef.current) {
+                    clearTimeout(closeTimerRef.current);
+                    closeTimerRef.current = null;
+                  }
+                }}
+              >
+                <Ionicons name="close" size={18} color="#5C4634" />
+              </TouchableOpacity>
+            </View>
+            {payosUrl ? (
+              <WebView
+                source={{ uri: payosUrl }}
+                style={styles.payosWebview}
+                onNavigationStateChange={handlePayosNavChange}
+                onShouldStartLoadWithRequest={handlePayosShouldStart}
+              />
+            ) : (
+              <View style={styles.payosFallback}>
+                <Text style={styles.payosFallbackText}>Missing checkout url.</Text>
+              </View>
+            )}
+          </SafeAreaView>
+        </Modal>
 
         <View style={styles.beverageCard}>
           <View style={styles.beverageHeader}>
@@ -851,6 +1127,107 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B4D35',
     fontWeight: '600',
+  },
+  walletBalance: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#3C2B20',
+  },
+  walletHint: {
+    marginTop: 10,
+    marginBottom: 6,
+    fontSize: 12,
+    color: '#8B6B4D',
+    fontWeight: '600',
+  },
+  walletOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  walletChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E8E1D9',
+    backgroundColor: '#FFF8F0',
+  },
+  walletChipActive: {
+    backgroundColor: '#F2D08C',
+    borderColor: '#E5B768',
+  },
+  walletChipText: {
+    fontSize: 12,
+    color: '#6B4D35',
+    fontWeight: '600',
+  },
+  walletChipTextActive: {
+    color: '#7A4A1B',
+  },
+  walletInput: {
+    borderWidth: 1,
+    borderColor: '#E7D6C3',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: '#4A331F',
+    backgroundColor: '#FFF9F2',
+  },
+  walletButton: {
+    marginTop: 12,
+    borderRadius: 16,
+    backgroundColor: '#D38B2A',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  walletButtonDisabled: {
+    opacity: 0.7,
+  },
+  walletButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  payosContainer: {
+    flex: 1,
+    backgroundColor: '#F7F4EF',
+  },
+  payosHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E1D9',
+    backgroundColor: '#FFF',
+  },
+  payosTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#3C2B20',
+  },
+  payosCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F2E6D7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payosWebview: {
+    flex: 1,
+  },
+  payosFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payosFallbackText: {
+    fontSize: 13,
+    color: '#6B4D35',
   },
   statusRow: {
     marginTop: 8,
