@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -12,6 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -31,48 +34,37 @@ const headerImage =
 
 const categories = ['Bean', 'Milk', 'Sugar', 'Syrup'];
 
-const products = [
-  {
-    id: '1',
-    name: 'Arabica',
-    desc: 'Description',
-    price: '100.000 vnd/gam',
-    eta: '1 - 2h',
-    rating: '4,5',
-    image:
-      'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    id: '2',
-    name: 'Robusta',
-    desc: 'Description',
-    price: '100.000 vnd/gam',
-    eta: '1 - 2h',
-    rating: '4,5',
-    image:
-      'https://images.unsplash.com/photo-1462917882517-e150004895fa?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    id: '3',
-    name: 'Arabica',
-    desc: 'Description',
-    price: '100.000 vnd/gam',
-    eta: '1 - 2h',
-    rating: '4,5',
-    image:
-      'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80',
-  },
-  {
-    id: '4',
-    name: 'Robusta',
-    desc: 'Description',
-    price: '100.000 vnd/gam',
-    eta: '1 - 2h',
-    rating: '4,5',
-    image:
-      'https://images.unsplash.com/photo-1462917882517-e150004895fa?auto=format&fit=crop&w=600&q=80',
-  },
-];
+const fallbackProductImage =
+  'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
+
+interface SupplierProductApiItem {
+  productId: number;
+  supplierId: number;
+  ingredientId: number;
+  price: number;
+  stock: number;
+  status: string;
+  createDate: string;
+  measurement: string;
+  image?: string | null;
+  description?: string | null;
+  ingredient?: {
+    ingredientId: number;
+    name: string;
+    category: string;
+    image: string | null;
+    createDate: string;
+    endDate: string;
+  };
+}
+
+interface SupplierProductListResponse {
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  items: SupplierProductApiItem[];
+}
 
 const { width } = Dimensions.get('window');
 const cardGap = 12;
@@ -81,11 +73,53 @@ const cardWidth = (width - 32 - cardGap) / 2;
 export default function ProductPage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [products, setProducts] = useState<SupplierProductApiItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
+        const items = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+        setProducts(items);
+      } catch (fetchError) {
+        setError('Failed to load supplier products.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProducts();
+  }, []);
   const filteredProducts = useMemo(() => {
     if (!search.trim()) return products;
     const term = search.trim().toLowerCase();
-    return products.filter((item) => item.name.toLowerCase().includes(term));
-  }, [search]);
+    return products.filter((item) =>
+      String(item?.ingredient?.name ?? '')
+        .toLowerCase()
+        .includes(term)
+    );
+  }, [products, search]);
+
+  const formatVnd = (value: number) =>
+    value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -138,29 +172,59 @@ export default function ProductPage() {
         </View>
 
         <View style={styles.grid}>
-          {filteredProducts.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.card}
-              onPress={() => router.push('/product-detail')}
-              activeOpacity={0.9}
-            >
-              <Image source={{ uri: item.image }} style={styles.cardImage} />
-              <Text style={styles.cardTitle}>{item.name}</Text>
-              <Text style={styles.cardDesc}>{item.desc}</Text>
-              <Text style={styles.cardPrice}>{item.price}</Text>
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <Ionicons name="time-outline" size={12} color={COLORS.textSecondary} />
-                  <Text style={styles.metaText}>{item.eta}</Text>
-                </View>
-                <View style={styles.metaItem}>
-                  <Ionicons name="star" size={12} color={COLORS.accent} />
-                  <Text style={styles.metaText}>{item.rating}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+          {loading ? (
+            <View style={styles.stateRow}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+              <Text style={styles.stateText}>Loading products...</Text>
+            </View>
+          ) : error ? (
+            <Text style={styles.stateText}>{error}</Text>
+          ) : filteredProducts.length === 0 ? (
+            <Text style={styles.stateText}>No products found</Text>
+          ) : (
+            filteredProducts.map((item) => {
+              const name = item?.ingredient?.name ?? 'Unknown';
+              const category = item?.ingredient?.category ?? 'Unknown';
+              const imageUrl =
+                item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
+              const description = String(item?.description ?? '').trim();
+              const priceText = `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
+
+              return (
+                <TouchableOpacity
+                  key={item.productId}
+                  style={styles.card}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/product-detail',
+                      params: { productId: String(item.productId) },
+                    })
+                  }
+                  activeOpacity={0.9}
+                >
+                  <Image source={{ uri: imageUrl }} style={styles.cardImage} />
+                  <Text style={styles.cardTitle}>{name}</Text>
+                  <Text style={styles.cardDesc}>{category}</Text>
+                  {description ? (
+                    <Text style={styles.cardDesc} numberOfLines={1}>
+                      {description}
+                    </Text>
+                  ) : null}
+                  <Text style={styles.cardPrice}>{priceText}</Text>
+                  <View style={styles.metaRow}>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="cube-outline" size={12} color={COLORS.textSecondary} />
+                      <Text style={styles.metaText}>Stock {item.stock}</Text>
+                    </View>
+                    <View style={styles.metaItem}>
+                      <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />
+                      <Text style={styles.metaText}>{item.status}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -272,6 +336,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: cardGap,
+  },
+  stateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+  },
+  stateText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   card: {
     width: cardWidth,

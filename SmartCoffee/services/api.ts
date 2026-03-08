@@ -56,6 +56,12 @@ export const API_ENDPOINTS = {
     getAll: () => `${AUTH_BASE_URL}/BeverageCategory`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/BeverageCategory/shop/${shopId}`,
   },
+  shopBeverage: {
+    count: () => `${AUTH_BASE_URL}/ShopBeverage/count`,
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopBeverage/shop/${shopId}`,
+    create: () => `${AUTH_BASE_URL}/ShopBeverage`,
+    uploadImage: () => `${AUTH_BASE_URL}/ShopBeverage/upload-image`,
+  },
   itemSize: {
     getByMenu: (menuId: number) => `${AUTH_BASE_URL}/ItemSize/by-menu/${menuId}`,
   },
