@@ -194,9 +194,9 @@ export default function ProfileScreen() {
   useEffect(() => {
     const balanceValue = Number(
       (profile as any)?.wallet?.availableBalance ??
-        (profile as any)?.wallet?.balance ??
-        (profile as any)?.walletBalance ??
-        0
+      (profile as any)?.wallet?.balance ??
+      (profile as any)?.walletBalance ??
+      0
     );
     setWalletBalance(Number.isFinite(balanceValue) ? balanceValue : 0);
     const idValue = getNumericId((profile as any)?.wallet?.walletId);
@@ -350,8 +350,8 @@ export default function ProfileScreen() {
           return;
         }
 
-        const returnUrl = Linking.createURL('wallet-topup/success');
-        const cancelUrl = Linking.createURL('wallet-topup/cancel');
+        const returnUrl = "http://localhost:8081/wallet-topup/success";
+        const cancelUrl = "http://localhost:8081/wallet-topup/cancel";
 
         const response = await authorizedFetch(`${AUTH_BASE_URL}/Wallet/${walletId}/top-up`, {
           method: 'POST',
@@ -402,6 +402,7 @@ export default function ProfileScreen() {
 
     try {
       setSuccessSubmitting(true);
+      console.log('[Top-up Success] Confirming top-up with backend...', { walletId, lastTopupAmount });
       const response = await authorizedFetch(
         `${AUTH_BASE_URL}/Wallet/${walletId}/top-up/success?amount=${lastTopupAmount}`,
         {
@@ -433,47 +434,35 @@ export default function ProfileScreen() {
     }
   };
 
-  const handlePayosNavChange = (event: { url?: string }) => {
-    if (successTriggeredRef.current) {
-      return;
-    }
-
-    const url = String(event?.url ?? '').toLowerCase();
-    if (!url) {
-      return;
-    }
-
-    const isSuccessRoute = url.includes('wallet-topup/success');
-    const isPaidStatus = url.includes('status=paid') || url.includes('code=00');
-
-    if (isSuccessRoute || isPaidStatus) {
-      successTriggeredRef.current = true;
-      handleTopupSuccess();
-    }
-  };
-
   const handlePayosShouldStart = (event: { url?: string }) => {
-    const url = String(event?.url ?? '').toLowerCase();
+    const rawUrl = String(event?.url ?? '');
+    const url = rawUrl.toLowerCase();
+    console.log('[PayOS] Navigated to URL:', rawUrl);
+
     if (!url) {
       return true;
     }
 
     const isSuccessRoute = url.includes('wallet-topup/success');
-    const isCancelRoute = url.includes('wallet-topup/cancel');
-    const isPaidStatus = url.includes('status=paid') || url.includes('code=00');
+    const isCancelRoute =
+      url.includes('wallet-topup/cancel') || url.includes('cancel=true') || url.includes('status=cancelled');
+    const isPaidStatus = url.includes('status=paid');
+
+    // Ưu tiên xử lý cancel, tránh gọi success nhầm
+    if (isCancelRoute) {
+      console.log('[PayOS] Cancel detected, closing modal.');
+      setShowPayosModal(false);
+      setPayosUrl(null);
+      setLastTopupAmount(null);
+      successTriggeredRef.current = false;
+      return false;
+    }
 
     if (isSuccessRoute || isPaidStatus) {
       if (!successTriggeredRef.current) {
         successTriggeredRef.current = true;
         handleTopupSuccess();
       }
-      return false;
-    }
-
-    if (isCancelRoute) {
-      setShowPayosModal(false);
-      setPayosUrl(null);
-      setLastTopupAmount(null);
       return false;
     }
 
@@ -764,7 +753,6 @@ export default function ProfileScreen() {
               <WebView
                 source={{ uri: payosUrl }}
                 style={styles.payosWebview}
-                onNavigationStateChange={handlePayosNavChange}
                 onShouldStartLoadWithRequest={handlePayosShouldStart}
               />
             ) : (
