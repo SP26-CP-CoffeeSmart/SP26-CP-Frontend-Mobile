@@ -10,6 +10,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import Toast from 'react-native-toast-message';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { BeverageCategoryProvider } from '@/context/beverage-category-context';
+import { CartProvider } from '@/context/cart-context';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -101,9 +102,11 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <BeverageCategoryProvider>
-          <RootLayoutNav />
-        </BeverageCategoryProvider>
+        <CartProvider>
+          <BeverageCategoryProvider>
+            <RootLayoutNav />
+          </BeverageCategoryProvider>
+        </CartProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

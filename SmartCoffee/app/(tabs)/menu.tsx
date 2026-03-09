@@ -95,6 +95,8 @@ export default function MenuScreen() {
   const [menuLoading, setMenuLoading] = useState(false);
   const [menuError, setMenuError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [totalBeverages, setTotalBeverages] = useState(0);
+  const [showMenuGuardModal, setShowMenuGuardModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createImageUrl, setCreateImageUrl] = useState('');
@@ -180,6 +182,40 @@ export default function MenuScreen() {
     fetchMenus();
   }, [fetchMenus]);
 
+  const fetchBeverageCount = useCallback(async () => {
+    if (authLoading) {
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setTotalBeverages(0);
+      return;
+    }
+
+    try {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/count`, {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      const countValue = Number(
+        typeof result === 'number'
+          ? result
+          : result?.totalBeverages ?? result?.count ?? result?.total ?? result?.data ?? 0
+      );
+
+      setTotalBeverages(Number.isFinite(countValue) ? countValue : 0);
+    } catch (error) {
+      setTotalBeverages(0);
+    }
+  }, [authLoading, coffeeShopId]);
+
   const fetchBeverages = useCallback(async () => {
     if (authLoading) {
       return;
@@ -257,6 +293,10 @@ export default function MenuScreen() {
   useEffect(() => {
     fetchBeverages();
   }, [fetchBeverages]);
+
+  useEffect(() => {
+    fetchBeverageCount();
+  }, [fetchBeverageCount]);
 
   const beveragePages = useMemo(
     () =>
@@ -368,10 +408,24 @@ export default function MenuScreen() {
 
     try {
       setRefreshing(true);
-      await Promise.all([fetchMenus(), fetchBeverages(), refreshCategories()]);
+      await Promise.all([
+        fetchMenus(),
+        fetchBeverages(),
+        fetchBeverageCount(),
+        refreshCategories(),
+      ]);
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const handleNewMenuPress = () => {
+    if (totalBeverages >= 5) {
+      router.push('/menu-recommendations');
+      return;
+    }
+
+    setShowMenuGuardModal(true);
   };
 
   const handleSelectCategory = (category: BeverageCategory) => {
@@ -552,6 +606,7 @@ export default function MenuScreen() {
       };
 
       setBeverages((prev) => [mapped, ...prev]);
+      await fetchBeverageCount();
       resetCreateForm();
       setShowCreateModal(false);
     } catch (error) {
@@ -589,7 +644,7 @@ export default function MenuScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Menu List</Text>
-            <TouchableOpacity onPress={() => router.push('/menu-recommendations')}>
+            <TouchableOpacity onPress={handleNewMenuPress}>
               <Text style={styles.sectionActionPrimary}>New Menu</Text>
             </TouchableOpacity>
           </View>
@@ -859,6 +914,87 @@ export default function MenuScreen() {
           <MaterialIcons name="auto-awesome" size={20} color={stylesVars.espresso} />
         </TouchableOpacity>
       ) : null}
+
+      <Modal
+        visible={showMenuGuardModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMenuGuardModal(false)}
+      >
+        <View style={styles.guardOverlay}>
+          <View style={styles.guardCard}>
+            <View style={styles.guardHeaderRow}>
+              <TouchableOpacity
+                style={styles.guardCloseButton}
+                onPress={() => setShowMenuGuardModal(false)}
+              >
+                <Ionicons name="close" size={18} color={stylesVars.espresso} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.guardHeaderCenter}>
+              <View style={styles.guardIconWrap}>
+                <Ionicons name="alert-circle" size={36} color={stylesVars.primary} />
+              </View>
+              <Text style={styles.guardTitle}>Oops!</Text>
+              <Text style={styles.guardSubtitle}>
+                You need at least 5 beverages to start creating a menu.
+              </Text>
+            </View>
+
+            <View style={styles.guardSteps}>
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>1</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Add beverages</Text>
+                  <Text style={styles.guardStepText}>
+                    Tap "Add" and fill in the beverage details.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>2</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Create recipes</Text>
+                  <Text style={styles.guardStepText}>
+                    Use AI or build your own recipes quickly.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>3</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Unlock menu</Text>
+                  <Text style={styles.guardStepText}>
+                    Reach 5 beverages to unlock menu creation.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.guardPrimaryButton}
+              onPress={() => {
+                setShowMenuGuardModal(false);
+                resetCreateForm();
+                refreshCategories();
+                setShowCreateModal(true);
+              }}
+            >
+              <Ionicons name="add" size={16} color={stylesVars.espresso} />
+              <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showCreateModal}
@@ -1501,6 +1637,119 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 12,
     elevation: 8,
+  },
+  guardOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  guardCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFF8EE',
+    borderRadius: 26,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(217,160,91,0.35)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  guardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  guardHeaderCenter: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  guardIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    backgroundColor: 'rgba(217,160,91,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  guardCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(62,39,35,0.08)',
+  },
+  guardTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  guardSubtitle: {
+    fontSize: 14,
+    color: '#6B5E52',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  guardSteps: {
+    gap: 12,
+    marginBottom: 18,
+  },
+  guardStepRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  guardStepBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
+    backgroundColor: stylesVars.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guardStepBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  guardStepTextWrap: {
+    flex: 1,
+  },
+  guardStepTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+    marginBottom: 2,
+  },
+  guardStepText: {
+    fontSize: 12,
+    color: '#6B5E52',
+    lineHeight: 16,
+  },
+  guardPrimaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: stylesVars.primary,
+  },
+  guardPrimaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
   modalOverlay: {
     flex: 1,

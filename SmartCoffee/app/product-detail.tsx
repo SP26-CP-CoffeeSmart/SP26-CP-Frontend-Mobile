@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -9,8 +10,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+import { useCart } from '@/context/cart-context';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -22,13 +26,48 @@ const COLORS = {
   danger: '#B23B3B',
 };
 
-const headerImage =
+const fallbackHeaderImage =
   'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=1200&q=80';
+
+interface SupplierProductApiItem {
+  productId: number;
+  supplierId: number;
+  ingredientId: number;
+  price: number;
+  stock: number;
+  status: string;
+  createDate: string;
+  measurement: string;
+  image?: string | null;
+  description?: string | null;
+  ingredient?: {
+    ingredientId: number;
+    name: string;
+    category: string;
+    image: string | null;
+    createDate: string;
+    endDate: string;
+  };
+}
+
+interface SupplierProductListResponse {
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  items: SupplierProductApiItem[];
+}
 
 export default function ProductDetail() {
   const router = useRouter();
+  const params = useLocalSearchParams();
+  const productId = Number(params.productId);
+  const { addItem } = useCart();
   const [quantity, setQuantity] = useState(1);
   const addScale = useRef(new Animated.Value(1)).current;
+  const [product, setProduct] = useState<SupplierProductApiItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const onAddToCart = () => {
     Animated.sequence([
@@ -46,19 +85,77 @@ export default function ProductDetail() {
       }),
     ]).start();
 
-    Toast.show({
-      type: 'success',
-      text1: 'Added to cart',
-      text2: 'Your order has been added to the cart.',
-    });
+    if (product) {
+      addItem({
+        productId: product.productId,
+        supplierId: product.supplierId,
+        name: product.ingredient?.name ?? 'Unknown product',
+        category: product.ingredient?.category ?? 'Unknown category',
+        image: product.ingredient?.image ?? null,
+        measurement: product.measurement ?? 'unit',
+        unitPrice: product.price ?? 0,
+        quantity,
+      });
+
+      Toast.show({
+        type: 'success',
+        text1: 'Added to cart',
+        text2: 'Your order has been added to the cart.',
+      });
+    }
   };
 
-  const totalPrice = useMemo(() => 100000 * quantity, [quantity]);
+  useEffect(() => {
+    const fetchProductDetail = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
+        const items = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+        const match = items.find((item) => item.productId === productId) || null;
+        setProduct(match);
+      } catch (fetchError) {
+        setError('Failed to load product detail.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!Number.isNaN(productId)) {
+      fetchProductDetail();
+    } else {
+      setLoading(false);
+      setError('Invalid product.');
+    }
+  }, [productId]);
+
+  const unitPrice = product?.price ?? 0;
+  const totalPrice = useMemo(() => unitPrice * quantity, [unitPrice, quantity]);
+  const name = product?.ingredient?.name ?? 'Unknown product';
+  const category = product?.ingredient?.category ?? 'Unknown category';
+  const description = String(product?.description ?? '').trim();
+  const imageUrl = product?.image ?? product?.ingredient?.image ?? fallbackHeaderImage;
+  const measurement = product?.measurement ?? 'unit';
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Image source={{ uri: headerImage }} style={styles.headerImage} />
+        <Image source={{ uri: imageUrl }} style={styles.headerImage} />
         <View style={styles.headerOverlay} />
         <TouchableOpacity
           style={styles.headerBackButton}
@@ -69,49 +166,62 @@ export default function ProductDetail() {
       </View>
 
       <View style={styles.sheet}>
-        <Text style={styles.title}>Robusta Bean</Text>
-        <Text style={styles.desc}>
-          Robusta coffee beans are known for their strong, earthy flavor and high caffeine
-          content.
-        </Text>
-
-        <View style={styles.vendorRow}>
-          <Ionicons name="storefront" size={14} color={COLORS.textSecondary} />
-          <Text style={styles.vendorText}>The Coffee House</Text>
-        </View>
-
-        <View style={styles.priceRow}>
-          <Text style={styles.priceText}>{totalPrice.toLocaleString('vi-VN')}vnd/g</Text>
-          <View style={styles.quantityRow}>
-            <TouchableOpacity
-              style={styles.qtyButton}
-              onPress={() => setQuantity((prev) => Math.max(1, prev - 1))}
-            >
-              <Ionicons name="remove" size={16} color={COLORS.text} />
-            </TouchableOpacity>
-            <Text style={styles.qtyValue}>{quantity}</Text>
-            <TouchableOpacity
-              style={styles.qtyButton}
-              onPress={() => setQuantity((prev) => prev + 1)}
-            >
-              <Ionicons name="add" size={16} color={COLORS.text} />
-            </TouchableOpacity>
+        {loading ? (
+          <View style={styles.stateRow}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+            <Text style={styles.stateText}>Loading product...</Text>
           </View>
-        </View>
+        ) : error ? (
+          <Text style={styles.stateText}>{error}</Text>
+        ) : !product ? (
+          <Text style={styles.stateText}>Product not found.</Text>
+        ) : (
+          <>
+            <Text style={styles.title}>{name}</Text>
+            <Text style={styles.desc}>{category}</Text>
+            {description ? <Text style={styles.desc}>{description}</Text> : null}
 
-        <View style={styles.actionRow}>
-          <Animated.View style={{ transform: [{ scale: addScale }] }}>
-            <TouchableOpacity style={styles.addButton} onPress={onAddToCart}>
-              <Text style={styles.addButtonText}>Add To Cart</Text>
-            </TouchableOpacity>
-          </Animated.View>
-          <TouchableOpacity
-            style={styles.purchaseButton}
-            onPress={() => router.push('/cart')}
-          >
-            <Text style={styles.purchaseButtonText}>Purchase</Text>
-          </TouchableOpacity>
-        </View>
+            <View style={styles.vendorRow}>
+              <Ionicons name="storefront" size={14} color={COLORS.textSecondary} />
+              <Text style={styles.vendorText}>Supplier #{product.supplierId}</Text>
+            </View>
+
+            <View style={styles.priceRow}>
+              <Text style={styles.priceText}>
+                {totalPrice.toLocaleString('vi-VN')}vnd/{measurement}
+              </Text>
+              <View style={styles.quantityRow}>
+                <TouchableOpacity
+                  style={styles.qtyButton}
+                  onPress={() => setQuantity((prev) => Math.max(1, prev - 1))}
+                >
+                  <Ionicons name="remove" size={16} color={COLORS.text} />
+                </TouchableOpacity>
+                <Text style={styles.qtyValue}>{quantity}</Text>
+                <TouchableOpacity
+                  style={styles.qtyButton}
+                  onPress={() => setQuantity((prev) => prev + 1)}
+                >
+                  <Ionicons name="add" size={16} color={COLORS.text} />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.actionRow}>
+              <Animated.View style={{ transform: [{ scale: addScale }] }}>
+                <TouchableOpacity style={styles.addButton} onPress={onAddToCart}>
+                  <Text style={styles.addButtonText}>Add To Cart</Text>
+                </TouchableOpacity>
+              </Animated.View>
+              <TouchableOpacity
+                style={styles.purchaseButton}
+                onPress={() => router.push('/cart')}
+              >
+                <Text style={styles.purchaseButtonText}>Purchase</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -219,6 +329,16 @@ const styles = StyleSheet.create({
   actionRow: {
     flexDirection: 'row',
     gap: 10,
+  },
+  stateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+  },
+  stateText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   addButton: {
     paddingHorizontal: 16,
