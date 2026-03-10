@@ -34,6 +34,8 @@ export default function ProfileScreen() {
   const {
     profile,
     coffeeShopId: profileCoffeeShopId,
+    walletBalance,
+    walletId,
     loading: profileLoading,
     error: profileError,
     refreshProfile,
@@ -61,8 +63,6 @@ export default function ProfileScreen() {
   const [topupSubmitting, setTopupSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [walletId, setWalletId] = useState<number | null>(null);
   const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
   const [successSubmitting, setSuccessSubmitting] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,18 +190,6 @@ export default function ProfileScreen() {
       isActive = false;
     };
   }, [profileCoffeeShopId, profileLoading]);
-
-  useEffect(() => {
-    const balanceValue = Number(
-      (profile as any)?.wallet?.availableBalance ??
-      (profile as any)?.wallet?.balance ??
-      (profile as any)?.walletBalance ??
-      0
-    );
-    setWalletBalance(Number.isFinite(balanceValue) ? balanceValue : 0);
-    const idValue = getNumericId((profile as any)?.wallet?.walletId);
-    setWalletId(idValue);
-  }, [profile]);
 
   const getSizeId = (size: BeverageSize) =>
     typeof size.id === 'number'

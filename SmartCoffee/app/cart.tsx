@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   View,
@@ -7,12 +7,19 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
+  Alert,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCart } from '@/context/cart-context';
+import { useAuth } from '@/context/auth-context';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 import { Swipeable } from 'react-native-gesture-handler';
+import { WebView } from 'react-native-webview';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -32,9 +39,23 @@ const fallbackItemImage =
 
 export default function CartPage() {
   const router = useRouter();
-  const { items, updateQuantity, removeItem } = useCart();
+  const { items, updateQuantity, removeItem, clearCart } = useCart();
+  const { walletBalance, walletId, refreshProfile } = useAuth();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showTopupModal, setShowTopupModal] = useState(false);
+  const [selectedTopup, setSelectedTopup] = useState<number | null>(null);
+  const [customTopup, setCustomTopup] = useState('');
+  const [topupSubmitting, setTopupSubmitting] = useState(false);
+  const [payosUrl, setPayosUrl] = useState<string | null>(null);
+  const [showPayosModal, setShowPayosModal] = useState(false);
+  const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
+  const [successSubmitting, setSuccessSubmitting] = useState(false);
+  const successTriggeredRef = useRef(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
@@ -100,6 +121,158 @@ export default function CartPage() {
       totalAmount: totalPrice + shipping,
     };
   }, [selectedItems]);
+  const canAfford = totals.totalAmount <= walletBalance;
+  const hasSelection = selectedItems.length > 0;
+  const showInsufficient = hasSelection && !canAfford;
+
+  const topupPresets = [100000, 500000, 1000000, 5000000];
+
+  const handleSelectTopup = (amount: number) => {
+    if (selectedTopup === amount) {
+      setSelectedTopup(null);
+      return;
+    }
+    setSelectedTopup(amount);
+    setCustomTopup('');
+  };
+
+  const handleTopup = () => {
+    const runTopup = async () => {
+      if (topupSubmitting) {
+        return;
+      }
+
+      const customValue = Number(customTopup.replace(/[^0-9]/g, ''));
+      const amount = selectedTopup ?? (Number.isFinite(customValue) ? customValue : 0);
+      if (!amount || amount <= 0) {
+        Alert.alert('Top up', 'Please select or enter a top-up amount.');
+        return;
+      }
+
+      try {
+        setTopupSubmitting(true);
+        if (!walletId) {
+          Alert.alert('Top up', 'Wallet not found. Please refresh and try again.');
+          return;
+        }
+
+        const returnUrl = 'http://localhost:8081/wallet-topup/success';
+        const cancelUrl = 'http://localhost:8081/wallet-topup/cancel';
+
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/Wallet/${walletId}/top-up`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            walletId,
+            amount,
+            returnUrl,
+            cancelUrl,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const checkoutUrl = String(data?.checkoutUrl ?? '').trim();
+        if (!checkoutUrl) {
+          throw new Error('Missing checkout url');
+        }
+
+        setLastTopupAmount(amount);
+        successTriggeredRef.current = false;
+        setPayosUrl(checkoutUrl);
+        setShowTopupModal(false);
+        setShowPayosModal(true);
+      } catch (error) {
+        Alert.alert('Top up', 'Unable to create top-up checkout.');
+      } finally {
+        setTopupSubmitting(false);
+      }
+    };
+
+    runTopup();
+  };
+
+  const handleTopupSuccess = async () => {
+    if (successSubmitting) {
+      return;
+    }
+
+    if (!walletId || !lastTopupAmount) {
+      Alert.alert('Top up', 'Missing top-up data. Please try again.');
+      return;
+    }
+
+    try {
+      setSuccessSubmitting(true);
+      const response = await authorizedFetch(
+        `${AUTH_BASE_URL}/Wallet/${walletId}/top-up/success?amount=${lastTopupAmount}`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      await refreshProfile();
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+      closeTimerRef.current = setTimeout(() => {
+        setShowPayosModal(false);
+        setPayosUrl(null);
+        setLastTopupAmount(null);
+        closeTimerRef.current = null;
+      }, 3000);
+    } catch (error) {
+      Alert.alert('Top up', 'Unable to confirm top-up.');
+    } finally {
+      setSuccessSubmitting(false);
+    }
+  };
+
+  const handlePayosShouldStart = (event: { url?: string }) => {
+    const rawUrl = String(event?.url ?? '');
+    const url = rawUrl.toLowerCase();
+
+    if (!url) {
+      return true;
+    }
+
+    const isSuccessRoute = url.includes('wallet-topup/success');
+    const isCancelRoute =
+      url.includes('wallet-topup/cancel') ||
+      url.includes('cancel=true') ||
+      url.includes('status=cancelled');
+    const isPaidStatus = url.includes('status=paid');
+
+    if (isCancelRoute) {
+      setShowPayosModal(false);
+      setPayosUrl(null);
+      setLastTopupAmount(null);
+      successTriggeredRef.current = false;
+      return false;
+    }
+
+    if (isSuccessRoute || isPaidStatus) {
+      if (!successTriggeredRef.current) {
+        successTriggeredRef.current = true;
+        handleTopupSuccess();
+      }
+      return false;
+    }
+
+    return true;
+  };
   const renderRightActions = (productId: number) => (
     <View style={styles.swipeActionWrap}>
       <TouchableOpacity
@@ -111,6 +284,86 @@ export default function CartPage() {
       </TouchableOpacity>
     </View>
   );
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 2000);
+  };
+
+  const handlePurchase = async () => {
+    if (selectedItems.length === 0) {
+      Alert.alert('Purchase', 'Please select at least one item.');
+      return;
+    }
+
+    if (!canAfford) {
+      Alert.alert('Purchase', 'Not enough wallet balance. Please top up.');
+      return;
+    }
+
+    if (isSubmitting) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const nowIso = new Date().toISOString();
+      const payload = {
+        notes: 'giao gap',
+        shipperName: 'string',
+        shipDate: nowIso,
+        receiDate: nowIso,
+        shipAddress: 'string',
+        receiveAddress: 's702a',
+        items: selectedItems.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+        })),
+      };
+
+      const response = await authorizedFetch(
+        API_ENDPOINTS.order.fromSupplierProducts(),
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      clearCart();
+      showToast('Order created successfully.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Purchase failed.';
+      Alert.alert('Purchase', message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+      }
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -239,18 +492,131 @@ export default function CartPage() {
             <Text style={styles.summaryValue}>{formatVnd(totals.totalPrice)} vnd</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Estimated shipping cost:</Text>
-            <Text style={styles.summaryValue}>{formatVnd(totals.shipping)} vnd</Text>
-          </View>
-          <View style={styles.summaryRow}>
             <Text style={styles.summaryTotalLabel}>Total Amount:</Text>
             <Text style={styles.summaryTotalValue}>{formatVnd(totals.totalAmount)} vnd</Text>
           </View>
-          <TouchableOpacity style={styles.purchaseCta}>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Wallet balance:</Text>
+            <Text style={styles.summaryValue}>{formatVnd(walletBalance)} vnd</Text>
+          </View>
+          {showInsufficient ? (
+            <Text style={styles.balanceWarning}>Not enough balance. Please top up.</Text>
+          ) : null}
+          {showInsufficient ? (
+            <TouchableOpacity style={styles.topupCta} onPress={() => setShowTopupModal(true)}>
+              <Text style={styles.topupCtaText}>Top up wallet</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={[styles.purchaseCta, (!canAfford || isSubmitting || !hasSelection) && styles.purchaseCtaDisabled]}
+            onPress={handlePurchase}
+            disabled={isSubmitting || !canAfford || !hasSelection}
+          >
             <Text style={styles.purchaseCtaText}>Purchase</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal
+        visible={showTopupModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTopupModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.topupCard}>
+            <View style={styles.topupHeader}>
+              <Text style={styles.topupTitle}>Top up wallet</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => setShowTopupModal(false)}
+              >
+                <Ionicons name="close" size={18} color={COLORS.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.topupHint}>Choose an amount</Text>
+            <View style={styles.topupOptions}>
+              {topupPresets.map((amount) => {
+                const isActive = amount === selectedTopup;
+                return (
+                  <TouchableOpacity
+                    key={amount}
+                    style={[styles.topupChip, isActive && styles.topupChipActive]}
+                    activeOpacity={0.8}
+                    onPress={() => handleSelectTopup(amount)}
+                  >
+                    <Text style={[styles.topupChipText, isActive && styles.topupChipTextActive]}>
+                      {amount.toLocaleString('vi-VN')} vnd
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.topupHint}>Or enter a custom amount</Text>
+            <TextInput
+              value={customTopup}
+              onChangeText={(value) => {
+                setCustomTopup(value);
+                if (selectedTopup) {
+                  setSelectedTopup(null);
+                }
+              }}
+              placeholder="e.g. 250000"
+              keyboardType="numeric"
+              style={styles.topupInput}
+            />
+            <TouchableOpacity
+              style={[styles.topupSubmit, topupSubmitting && styles.topupSubmitDisabled]}
+              onPress={handleTopup}
+              disabled={topupSubmitting}
+            >
+              <Text style={styles.topupSubmitText}>
+                {topupSubmitting ? 'Processing...' : 'Top up wallet'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showPayosModal}
+        animationType="slide"
+        onRequestClose={() => setShowPayosModal(false)}
+      >
+        <SafeAreaView style={styles.payosContainer} edges={['top']}>
+          <View style={styles.payosHeader}>
+            <Text style={styles.payosTitle}>PayOS Checkout</Text>
+            <TouchableOpacity
+              style={styles.payosCloseButton}
+              onPress={() => {
+                setShowPayosModal(false);
+                if (closeTimerRef.current) {
+                  clearTimeout(closeTimerRef.current);
+                  closeTimerRef.current = null;
+                }
+              }}
+            >
+              <Ionicons name="close" size={18} color={COLORS.text} />
+            </TouchableOpacity>
+          </View>
+          {payosUrl ? (
+            <WebView
+              source={{ uri: payosUrl }}
+              style={styles.payosWebview}
+              onShouldStartLoadWithRequest={handlePayosShouldStart}
+            />
+          ) : (
+            <View style={styles.payosFallback}>
+              <Text style={styles.payosFallbackText}>Missing checkout url.</Text>
+            </View>
+          )}
+        </SafeAreaView>
+      </Modal>
+      {toastMessage ? (
+        <View style={styles.toastContainer}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -476,9 +842,171 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  purchaseCtaDisabled: {
+    opacity: 0.5,
+  },
   purchaseCtaText: {
     fontSize: 13,
     fontWeight: '700',
     color: COLORS.white,
+  },
+  balanceWarning: {
+    fontSize: 11,
+    color: COLORS.danger,
+    fontWeight: '600',
+  },
+  topupCta: {
+    marginTop: 6,
+    backgroundColor: COLORS.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topupCtaText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  topupCard: {
+    width: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    padding: 16,
+  },
+  topupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  topupTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  modalCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F2E9E1',
+  },
+  topupHint: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 8,
+  },
+  topupOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  topupChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: COLORS.white,
+  },
+  topupChipActive: {
+    backgroundColor: '#F3D7AA',
+    borderColor: COLORS.accent,
+  },
+  topupChipText: {
+    fontSize: 11,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  topupChipTextActive: {
+    color: COLORS.text,
+  },
+  topupInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  topupSubmit: {
+    backgroundColor: COLORS.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  topupSubmitDisabled: {
+    opacity: 0.6,
+  },
+  topupSubmitText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  payosContainer: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  payosHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  payosTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  payosCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F2E9E1',
+  },
+  payosWebview: {
+    flex: 1,
+  },
+  payosFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payosFallbackText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  toastContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    backgroundColor: '#3A1C1C',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  toastText: {
+    color: COLORS.white,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

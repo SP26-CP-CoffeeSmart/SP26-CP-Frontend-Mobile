@@ -94,4 +94,8 @@ export const API_ENDPOINTS = {
     batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
     getByMenuItem: (menuItemId: number) => `${AUTH_BASE_URL}/DailySale/by-menu-item/${menuItemId}`,
   },
+  order: {
+    fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
+    byOwner: (ownerId: number) => `${AUTH_BASE_URL}/Order/by-owner/${ownerId}`,
+  },
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,10 +6,14 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useAuth } from '@/context/auth-context';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -28,40 +32,83 @@ const headerImage =
 
 const statuses = [
   { key: 'pending', label: 'Pending', icon: 'hourglass-outline' },
-  { key: 'pickup', label: 'Awaiting pickup', icon: 'cafe-outline' },
-  { key: 'delivery', label: 'Awaiting delivery', icon: 'bicycle-outline' },
-  { key: 'done', label: 'Delivered', icon: 'checkmark-circle-outline' },
+  { key: 'preparing', label: 'Preparing', icon: 'cafe-outline' },
+  { key: 'delivering', label: 'Delivering', icon: 'bicycle-outline' },
+  { key: 'delivered', label: 'Delivered', icon: 'checkmark-circle-outline' },
+  { key: 'rejected', label: 'Rejected', icon: 'close-circle-outline' },
+  { key: 'refunded', label: 'Refunded', icon: 'cash-outline' },
 ];
 
-const sampleOrders = [
-  {
-    id: '1',
-    name: 'Arabica',
-    desc: 'Description',
-    price: '100.000 vnd',
-    image:
-      'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80',
-  },
-  {
-    id: '2',
-    name: 'Robusta',
-    desc: 'Description',
-    price: '100.000 vnd',
-    image:
-      'https://images.unsplash.com/photo-1462917882517-e150004895fa?auto=format&fit=crop&w=400&q=80',
-  },
-  {
-    id: '3',
-    name: 'Liberica',
-    desc: 'Description',
-    price: '100.000 vnd',
-    image:
-      'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?auto=format&fit=crop&w=400&q=80',
-  },
-];
+const fallbackOrderImage =
+  'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
+
+type OrderResponse = {
+  orderId?: number;
+  status?: string;
+  totalPrice?: number;
+  createAt?: string;
+  supplierId?: number;
+};
+
+type PagedOrderResponse = {
+  items?: OrderResponse[];
+};
 
 export default function OrderScreen() {
   const router = useRouter();
+  const { accountId } = useAuth();
+  const [orders, setOrders] = useState<OrderResponse[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<string>('pending');
+  const formatVnd = (value: number) =>
+    value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+
+  useEffect(() => {
+    const loadOrders = async () => {
+      if (!accountId) {
+        setOrders([]);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await authorizedFetch(API_ENDPOINTS.order.byOwner(accountId), {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
+        if (Array.isArray(data)) {
+          setOrders(data);
+        } else if (Array.isArray(data?.items)) {
+          setOrders(data.items);
+        } else {
+          setOrders([]);
+        }
+      } catch (err) {
+        setError('Unable to load orders.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadOrders();
+  }, [accountId]);
+
+  const visibleOrders = useMemo(() => {
+    const filtered = orders.filter((order) => {
+      const status = String(order.status ?? '').toLowerCase();
+      return status === selectedStatus;
+    });
+    return filtered.slice(0, 10);
+  }, [orders, selectedStatus]);
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -83,30 +130,57 @@ export default function OrderScreen() {
         <Text style={styles.sectionTitle}>Recent orders</Text>
 
         <View style={styles.statusRow}>
-          {statuses.map((item) => (
-            <View key={item.key} style={styles.statusItem}>
-              <View style={styles.statusIconWrap}>
-                <Ionicons name={item.icon as any} size={18} color={COLORS.chipText} />
-              </View>
-              <Text style={styles.statusText}>{item.label}</Text>
-            </View>
-          ))}
+          {statuses.map((item) => {
+            const isActive = selectedStatus === item.key;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                style={styles.statusItem}
+                onPress={() => setSelectedStatus(item.key)}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.statusIconWrap, isActive && styles.statusIconWrapActive]}>
+                  <Ionicons
+                    name={item.icon as any}
+                    size={18}
+                    color={isActive ? COLORS.white : COLORS.chipText}
+                  />
+                </View>
+                <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <View style={styles.cardList}>
-          {sampleOrders.map((order) => (
-            <View key={order.id} style={styles.orderCard}>
-              <Image source={{ uri: order.image }} style={styles.orderImage} />
-              <View style={styles.orderInfo}>
-                <Text style={styles.orderName}>{order.name}</Text>
-                <Text style={styles.orderDesc}>{order.desc}</Text>
-                <Text style={styles.orderPrice}>{order.price}</Text>
-              </View>
-              <TouchableOpacity style={styles.reorderButton}>
-                <Text style={styles.reorderText}>Re-Order</Text>
-              </TouchableOpacity>
+          {loading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+              <Text style={styles.emptyText}>Loading orders...</Text>
             </View>
-          ))}
+          ) : error ? (
+            <Text style={styles.emptyText}>{error}</Text>
+          ) : visibleOrders.length === 0 ? (
+            <Text style={styles.emptyText}>No recent orders.</Text>
+          ) : (
+            visibleOrders.map((order) => (
+              <View key={String(order.orderId ?? Math.random())} style={styles.orderCard}>
+                <Image source={{ uri: fallbackOrderImage }} style={styles.orderImage} />
+                <View style={styles.orderInfo}>
+                  <Text style={styles.orderName}>Order #{order.orderId ?? '-'}</Text>
+                  <Text style={styles.orderDesc}>{order.status ?? 'Pending'}</Text>
+                  <Text style={styles.orderPrice}>
+                    {formatVnd(order.totalPrice ?? 0)} vnd
+                  </Text>
+                </View>
+                <TouchableOpacity style={styles.reorderButton}>
+                  <Text style={styles.reorderText}>Re-Order</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          )}
         </View>
 
         <TouchableOpacity style={styles.loadMoreButton}>
@@ -175,17 +249,17 @@ const styles = StyleSheet.create({
   },
   statusRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
     marginBottom: 16,
   },
   statusItem: {
     alignItems: 'center',
-    width: 72,
+    width: 54,
   },
   statusIconWrap: {
-    width: 40,
-    height: 40,
+    width: 34,
+    height: 34,
     borderRadius: 12,
     backgroundColor: COLORS.chip,
     alignItems: 'center',
@@ -193,14 +267,32 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+  statusIconWrapActive: {
+    backgroundColor: COLORS.text,
+    borderColor: COLORS.text,
+  },
   statusText: {
-    fontSize: 10,
+    fontSize: 9,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    marginTop: 6,
+    marginTop: 4,
+  },
+  statusTextActive: {
+    color: COLORS.text,
+    fontWeight: '700',
   },
   cardList: {
     paddingHorizontal: 16,
+  },
+  emptyState: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  emptyText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
   orderCard: {
     flexDirection: 'row',
