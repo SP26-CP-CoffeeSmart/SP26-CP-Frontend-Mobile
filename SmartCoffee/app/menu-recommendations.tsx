@@ -88,6 +88,7 @@ export default function MenuRecommendationsScreen() {
   const [selectedShopStyle, setSelectedShopStyle] = useState('Modern Minimalist');
   const [shopStyleText, setShopStyleText] = useState('');
   const [selectedPricing, setSelectedPricing] = useState('budget');
+  const [numberOfOptions, setNumberOfOptions] = useState(1);
   const [menuGroups, setMenuGroups] = useState<MenuGroup[]>([]);
   const [menuGroupInput, setMenuGroupInput] = useState('');
   const [categories, setCategories] = useState<BeverageCategory[]>([]);
@@ -96,6 +97,7 @@ export default function MenuRecommendationsScreen() {
   const [activeGroupIndex, setActiveGroupIndex] = useState<number | null>(null);
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [useExistingShopItems, setUseExistingShopItems] = useState(true);
 
   const getCategoryId = (category: BeverageCategory) =>
     typeof category.id === 'number'
@@ -258,10 +260,12 @@ export default function MenuRecommendationsScreen() {
     const payload = {
       title,
       menuSizeValue: menuSize,
+      numberOfOptions,
       layout: layoutValue,
       topic: topicValue,
       shopStyle: shopStyleText.trim() || selectedShopStyle,
       pricing: pricingValue,
+      useExistingShopItems,
       groups: menuGroups.map((group) => ({
         name: group.name,
         selectedBeverageCategories: group.selectedBeverageCategories,
@@ -369,6 +373,29 @@ export default function MenuRecommendationsScreen() {
             <View style={styles.rowBetween}>
               <Text style={styles.helperText}>10</Text>
               <Text style={styles.helperText}>20</Text>
+            </View>
+          </View>
+
+          <View style={styles.fieldGroup}>
+            <Text style={styles.label}>
+              How many menu results would you like the AI to return?
+            </Text>
+            <Text style={styles.helperText}>Choose 1, 2, or 3 options.</Text>
+            <View style={styles.optionRow}>
+              {[1, 2, 3].map((option) => {
+                const active = numberOfOptions === option;
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    style={[styles.optionChip, active && styles.optionChipActive]}
+                    onPress={() => setNumberOfOptions(option)}
+                  >
+                    <Text style={[styles.optionChipText, active && styles.optionChipTextActive]}>
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
@@ -540,6 +567,41 @@ export default function MenuRecommendationsScreen() {
                 <TouchableOpacity style={styles.groupInputAction} onPress={handleAddGroup}>
                   <Ionicons name="add" size={18} color={COLORS.accentDark} />
                 </TouchableOpacity>
+              </View>
+              <View style={styles.recipeToggleRow}>
+                <Text style={styles.label}>Use existing recipes from your shop?</Text>
+                <View style={styles.recipeToggleActions}>
+                  <TouchableOpacity
+                    style={styles.recipeToggleOption}
+                    onPress={() => setUseExistingShopItems(true)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.recipeRadioOuter,
+                        useExistingShopItems && styles.recipeRadioOuterActive,
+                      ]}
+                    >
+                      {useExistingShopItems ? <View style={styles.recipeRadioInner} /> : null}
+                    </View>
+                    <Text style={styles.recipeToggleText}>Yes</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.recipeToggleOption}
+                    onPress={() => setUseExistingShopItems(false)}
+                    activeOpacity={0.8}
+                  >
+                    <View
+                      style={[
+                        styles.recipeRadioOuter,
+                        !useExistingShopItems && styles.recipeRadioOuterActive,
+                      ]}
+                    >
+                      {!useExistingShopItems ? <View style={styles.recipeRadioInner} /> : null}
+                    </View>
+                    <Text style={styles.recipeToggleText}>No</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           </View>
@@ -808,6 +870,32 @@ const styles = StyleSheet.create({
   pricingLabelActive: {
     color: '#FFF',
   },
+  optionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  optionChip: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: COLORS.chip,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  optionChipActive: {
+    backgroundColor: '#F5E7D8',
+    borderColor: COLORS.accent,
+  },
+  optionChipText: {
+    fontSize: 12,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  optionChipTextActive: {
+    color: COLORS.accentDark,
+  },
   groupBadge: {
     backgroundColor: '#F2E7DC',
     paddingHorizontal: 8,
@@ -908,6 +996,46 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  recipeToggleRow: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+  },
+  recipeToggleActions: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 8,
+  },
+  recipeToggleOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recipeRadioOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.card,
+  },
+  recipeRadioOuterActive: {
+    borderColor: COLORS.accentDark,
+  },
+  recipeRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.accentDark,
+  },
+  recipeToggleText: {
+    fontSize: 12,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
   primaryButton: {
     marginTop: 8,
     backgroundColor: COLORS.accentDark,
@@ -930,7 +1058,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalCard: {
-    backgroundColor: '#FFF',
+    backgroundColor: COLORS.card,
     borderRadius: 16,
     padding: 16,
     maxHeight: '80%',

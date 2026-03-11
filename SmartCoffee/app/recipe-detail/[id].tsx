@@ -72,7 +72,7 @@ interface Ingredient {
 export default function RecipeDetailScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
-    const { id, recipe: recipeParam, ingredients: ingredientsParam } = useLocalSearchParams();
+    const { id, recipe: recipeParam, recipes: recipesParam, ingredients: ingredientsParam } = useLocalSearchParams();
     const router = useRouter();
     const [showChipsSelector, setShowChipsSelector] = useState(false);
     const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
@@ -96,20 +96,36 @@ export default function RecipeDetailScreen() {
             try {
                 setLoading(true);
 
-                // Nếu có recipe từ params (từ menu-detail), dùng luôn
-                if (recipeParam) {
-                    const parsed = safeParseJson(recipeParam as string);
-                    if (parsed) {
-                        setRecipeData(parsed);
-                        setRecipes([parsed]);
+                const parsedRecipes = safeParseJson(recipesParam as string);
+                
+                if (recipeParam || parsedRecipes) {
+                    let defaultRecipe = null;
+                    let parsedRecipeList: RecipeData[] = [];
+
+                    if (Array.isArray(parsedRecipes) && parsedRecipes.length > 0) {
+                        parsedRecipeList = parsedRecipes;
+                        defaultRecipe = parsedRecipes[0];
+                    }
+
+                    const parsedSingleRecipe = safeParseJson(recipeParam as string);
+                    if (parsedSingleRecipe) {
+                         defaultRecipe = parsedSingleRecipe;
+                         if (parsedRecipeList.length === 0) {
+                             parsedRecipeList = [parsedSingleRecipe];
+                         }
+                    }
+
+                    if (defaultRecipe) {
+                        setRecipeData(defaultRecipe);
+                        setRecipes(parsedRecipeList);
                         setActiveRecipeIndex(0);
 
                         // Nếu có ingredients từ params, dùng luôn
                         const parsedIngredients = safeParseJson(ingredientsParam as string);
-                        if (Array.isArray(parsedIngredients)) {
+                        if (Array.isArray(parsedIngredients) && parsedIngredients.length > 0) {
                             setIngredients(parsedIngredients);
-                        } else if (Array.isArray(parsed?.ingredients)) {
-                            setIngredients(parsed.ingredients);
+                        } else if (Array.isArray(defaultRecipe?.ingredients) && defaultRecipe.ingredients.length > 0) {
+                            setIngredients(defaultRecipe.ingredients);
                         }
                         setError(null);
                         setLoading(false);

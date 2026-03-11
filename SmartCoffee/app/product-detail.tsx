@@ -32,6 +32,7 @@ const fallbackHeaderImage =
 interface SupplierProductApiItem {
   productId: number;
   supplierId: number;
+  supplierName?: string | null;
   ingredientId: number;
   price: number;
   stock: number;
@@ -89,9 +90,10 @@ export default function ProductDetail() {
       addItem({
         productId: product.productId,
         supplierId: product.supplierId,
+        supplierName: product.supplierName ?? null,
         name: product.ingredient?.name ?? 'Unknown product',
         category: product.ingredient?.category ?? 'Unknown category',
-        image: product.ingredient?.image ?? null,
+        image: product.image ?? product.ingredient?.image ?? null,
         measurement: product.measurement ?? 'unit',
         unitPrice: product.price ?? 0,
         quantity,
@@ -183,7 +185,9 @@ export default function ProductDetail() {
 
             <View style={styles.vendorRow}>
               <Ionicons name="storefront" size={14} color={COLORS.textSecondary} />
-              <Text style={styles.vendorText}>Supplier #{product.supplierId}</Text>
+              <Text style={styles.vendorText}>
+                {product.supplierName ?? `Supplier #${product.supplierId}`}
+              </Text>
             </View>
 
             <View style={styles.priceRow}>

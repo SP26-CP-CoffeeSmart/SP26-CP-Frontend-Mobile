@@ -115,7 +115,17 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
   const buildGroupedItem = (menuItem: any) => {
     const shopBeverage = menuItem?.shopBeverage || {};
-    const shopRecipe = menuItem?.shopRecipe || {};
+    let shopRecipe = menuItem?.shopRecipe || null;
+    let shopRecipes: any[] = [];
+
+    if (shopBeverage?.shopRecipes && Array.isArray(shopBeverage.shopRecipes)) {
+      shopRecipes = shopBeverage.shopRecipes;
+    }
+
+    if (!shopRecipe && shopRecipes.length > 0) {
+      shopRecipe = shopRecipes[0];
+    }
+
     const recipeName =
       shopRecipe?.recipeName ||
       shopBeverage?.name ||
@@ -128,9 +138,9 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
       recipeName,
       description: text,
       priceInfo: prices,
-      image: shopRecipe?.image,
+      image: shopRecipe?.image || shopBeverage?.image || shopBeverage?.imageUrl,
       shopBeverage,
-      shopRecipe,
+      shopRecipe: shopRecipe || {},
       sourceMenuItem: menuItem,
     };
   };
@@ -314,7 +324,19 @@ export default function MenuDetailScreen() {
   const handleItemPress = (menuItem: any) => {
     if (!menuItem) return;
     const menuItemId = Number(menuItem?.menuItemId ?? menuItem?.id ?? 0);
-    const shopRecipe = menuItem?.shopRecipe || {};
+    let shopRecipe = menuItem?.shopRecipe || null;
+    let shopRecipes: any[] = [];
+    
+    // Check if the beverage has multiple recipes attached
+    if (menuItem?.shopBeverage?.shopRecipes && Array.isArray(menuItem.shopBeverage.shopRecipes)) {
+      shopRecipes = menuItem.shopBeverage.shopRecipes;
+    }
+
+    // Default to the first shop recipe if the item's recipe doesn't exist but the beverage's does
+    if (!shopRecipe && shopRecipes.length > 0) {
+       shopRecipe = shopRecipes[0];
+    }
+
     const shopRecipeIngredients = toArray(
       shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients ?? []
     );
@@ -323,7 +345,8 @@ export default function MenuDetailScreen() {
       pathname: '/recipe-detail/[id]',
       params: {
         id: String(menuItemId || 0),
-        recipe: JSON.stringify(shopRecipe),
+        recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
+        recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
         ingredients: JSON.stringify(shopRecipeIngredients),
       },
     });
