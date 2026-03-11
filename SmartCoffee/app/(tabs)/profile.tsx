@@ -39,6 +39,7 @@ export default function ProfileScreen() {
     loading: profileLoading,
     error: profileError,
     refreshProfile,
+    fullAddress,
   } = useAuth();
   const [logoutSubmitting, setLogoutSubmitting] = useState(false);
   const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
@@ -662,6 +663,13 @@ export default function ProfileScreen() {
             <Text style={styles.infoLabel}>Shop name:</Text>
             <Text style={styles.infoValue}>{profileShopDisplay}</Text>
           </View>
+          <View style={styles.infoRowAddress}>
+            <View style={styles.infoRowAddressTop}>
+              <Ionicons name="location" size={16} color="#8B5E3C" />
+              <Text style={styles.infoLabel}>Address:</Text>
+            </View>
+            <Text style={styles.infoAddressValue}>{fullAddress || '-'}</Text>
+          </View>
         </View>
 
         <View style={styles.card}>
@@ -1261,7 +1269,7 @@ const styles = StyleSheet.create({
   },
   infoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
     gap: 6,
   },
@@ -1271,9 +1279,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   infoValue: {
+    flex: 1,
+    flexWrap: 'wrap',
     fontSize: 13,
     color: '#3C2B20',
     fontWeight: '600',
+    paddingRight: 10,
+  },
+  infoRowAddress: {
+    marginBottom: 8,
+  },
+  infoRowAddressTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  infoAddressValue: {
+    fontSize: 13,
+    color: '#3C2B20',
+    fontWeight: '600',
+    paddingLeft: 22,
   },
   sectionHeader: {
     flexDirection: 'row',

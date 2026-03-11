@@ -93,7 +93,7 @@ export default function ProductDetail() {
         supplierName: product.supplierName ?? null,
         name: product.ingredient?.name ?? 'Unknown product',
         category: product.ingredient?.category ?? 'Unknown category',
-        image: product.ingredient?.image ?? null,
+        image: product.image ?? product.ingredient?.image ?? null,
         measurement: product.measurement ?? 'unit',
         unitPrice: product.price ?? 0,
         quantity,

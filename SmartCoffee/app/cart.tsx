@@ -109,23 +109,7 @@ export default function CartPage() {
   };
 
   const selectedItems = items.filter((item) => selectedIds.has(item.productId));
-  const totals = useMemo(() => {
-    const itemCount = selectedItems.reduce((sum, item) => sum + item.quantity, 0);
-    const totalPrice = selectedItems.reduce(
-      (sum, item) => sum + item.unitPrice * item.quantity,
-      0
-    );
-    const shipping = Math.round(totalPrice * 0.1);
-    return {
-      itemCount,
-      totalPrice,
-      shipping,
-      totalAmount: totalPrice ,
-    };
-  }, [selectedItems]);
-  const canAfford = totals.totalAmount <= walletBalance;
   const hasSelection = selectedItems.length > 0;
-  const showInsufficient = hasSelection && !canAfford;
 
   const topupPresets = [100000, 500000, 1000000, 5000000];
 
@@ -304,65 +288,11 @@ export default function CartPage() {
       return;
     }
 
-    if (!canAfford) {
-      Alert.alert('Purchase', 'Not enough wallet balance. Please top up.');
-      return;
-    }
-
-    if (isSubmitting) {
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const nowIso = new Date().toISOString();
-      const payload = {
-        notes: 'giao gap',
-        shipperName: 'string',
-        shipDate: nowIso,
-        receiDate: nowIso,
-        shipAddress: 'string',
-        receiveAddress: 's702a',
-        items: selectedItems.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-        })),
-      };
-
-      const response = await authorizedFetch(
-        API_ENDPOINTS.order.fromSupplierProducts(),
-        {
-          method: 'POST',
-          headers: {
-            Accept: '*/*',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-
-      // Only remove the purchased items, leaving unpurchased items in cart
-      selectedItems.forEach((item) => removeItem(item.productId));
-      setSelectedIds(new Set());
-      Toast.show({
-        type: 'success',
-        text1: 'Order placed successfully!',
-        text2: 'Your order has been submitted.',
-      });
-      // Navigate back to order tab so user sees the new order
-      setTimeout(() => router.replace('/(tabs)/order'), 300);
-
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Purchase failed.';
-      Alert.alert('Purchase', message);
-    } finally {
-      setIsSubmitting(false);
-    }
+    const selectedIdsArray = Array.from(selectedIds);
+    router.push({
+      pathname: '/checkout',
+      params: { selectedIds: JSON.stringify(selectedIdsArray) }
+    });
   };
 
   useEffect(() => {
@@ -384,189 +314,156 @@ export default function CartPage() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-        <View style={styles.header}>
-          <Image source={{ uri: headerImage }} style={styles.headerImage} />
-          <View style={styles.headerOverlay} />
-          <Text style={styles.headerTitle}>Your Cart</Text>
-          <TouchableOpacity
-            style={styles.headerBackButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="chevron-back" size={20} color={COLORS.white} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={styles.selectAllRow}
-            onPress={toggleAll}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.checkbox, isAllSelected && styles.checkboxChecked]}>
-              {isAllSelected ? (
-                <Ionicons name="checkmark" size={12} color={COLORS.white} />
-              ) : null}
-            </View>
-            <Text style={styles.selectAllText}>All</Text>
-          </TouchableOpacity>
-
-          {items.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>Your cart is empty.</Text>
-            </View>
-          ) : (
-            (() => {
-              // Group items by supplierId, preserving insertion order
-              const groups: { supplierId: number; supplierName: string | null | undefined; items: typeof items }[] = [];
-              const seen = new Map<number, number>();
-              for (const item of items) {
-                if (!seen.has(item.supplierId)) {
-                  seen.set(item.supplierId, groups.length);
-                  groups.push({ supplierId: item.supplierId, supplierName: item.supplierName, items: [] });
-                }
-                groups[seen.get(item.supplierId)!].items.push(item);
-              }
-
-              return groups.map((group) => {
-                const supplierSelected = group.items.every((item) =>
-                  selectedIds.has(item.productId)
-                );
-                const label = group.supplierName ?? `Supplier #${group.supplierId}`;
-
-                return (
-                  <View key={group.supplierId} style={styles.shopSection}>
-                    {/* Supplier header row */}
-                    <TouchableOpacity
-                      style={styles.shopRow}
-                      onPress={() => toggleSupplier(group.supplierId)}
-                      activeOpacity={0.7}
-                    >
-                      <View style={[styles.checkbox, supplierSelected && styles.checkboxChecked]}>
-                        {supplierSelected ? (
-                          <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                        ) : null}
-                      </View>
-                      <Text style={styles.shopText}>{label} {'>'}</Text>
-                    </TouchableOpacity>
-
-                    {/* All items from this supplier inside one rounded container */}
-                    <View style={styles.shopItemsContainer}>
-                      {group.items.map((item, idx) => {
-                        const isSelected = selectedIds.has(item.productId);
-                        return (
-                          <View key={item.productId}>
-                            {idx > 0 && <View style={styles.itemDivider} />}
-                            <Swipeable
-                              renderRightActions={() => renderRightActions(item.productId)}
-                              rightThreshold={32}
-                            >
-                              <TouchableOpacity
-                                style={[styles.itemCard, isSelected && styles.itemCardSelected]}
-                                onPress={() => toggleItem(item.productId)}
-                                activeOpacity={0.55}
-                              >
-                                <View style={styles.itemInfo}>
-                                  <Text style={styles.itemName}>{item.name}</Text>
-                                  <Text style={styles.itemDesc}>{item.category}</Text>
-                                  <Text style={styles.itemPrice}>
-                                    {formatVnd(item.unitPrice)}vnd/{item.measurement}
-                                  </Text>
-                                  <View style={styles.qtyRow}>
-                                    <TouchableOpacity
-                                      style={styles.qtyButton}
-                                      onPress={() =>
-                                        updateQuantity(item.productId, Math.max(1, item.quantity - 1))
-                                      }
-                                    >
-                                      <Ionicons name="remove" size={14} color={COLORS.text} />
-                                    </TouchableOpacity>
-                                    <Text style={styles.qtyValue}>{item.quantity}</Text>
-                                    <TouchableOpacity
-                                      style={styles.qtyButton}
-                                      onPress={() => updateQuantity(item.productId, item.quantity + 1)}
-                                    >
-                                      <Ionicons name="add" size={14} color={COLORS.text} />
-                                    </TouchableOpacity>
-                                  </View>
-                                </View>
-                                <Image
-                                  source={{ uri: item.image ?? fallbackItemImage }}
-                                  style={styles.itemImage}
-                                />
-                                <View style={styles.itemSelectOverlay}>
-                                  <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-                                    {isSelected ? (
-                                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                                    ) : null}
-                                  </View>
-                                </View>
-                              </TouchableOpacity>
-                            </Swipeable>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  </View>
-                );
-              });
-            })()
-          )}
-        </View>
-      </ScrollView>
-
-        <View style={styles.summaryBar}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Number of items:</Text>
-            <Text style={styles.summaryValue}>{totals.itemCount}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Total Price:</Text>
-            <Text style={styles.summaryValue}>{formatVnd(totals.totalPrice)} vnd</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryTotalLabel}>Total Amount:</Text>
-            <Text style={styles.summaryTotalValue}>{formatVnd(totals.totalAmount)} vnd</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Wallet balance:</Text>
-            <Text style={styles.summaryValue}>{formatVnd(walletBalance)} vnd</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Balance after payment:</Text>
-            <Text style={[styles.summaryValue, { color: canAfford ? '#2E7D32' : COLORS.danger }]}>
-              {formatVnd(walletBalance - totals.totalAmount)} vnd
-            </Text>
-          </View>
-          {showInsufficient ? (
-            <Text style={styles.balanceWarning}>Not enough balance. Please top up.</Text>
-          ) : null}
-          {showInsufficient ? (
-            <TouchableOpacity style={styles.topupCta} onPress={() => setShowTopupModal(true)}>
-              <Text style={styles.topupCtaText}>Top up wallet</Text>
+          <View style={styles.header}>
+            <Image source={{ uri: headerImage }} style={styles.headerImage} />
+            <View style={styles.headerOverlay} />
+            <Text style={styles.headerTitle}>Your Cart</Text>
+            <TouchableOpacity
+              style={styles.headerBackButton}
+              onPress={() => router.back()}
+            >
+              <Ionicons name="chevron-back" size={20} color={COLORS.white} />
             </TouchableOpacity>
-          ) : null}
-          <TouchableOpacity
-            style={[styles.purchaseCta, (!canAfford || isSubmitting || !hasSelection) && styles.purchaseCtaDisabled]}
-            onPress={() => {
-              if (!hasSelection) {
-                Alert.alert('Purchase', 'Please select at least one item.');
-                return;
-              }
-              if (!canAfford) {
-                Alert.alert('Purchase', 'Not enough wallet balance. Please top up.');
-                return;
-              }
-              setShowConfirmModal(true);
-            }}
-            disabled={isSubmitting || !canAfford || !hasSelection}
-          >
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
-            ) : null}
-            <Text style={styles.purchaseCtaText}>
-              {isSubmitting ? 'Purchasing...' : 'Purchase'}
-            </Text>
-          </TouchableOpacity>
+          </View>
+
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={styles.selectAllRow}
+              onPress={toggleAll}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.checkbox, isAllSelected && styles.checkboxChecked]}>
+                {isAllSelected ? (
+                  <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                ) : null}
+              </View>
+              <Text style={styles.selectAllText}>All</Text>
+            </TouchableOpacity>
+
+            {items.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyText}>Your cart is empty.</Text>
+              </View>
+            ) : (
+              (() => {
+                // Group items by supplierId, preserving insertion order
+                const groups: { supplierId: number; supplierName: string | null | undefined; items: typeof items }[] = [];
+                const seen = new Map<number, number>();
+                for (const item of items) {
+                  if (!seen.has(item.supplierId)) {
+                    seen.set(item.supplierId, groups.length);
+                    groups.push({ supplierId: item.supplierId, supplierName: item.supplierName, items: [] });
+                  }
+                  groups[seen.get(item.supplierId)!].items.push(item);
+                }
+
+                return groups.map((group) => {
+                  const supplierSelected = group.items.every((item) =>
+                    selectedIds.has(item.productId)
+                  );
+                  const label = group.supplierName ?? `Supplier #${group.supplierId}`;
+
+                  return (
+                    <View key={group.supplierId} style={styles.shopSection}>
+                      {/* Supplier header row */}
+                      <TouchableOpacity
+                        style={styles.shopRow}
+                        onPress={() => toggleSupplier(group.supplierId)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={[styles.checkbox, supplierSelected && styles.checkboxChecked]}>
+                          {supplierSelected ? (
+                            <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                          ) : null}
+                        </View>
+                        <Text style={styles.shopText}>{label} {'>'}</Text>
+                      </TouchableOpacity>
+
+                      {/* All items from this supplier inside one rounded container */}
+                      <View style={styles.shopItemsContainer}>
+                        {group.items.map((item, idx) => {
+                          const isSelected = selectedIds.has(item.productId);
+                          return (
+                            <View key={item.productId}>
+                              {idx > 0 && <View style={styles.itemDivider} />}
+                              <Swipeable
+                                renderRightActions={() => renderRightActions(item.productId)}
+                                rightThreshold={32}
+                              >
+                                <TouchableOpacity
+                                  style={[styles.itemCard, isSelected && styles.itemCardSelected]}
+                                  onPress={() => toggleItem(item.productId)}
+                                  activeOpacity={0.55}
+                                >
+                                  <View style={styles.itemInfo}>
+                                    <Text style={styles.itemName}>{item.name}</Text>
+                                    <Text style={styles.itemDesc}>{item.category}</Text>
+                                    <Text style={styles.itemPrice}>
+                                      {formatVnd(item.unitPrice)}vnd/{item.measurement}
+                                    </Text>
+                                    <View style={styles.qtyRow}>
+                                      <TouchableOpacity
+                                        style={styles.qtyButton}
+                                        onPress={() =>
+                                          updateQuantity(item.productId, Math.max(1, item.quantity - 1))
+                                        }
+                                      >
+                                        <Ionicons name="remove" size={14} color={COLORS.text} />
+                                      </TouchableOpacity>
+                                      <Text style={styles.qtyValue}>{item.quantity}</Text>
+                                      <TouchableOpacity
+                                        style={styles.qtyButton}
+                                        onPress={() => updateQuantity(item.productId, item.quantity + 1)}
+                                      >
+                                        <Ionicons name="add" size={14} color={COLORS.text} />
+                                      </TouchableOpacity>
+                                    </View>
+                                  </View>
+                                  <Image
+                                    source={{ uri: item.image ?? fallbackItemImage }}
+                                    style={styles.itemImage}
+                                  />
+                                  <View style={styles.itemSelectOverlay}>
+                                    <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+                                      {isSelected ? (
+                                        <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                                      ) : null}
+                                    </View>
+                                  </View>
+                                </TouchableOpacity>
+                              </Swipeable>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                });
+              })()
+            )}
+          </View>
+        </ScrollView>
+
+        <View style={styles.bottomContainer}>
+          <View style={styles.actionButtonsContainer}>
+            <TouchableOpacity
+              style={styles.addIngredientsBtn}
+              onPress={() => router.push('/product-page')}
+            >
+              <Text style={styles.addIngredientsText}>+ Add ingredients</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.purchaseItemsBtn, !hasSelection && styles.purchaseItemsBtnDisabled]}
+              onPress={handlePurchase}
+              disabled={!hasSelection}
+            >
+              <Ionicons name="cart-outline" size={18} color={COLORS.white} style={{ marginRight: 6 }} />
+              <Text style={styles.purchaseItemsText}>
+                Purchase Items
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -902,71 +799,114 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.white,
   },
-  summaryBar: {
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.white,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 16,
-    gap: 6,
+  bottomContainer: {
+    backgroundColor: COLORS.bg,
+    paddingTop: 16,
+    paddingBottom: 24,
+    gap: 16,
+  },
+  orderSummaryCard: {
+    backgroundColor: '#FAF7F2',
+    marginHorizontal: 16,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  orderSummaryTitle: {
+    fontSize: 18,
+    color: '#3C2A21',
+    fontWeight: '600',
+    marginBottom: 16,
   },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 8,
   },
   summaryLabel: {
-    fontSize: 12,
-    color: COLORS.text,
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#8E7B6F',
   },
   summaryValue: {
-    fontSize: 12,
-    color: COLORS.text,
-    fontWeight: '600',
+    fontSize: 14,
+    color: '#8E7B6F',
+  },
+  summaryDivider: {
+    height: 1,
+    backgroundColor: '#E8E1D9',
+    marginVertical: 12,
   },
   summaryTotalLabel: {
-    fontSize: 13,
-    color: COLORS.danger,
+    fontSize: 16,
+    color: '#3C2A21',
     fontWeight: '700',
   },
   summaryTotalValue: {
-    fontSize: 13,
-    color: COLORS.danger,
+    fontSize: 16,
+    color: '#3C2A21',
     fontWeight: '700',
   },
-  purchaseCta: {
-    marginTop: 8,
-    backgroundColor: '#3A1C1C',
-    borderRadius: 12,
-    paddingVertical: 12,
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: 16,
+    gap: 12,
+  },
+  addIngredientsBtn: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E8E1D9',
+    borderRadius: 40,
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  purchaseCtaDisabled: {
-    opacity: 0.5,
-  },
-  purchaseCtaText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  balanceWarning: {
-    fontSize: 11,
-    color: COLORS.danger,
+  addIngredientsText: {
+    fontSize: 14,
+    color: '#3C2A21',
     fontWeight: '600',
   },
+  purchaseItemsBtn: {
+    flex: 1,
+    backgroundColor: '#2A1810',
+    borderRadius: 40,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  purchaseItemsBtnDisabled: {
+    opacity: 0.5,
+  },
+  purchaseItemsText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  insufficientContainer: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  balanceWarning: {
+    fontSize: 12,
+    color: COLORS.danger,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
   topupCta: {
-    marginTop: 6,
     backgroundColor: COLORS.accent,
     borderRadius: 12,
     paddingVertical: 10,
+    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   topupCtaText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
     color: COLORS.white,
   },
