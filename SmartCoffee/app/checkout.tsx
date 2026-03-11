@@ -33,17 +33,38 @@ const COLORS = {
     orange: '#F05D23',
     green: '#2E7D32',
 };
-
-const SHIPPING_OPTIONS = [
-    { id: 'nhanh', label: 'Fast', price: 0, desc: 'Receive in 1-2 days' },
-    { id: 'hoatoc', label: 'Express', price: 10000, desc: 'Receive in 4 hours' },
-];
+type ShippingOption = {
+    id: string;
+    label: string;
+    price: number;
+    desc: string;
+};
 
 interface SupplierGroup {
     supplierId: number;
     supplierName: string;
     items: CartItem[];
 }
+
+type SupplierInfo = {
+    supplierId: number;
+    supplierName: string;
+    address?: string | null;
+    provinceId?: number | null;
+    districtId?: number | null;
+    wardCode?: string | null;
+};
+
+type GhnService = {
+    service_id: number;
+    short_name: string;
+    service_type_id: number;
+};
+
+type GhnFeeResponse = {
+    total: number;
+    service_fee: number;
+};
 
 export default function CheckoutPage() {
     const router = useRouter();
@@ -54,8 +75,16 @@ export default function CheckoutPage() {
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
 
     // State for each supplier group
-    const [shippingOptions, setShippingOptions] = useState<Record<number, typeof SHIPPING_OPTIONS[0]>>({});
+    const [shippingOptions, setShippingOptions] = useState<Record<number, ShippingOption>>({});
     const [notes, setNotes] = useState<Record<number, string>>({});
+
+    // GHN shipping integration state
+    const [suppliers, setSuppliers] = useState<SupplierInfo[]>([]);
+    const [ghnServicesBySupplier, setGhnServicesBySupplier] = useState<Record<number, GhnService[]>>({});
+    const [shippingFeeBySupplierService, setShippingFeeBySupplierService] = useState<Record<number, Record<number, number>>>({});
+    const [shippingErrorBySupplierService, setShippingErrorBySupplierService] = useState<Record<number, Record<number, string | null>>>({});
+    const [shippingLoadingBySupplier, setShippingLoadingBySupplier] = useState<Record<number, boolean>>({});
+    const [shippingErrorBySupplier, setShippingErrorBySupplier] = useState<Record<number, string | null>>({});
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -74,6 +103,8 @@ export default function CheckoutPage() {
     const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const topupPresets = [100000, 500000, 1000000, 5000000];
 
+    const hasShippingAddress = Boolean((profile as any)?.districtId && (profile as any)?.wardCode);
+
     useEffect(() => {
         if (params.selectedIds) {
             try {
@@ -84,6 +115,33 @@ export default function CheckoutPage() {
             }
         }
     }, [params.selectedIds]);
+
+    // Load suppliers to map supplierId -> GHN address info
+    useEffect(() => {
+        const loadSuppliers = async () => {
+            try {
+                const response = await authorizedFetch(API_ENDPOINTS.supplier.list(), {
+                    method: 'GET',
+                    headers: {
+                        Accept: '*/*',
+                    },
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    setSuppliers(data as SupplierInfo[]);
+                }
+            } catch (error) {
+                console.error('Failed to load suppliers', error);
+            }
+        };
+
+        loadSuppliers();
+    }, []);
 
     const selectedItems = items.filter((item) => selectedIds.includes(item.productId));
 
@@ -101,27 +159,189 @@ export default function CheckoutPage() {
         return Object.values(groups);
     }, [selectedItems]);
 
-    // Make sure every group has a default shipping option
-    useEffect(() => {
-        const defaultShipping: Record<number, typeof SHIPPING_OPTIONS[0]> = {};
-        groupedItems.forEach((group) => {
-            if (!shippingOptions[group.supplierId]) {
-                defaultShipping[group.supplierId] = SHIPPING_OPTIONS[0];
-            }
-        });
-
-        if (Object.keys(defaultShipping).length > 0) {
-            setShippingOptions((prev) => ({ ...prev, ...defaultShipping }));
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [groupedItems]);
-
-    const setGroupShipping = (supplierId: number, option: typeof SHIPPING_OPTIONS[0]) => {
+    const setGroupShipping = (supplierId: number, option: ShippingOption) => {
         setShippingOptions((prev) => ({ ...prev, [supplierId]: option }));
     };
 
     const setGroupNote = (supplierId: number, note: string) => {
         setNotes((prev) => ({ ...prev, [supplierId]: note }));
+    };
+
+    const computeGroupWeight = (group: SupplierGroup) => {
+        const DEFAULT_ITEM_WEIGHT = 1; // grams per item (approximation)
+        let totalQuantity = 0;
+        group.items.forEach((item) => {
+            totalQuantity += item.quantity;
+        });
+        const estimated = totalQuantity * DEFAULT_ITEM_WEIGHT;
+        return estimated > 0 ? estimated : 1000; // at least 1kg
+    };
+
+    const loadShippingForGroup = async (group: SupplierGroup, overwriteServiceId?: number) => {
+        if (!profile) return;
+
+        const toDistrictId = (profile as any)?.districtId;
+        const toWardCode = (profile as any)?.wardCode;
+
+        if (!toDistrictId || !toWardCode) {
+            return;
+        }
+
+        const supplierInfo = suppliers.find((s) => s.supplierId === group.supplierId);
+        if (!supplierInfo || !supplierInfo.districtId || !supplierInfo.wardCode) {
+            return;
+        }
+
+        const supplierId = group.supplierId;
+        const fromDistrictId = supplierInfo.districtId;
+        const fromWardCode = supplierInfo.wardCode;
+
+        setShippingLoadingBySupplier((prev) => ({ ...prev, [supplierId]: true }));
+        setShippingErrorBySupplier((prev) => ({ ...prev, [supplierId]: null }));
+        setShippingErrorBySupplierService((prev) => ({
+            ...prev,
+            [supplierId]: {},
+        }));
+
+        let services = ghnServicesBySupplier[supplierId];
+
+        try {
+            if (!services || services.length === 0) {
+                const svcRes = await authorizedFetch(
+                    API_ENDPOINTS.ghn.availableServices(fromDistrictId, toDistrictId),
+                    {
+                        method: 'GET',
+                        headers: {
+                            Accept: '*/*',
+                        },
+                    }
+                );
+
+                if (!svcRes.ok) {
+                    throw new Error(`Failed to load services: ${svcRes.status}`);
+                }
+
+                const svcData = await svcRes.json();
+                const rawServices = Array.isArray(svcData?.data)
+                    ? (svcData.data as GhnService[])
+                    : [];
+
+                // Filter out unsupported heavy service 100039
+                services = rawServices.filter((s) => s.service_id !== 100039);
+
+                setGhnServicesBySupplier((prev) => ({ ...prev, [supplierId]: services }));
+            }
+
+            if (!services || services.length === 0) {
+                throw new Error('No GHN services available');
+            }
+        } catch (error) {
+            console.log('Failed to load GHN services for supplier', supplierId, error);
+            setShippingErrorBySupplier((prev) => ({
+                ...prev,
+                [supplierId]:
+                    error instanceof Error ? error.message : 'Unable to load GHN services',
+            }));
+            setShippingLoadingBySupplier((prev) => ({ ...prev, [supplierId]: false }));
+            return;
+        }
+
+        const feesByService: Record<number, number> = {};
+        const errorsByService: Record<number, string | null> = {};
+
+        const weight = computeGroupWeight(group);
+
+        await Promise.all(
+            services.map(async (svc) => {
+                const feePayload = {
+                    service_id: svc.service_id,
+                    insurance_value: 0,
+                    from_district_id: fromDistrictId,
+                    from_ward_code: fromWardCode,
+                    to_district_id: toDistrictId,
+                    to_ward_code: toWardCode,
+                    weight,
+                    length: 0,
+                    width: 0,
+                    height: 0,
+                };
+
+                try {
+                    const feeRes = await authorizedFetch(API_ENDPOINTS.order.ghnFee(), {
+                        method: 'POST',
+                        headers: {
+                            Accept: '*/*',
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(feePayload),
+                    });
+
+                    if (!feeRes.ok) {
+                        let feeText = '';
+                        try {
+                            feeText = await feeRes.text();
+                        } catch {
+                            // ignore
+                        }
+                        throw new Error(`Failed to calculate fee: ${feeRes.status} ${feeText}`);
+                    }
+
+                    const feeData: GhnFeeResponse = await feeRes.json();
+                    const totalFee = Number(feeData?.total) || 0;
+                    feesByService[svc.service_id] = totalFee;
+                } catch (error) {
+                    console.log(
+                        'Failed to calculate GHN fee for supplier',
+                        supplierId,
+                        'service',
+                        svc.service_id,
+                        error
+                    );
+                    errorsByService[svc.service_id] =
+                        error instanceof Error ? error.message : 'Unable to calculate shipping';
+                }
+            })
+        );
+
+        setShippingFeeBySupplierService((prev) => ({
+            ...prev,
+            [supplierId]: {
+                ...(prev[supplierId] || {}),
+                ...feesByService,
+            },
+        }));
+
+        setShippingErrorBySupplierService((prev) => ({
+            ...prev,
+            [supplierId]: {
+                ...(prev[supplierId] || {}),
+                ...errorsByService,
+            },
+        }));
+
+        const existingSelectedId =
+            (overwriteServiceId ?? Number(shippingOptions[supplierId]?.id)) || undefined;
+
+        let selectedService: GhnService | undefined;
+        if (existingSelectedId && services.some((s) => s.service_id === existingSelectedId)) {
+            selectedService = services.find((s) => s.service_id === existingSelectedId);
+        } else {
+            selectedService =
+                services.find((s) => typeof feesByService[s.service_id] === 'number') ||
+                services[0];
+        }
+
+        if (selectedService) {
+            const selectedFee = feesByService[selectedService.service_id];
+            setGroupShipping(supplierId, {
+                id: String(selectedService.service_id),
+                label: selectedService.short_name || 'GHN Service',
+                price: typeof selectedFee === 'number' ? selectedFee : 0,
+                desc: 'GHN shipping service',
+            });
+        }
+
+        setShippingLoadingBySupplier((prev) => ({ ...prev, [supplierId]: false }));
     };
 
     const totals = useMemo(() => {
@@ -132,8 +352,20 @@ export default function CheckoutPage() {
             group.items.forEach((item) => {
                 itemTotal += item.unitPrice * item.quantity;
             });
-            const groupShipping = shippingOptions[group.supplierId] || SHIPPING_OPTIONS[0];
-            shippingTotal += groupShipping.price;
+
+            const selectedOption = shippingOptions[group.supplierId];
+            if (selectedOption) {
+                const serviceId = Number(selectedOption.id);
+                const feeMap = shippingFeeBySupplierService[group.supplierId];
+                const explicitFee =
+                    feeMap && typeof feeMap[serviceId] === 'number'
+                        ? feeMap[serviceId]
+                        : undefined;
+
+                if (typeof explicitFee === 'number') {
+                    shippingTotal += explicitFee;
+                }
+            }
         });
 
         const totalAmount = itemTotal + shippingTotal;
@@ -143,7 +375,26 @@ export default function CheckoutPage() {
             shippingTotal,
             totalAmount,
         };
-    }, [groupedItems, shippingOptions]);
+    }, [groupedItems, shippingOptions, shippingFeeBySupplierService]);
+
+    // Auto-load GHN shipping fee for each supplier group when data is ready
+    useEffect(() => {
+        if (!profile || suppliers.length === 0 || groupedItems.length === 0) return;
+
+        groupedItems.forEach((group) => {
+            const supplierId = group.supplierId;
+            const feeMap = shippingFeeBySupplierService[supplierId];
+            const hasFee =
+                feeMap && Object.values(feeMap).some((value) => typeof value === 'number');
+            const hasError = shippingErrorBySupplier[supplierId];
+            const isLoading = shippingLoadingBySupplier[supplierId];
+
+            if (!hasFee && !hasError && !isLoading) {
+                loadShippingForGroup(group);
+            }
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [groupedItems, profile, suppliers]);
 
     const canAfford = totals.totalAmount <= walletBalance;
     const missingAmount = Math.max(0, totals.totalAmount - walletBalance);
@@ -168,40 +419,50 @@ export default function CheckoutPage() {
 
         setIsSubmitting(true);
         try {
-            const nowIso = new Date().toISOString();
+            // Build new payload shape:
+            // {
+            //   orders: [
+            //     { supplierId, notes, shippingFee, items: [{ productId, quantity }] }
+            //   ]
+            // }
 
-            // Submit one order per supplier group
-            const promises = groupedItems.map((group) => {
-                const payload = {
+            const orders = groupedItems.map((group) => {
+                const selectedOption = shippingOptions[group.supplierId];
+                const serviceId = selectedOption ? Number(selectedOption.id) : undefined;
+                const feeMap = shippingFeeBySupplierService[group.supplierId];
+                const explicitFee =
+                    serviceId && feeMap && typeof feeMap[serviceId] === 'number'
+                        ? feeMap[serviceId]
+                        : 0;
+
+                return {
+                    supplierId: group.supplierId,
                     notes: (notes[group.supplierId] || '').trim() || 'None',
-                    shipperName: shippingOptions[group.supplierId]?.label || 'Fast',
-                    shipDate: nowIso,
-                    receiDate: nowIso,
-                    shipAddress: 'HCM',
-                    receiveAddress: 'HCM',
+                    shippingFee: explicitFee,
                     items: group.items.map((item) => ({
                         productId: item.productId,
                         quantity: item.quantity,
                     })),
                 };
-
-                return authorizedFetch(API_ENDPOINTS.order.fromSupplierProducts(), {
-                    method: 'POST',
-                    headers: {
-                        Accept: '*/*',
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(payload),
-                }).then(async (response) => {
-                    if (!response.ok) {
-                        const text = await response.text();
-                        throw new Error(`Order for ${group.supplierName} failed: ${text || response.status}`);
-                    }
-                    return response;
-                });
             });
 
-            await Promise.all(promises);
+            const payload = {
+                orders,
+            };
+
+            const response = await authorizedFetch(API_ENDPOINTS.order.fromSupplierProducts(), {
+                method: 'POST',
+                headers: {
+                    Accept: '*/*',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Order failed: ${text || response.status}`);
+            }
 
             // Remove purchased items from cart
             selectedItems.forEach((item) => removeItem(item.productId));
@@ -381,7 +642,17 @@ export default function CheckoutPage() {
 
                 {/* Grouped Products by Supplier */}
                 {groupedItems.map((group) => {
-                    const currentShippingId = shippingOptions[group.supplierId]?.id || SHIPPING_OPTIONS[0].id;
+                    const groupIsLoading = shippingLoadingBySupplier[group.supplierId];
+                    const groupError = shippingErrorBySupplier[group.supplierId];
+                    const ghnServices = ghnServicesBySupplier[group.supplierId];
+                    const hasAnyGhnService = !!(ghnServices && ghnServices.length > 0);
+                    const feeMapForGroup = shippingFeeBySupplierService[group.supplierId] || {};
+                    const errorMapForGroup =
+                        shippingErrorBySupplierService[group.supplierId] || {};
+
+                    const currentShippingId =
+                        (shippingOptions[group.supplierId]?.id as string | undefined) ??
+                        (hasAnyGhnService ? String(ghnServices![0].service_id) : '');
 
                     return (
                         <View key={`supplier-${group.supplierId}`} style={styles.supplierGroupSection}>
@@ -417,40 +688,93 @@ export default function CheckoutPage() {
 
                             <View style={styles.shippingSection}>
                                 <Text style={styles.shippingSectionTitle}>Shipping Method</Text>
-                                {SHIPPING_OPTIONS.map((option) => (
-                                    <TouchableOpacity
-                                        key={option.id}
-                                        style={[
-                                            styles.shippingCard,
-                                            currentShippingId === option.id && styles.shippingCardSelected
-                                        ]}
-                                        onPress={() => setGroupShipping(group.supplierId, option)}
-                                        activeOpacity={0.7}
-                                    >
-                                        <View style={styles.shippingHeader}>
-                                            <View style={styles.shippingTitleRow}>
-                                                <Text style={[
-                                                    styles.shippingTitle,
-                                                    currentShippingId === option.id && styles.shippingTitleSelected
-                                                ]}>
-                                                    {option.label}
-                                                </Text>
-                                                {currentShippingId === option.id && (
-                                                    <Ionicons name="checkmark-circle" size={16} color={COLORS.green} style={{ marginLeft: 6 }} />
-                                                )}
-                                            </View>
-                                            <View style={styles.shippingPriceRow}>
-                                                <Text style={[
-                                                    styles.shippingPrice,
-                                                    option.price === 0 && styles.freeShippingText
-                                                ]}>
-                                                    {option.price === 0 ? 'Free' : `${formatVnd(option.price)} VND`}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <Text style={styles.shippingDesc}>{option.desc}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                                {!hasShippingAddress && (
+                                    <Text style={styles.shippingDesc}>
+                                        Shipping address is missing. Please update your address before placing an order.
+                                    </Text>
+                                )}
+                                {hasShippingAddress && !hasAnyGhnService && groupError && (
+                                    <Text style={styles.shippingDesc}>
+                                        No services for this supplier&apos;s address.
+                                    </Text>
+                                )}
+                                {hasShippingAddress && hasAnyGhnService &&
+                                    ghnServices!.map((svc) => {
+                                        const option: ShippingOption = {
+                                            id: String(svc.service_id),
+                                            label: svc.short_name || 'GHN Service',
+                                            price:
+                                                typeof feeMapForGroup[svc.service_id] === 'number'
+                                                    ? feeMapForGroup[svc.service_id]
+                                                    : 0,
+                                            desc: 'GHN shipping service',
+                                        };
+
+                                        const isSelected = currentShippingId === option.id;
+                                        const serviceFee = feeMapForGroup[svc.service_id];
+                                        const serviceError = errorMapForGroup[svc.service_id];
+
+                                        let priceLabel = '';
+                                        if (typeof serviceFee === 'number' && serviceFee > 0) {
+                                            priceLabel = `${formatVnd(serviceFee)} VND`;
+                                        } else if (serviceError) {
+                                            priceLabel = "Not avalable";
+                                        } else if (groupIsLoading) {
+                                            priceLabel = 'Calculating...';
+                                        } else {
+                                            priceLabel = '--';
+                                        }
+
+                                        const isDisabled = !!serviceError;
+
+                                        return (
+                                            <TouchableOpacity
+                                                key={option.id}
+                                                style={[
+                                                    styles.shippingCard,
+                                                    isSelected && styles.shippingCardSelected,
+                                                    (isDisabled || groupIsLoading) &&
+                                                    styles.shippingCardDisabled,
+                                                ]}
+                                                onPress={() => {
+                                                    if (isDisabled || groupIsLoading) return;
+                                                    setGroupShipping(group.supplierId, option);
+                                                }}
+                                                activeOpacity={0.7}
+                                                disabled={isDisabled || groupIsLoading}
+                                            >
+                                                <View style={styles.shippingHeader}>
+                                                    <View style={styles.shippingTitleRow}>
+                                                        <Text style={[
+                                                            styles.shippingTitle,
+                                                            isSelected && styles.shippingTitleSelected,
+                                                        ]}>
+                                                            {option.label}
+                                                        </Text>
+                                                        {isSelected && (
+                                                            <Ionicons
+                                                                name="checkmark-circle"
+                                                                size={16}
+                                                                color={COLORS.green}
+                                                                style={{ marginLeft: 6 }}
+                                                            />
+                                                        )}
+                                                    </View>
+                                                    <View style={styles.shippingPriceRow}>
+                                                        <Text
+                                                            style={[
+                                                                styles.shippingPrice,
+                                                                !ghnServices && option.price === 0 && styles.freeShippingText,
+                                                            ]}
+                                                        >
+                                                            {priceLabel}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                                <Text style={styles.shippingDesc}>{option.desc}</Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
                             </View>
                         </View>
                     );
@@ -861,6 +1185,9 @@ const styles = StyleSheet.create({
     shippingCardSelected: {
         borderColor: COLORS.accent,
         backgroundColor: '#FAF5EF',
+    },
+    shippingCardDisabled: {
+        opacity: 0.6,
     },
     shippingHeader: {
         flexDirection: 'row',

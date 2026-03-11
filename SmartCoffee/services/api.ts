@@ -45,6 +45,8 @@ export const API_ENDPOINTS = {
     provinces: () => `${AUTH_BASE_URL}/GHN/provinces`,
     districts: (provinceId: number) => `${AUTH_BASE_URL}/GHN/districts/${provinceId}`,
     wards: (districtId: number) => `${AUTH_BASE_URL}/GHN/wards/${districtId}`,
+    availableServices: (fromDistrictId: number, toDistrictId: number) =>
+      `${AUTH_BASE_URL}/GHN/available-services?fromDistrictId=${fromDistrictId}&toDistrictId=${toDistrictId}`,
   },
   shopRecipeIngredients: {
     getAll: () => `${AUTH_BASE_URL}/ShopRecipeIngredients`,
@@ -102,5 +104,9 @@ export const API_ENDPOINTS = {
   order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
     byOwner: (ownerId: number) => `${AUTH_BASE_URL}/Order/by-owner/${ownerId}`,
+    ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
+  },
+  supplier: {
+    list: () => `${AUTH_BASE_URL}/Supplier`,
   },
 };

@@ -46,6 +46,8 @@ interface SupplierProductApiItem {
   status: string;
   createDate: string;
   measurement: string;
+  // packageSize: khối lượng 1 túi (theo measurement)
+  packageSize?: number | null;
   image?: string | null;
   description?: string | null;
   ingredient?: {
@@ -216,10 +218,10 @@ export default function ProductPage() {
 
         <View style={styles.suggestionBox}>
           <TouchableOpacity onPress={() => router.push('/ai-order-suggestions')}>
-          <Ionicons name="sparkles" size={14} color={COLORS.text} />
-          <Text style={styles.suggestionText}>
-            AI suggestion: Helping you make purchases quickly based on inventory analysis.
-          </Text>
+            <Ionicons name="sparkles" size={14} color={COLORS.text} />
+            <Text style={styles.suggestionText}>
+              AI suggestion: Helping you make purchases quickly based on inventory analysis.
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -240,7 +242,9 @@ export default function ProductPage() {
               const imageUrl =
                 item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
               const description = String(item?.description ?? '').trim();
-              const priceText = `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
+              const priceText = item.packageSize && item.measurement
+                ? `${formatVnd(item.price)} vnd/(${item.packageSize}${item.measurement})`
+                : `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
 
               return (
                 <TouchableOpacity
