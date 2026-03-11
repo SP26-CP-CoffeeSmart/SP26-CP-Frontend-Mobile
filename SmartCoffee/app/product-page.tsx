@@ -32,7 +32,6 @@ const COLORS = {
 const headerImage =
   'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1200&q=80';
 
-const categories = ['Bean', 'Milk', 'Sugar', 'Syrup'];
 
 const fallbackProductImage =
   'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
@@ -40,6 +39,7 @@ const fallbackProductImage =
 interface SupplierProductApiItem {
   productId: number;
   supplierId: number;
+  supplierName?: string | null;
   ingredientId: number;
   price: number;
   stock: number;
@@ -73,9 +73,20 @@ const cardWidth = (width - 32 - cardGap) / 2;
 export default function ProductPage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [products, setProducts] = useState<SupplierProductApiItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const dynamicCategories = useMemo(() => {
+    const cats = new Set<string>();
+    products.forEach((p) => {
+      if (p?.ingredient?.category) {
+        cats.add(p.ingredient.category);
+      }
+    });
+    return Array.from(cats);
+  }, [products]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -109,14 +120,23 @@ export default function ProductPage() {
     fetchProducts();
   }, []);
   const filteredProducts = useMemo(() => {
-    if (!search.trim()) return products;
-    const term = search.trim().toLowerCase();
-    return products.filter((item) =>
-      String(item?.ingredient?.name ?? '')
-        .toLowerCase()
-        .includes(term)
-    );
-  }, [products, search]);
+    let result = products;
+
+    if (activeCategory) {
+      result = result.filter((item) => item?.ingredient?.category === activeCategory);
+    }
+
+    if (search.trim()) {
+      const term = search.trim().toLowerCase();
+      result = result.filter((item) =>
+        String(item?.ingredient?.name ?? '')
+          .toLowerCase()
+          .includes(term)
+      );
+    }
+
+    return result;
+  }, [products, search, activeCategory]);
 
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
@@ -155,11 +175,43 @@ export default function ProductPage() {
         </View>
 
         <View style={styles.categoryRow}>
-          {categories.map((item) => (
-            <TouchableOpacity key={item} style={styles.categoryChip}>
-              <Text style={styles.categoryText}>{item}</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16 }}>
+            <TouchableOpacity
+              style={[
+                styles.categoryChip,
+                activeCategory === null && { backgroundColor: COLORS.accent },
+              ]}
+              onPress={() => setActiveCategory(null)}
+            >
+              <Text
+                style={[
+                  styles.categoryText,
+                  activeCategory === null && { color: COLORS.white },
+                ]}
+              >
+                All
+              </Text>
             </TouchableOpacity>
-          ))}
+            {dynamicCategories.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={[
+                  styles.categoryChip,
+                  activeCategory === item && { backgroundColor: COLORS.accent },
+                ]}
+                onPress={() => setActiveCategory(item)}
+              >
+                <Text
+                  style={[
+                    styles.categoryText,
+                    activeCategory === item && { color: COLORS.white },
+                  ]}
+                >
+                  {item}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         </View>
 
         <View style={styles.suggestionBox}>
@@ -213,8 +265,10 @@ export default function ProductPage() {
                   <Text style={styles.cardPrice}>{priceText}</Text>
                   <View style={styles.metaRow}>
                     <View style={styles.metaItem}>
-                      <Ionicons name="cube-outline" size={12} color={COLORS.textSecondary} />
-                      <Text style={styles.metaText}>Stock {item.stock}</Text>
+                      <Ionicons name="storefront-outline" size={12} color={COLORS.textSecondary} />
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {item.supplierName ?? `Supplier #${item.supplierId}`}
+                      </Text>
                     </View>
                     <View style={styles.metaItem}>
                       <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />

@@ -420,7 +420,7 @@ export default function MenuScreen() {
   };
 
   const handleNewMenuPress = () => {
-    if (totalBeverages >= 5) {
+    if (totalBeverages >= 5 || beverages.length >= 5) {
       router.push('/menu-recommendations');
       return;
     }

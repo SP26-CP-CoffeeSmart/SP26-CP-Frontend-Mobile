@@ -34,9 +34,12 @@ export default function ProfileScreen() {
   const {
     profile,
     coffeeShopId: profileCoffeeShopId,
+    walletBalance,
+    walletId,
     loading: profileLoading,
     error: profileError,
     refreshProfile,
+    fullAddress,
   } = useAuth();
   const [logoutSubmitting, setLogoutSubmitting] = useState(false);
   const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
@@ -61,8 +64,6 @@ export default function ProfileScreen() {
   const [topupSubmitting, setTopupSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(0);
-  const [walletId, setWalletId] = useState<number | null>(null);
   const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
   const [successSubmitting, setSuccessSubmitting] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -190,18 +191,6 @@ export default function ProfileScreen() {
       isActive = false;
     };
   }, [profileCoffeeShopId, profileLoading]);
-
-  useEffect(() => {
-    const balanceValue = Number(
-      (profile as any)?.wallet?.availableBalance ??
-      (profile as any)?.wallet?.balance ??
-      (profile as any)?.walletBalance ??
-      0
-    );
-    setWalletBalance(Number.isFinite(balanceValue) ? balanceValue : 0);
-    const idValue = getNumericId((profile as any)?.wallet?.walletId);
-    setWalletId(idValue);
-  }, [profile]);
 
   const getSizeId = (size: BeverageSize) =>
     typeof size.id === 'number'
@@ -673,6 +662,13 @@ export default function ProfileScreen() {
             <Ionicons name="storefront" size={16} color="#8B5E3C" />
             <Text style={styles.infoLabel}>Shop name:</Text>
             <Text style={styles.infoValue}>{profileShopDisplay}</Text>
+          </View>
+          <View style={styles.infoRowAddress}>
+            <View style={styles.infoRowAddressTop}>
+              <Ionicons name="location" size={16} color="#8B5E3C" />
+              <Text style={styles.infoLabel}>Address:</Text>
+            </View>
+            <Text style={styles.infoAddressValue}>{fullAddress || '-'}</Text>
           </View>
         </View>
 
@@ -1273,7 +1269,7 @@ const styles = StyleSheet.create({
   },
   infoRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 8,
     gap: 6,
   },
@@ -1283,9 +1279,27 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   infoValue: {
+    flex: 1,
+    flexWrap: 'wrap',
     fontSize: 13,
     color: '#3C2B20',
     fontWeight: '600',
+    paddingRight: 10,
+  },
+  infoRowAddress: {
+    marginBottom: 8,
+  },
+  infoRowAddressTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  infoAddressValue: {
+    fontSize: 13,
+    color: '#3C2B20',
+    fontWeight: '600',
+    paddingLeft: 22,
   },
   sectionHeader: {
     flexDirection: 'row',

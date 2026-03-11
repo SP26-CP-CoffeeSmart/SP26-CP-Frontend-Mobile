@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export type CartItem = {
   productId: number;
   supplierId: number;
+  supplierName?: string | null;
   name: string;
   category: string;
   image: string | null;

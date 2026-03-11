@@ -41,6 +41,11 @@ export const API_ENDPOINTS = {
     refreshToken: () => `${AUTH_BASE_URL}/Auth/refresh-token`,
     changePassword: () => `${AUTH_BASE_URL}/Auth/change-password`,
   },
+  ghn: {
+    provinces: () => `${AUTH_BASE_URL}/GHN/provinces`,
+    districts: (provinceId: number) => `${AUTH_BASE_URL}/GHN/districts/${provinceId}`,
+    wards: (districtId: number) => `${AUTH_BASE_URL}/GHN/wards/${districtId}`,
+  },
   shopRecipeIngredients: {
     getAll: () => `${AUTH_BASE_URL}/ShopRecipeIngredients`,
     getById: (id: number) => `${AUTH_BASE_URL}/ShopRecipeIngredients/${id}`,
@@ -93,5 +98,9 @@ export const API_ENDPOINTS = {
   dailySale: {
     batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
     getByMenuItem: (menuItemId: number) => `${AUTH_BASE_URL}/DailySale/by-menu-item/${menuItemId}`,
+  },
+  order: {
+    fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
+    byOwner: (ownerId: number) => `${AUTH_BASE_URL}/Order/by-owner/${ownerId}`,
   },
 };
