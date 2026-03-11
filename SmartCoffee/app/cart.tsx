@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Toast from 'react-native-toast-message';
+import { ActivityIndicator } from 'react-native';
 import {
-  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -44,6 +45,7 @@ export default function CartPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showTopupModal, setShowTopupModal] = useState(false);
   const [selectedTopup, setSelectedTopup] = useState<number | null>(null);
@@ -118,7 +120,7 @@ export default function CartPage() {
       itemCount,
       totalPrice,
       shipping,
-      totalAmount: totalPrice + shipping,
+      totalAmount: totalPrice ,
     };
   }, [selectedItems]);
   const canAfford = totals.totalAmount <= walletBalance;
@@ -344,8 +346,17 @@ export default function CartPage() {
         throw new Error(text || `Request failed (${response.status})`);
       }
 
-      clearCart();
-      showToast('Order created successfully.');
+      // Only remove the purchased items, leaving unpurchased items in cart
+      selectedItems.forEach((item) => removeItem(item.productId));
+      setSelectedIds(new Set());
+      Toast.show({
+        type: 'success',
+        text1: 'Order placed successfully!',
+        text2: 'Your order has been submitted.',
+      });
+      // Navigate back to order tab so user sees the new order
+      setTimeout(() => router.replace('/(tabs)/order'), 300);
+
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Purchase failed.';
       Alert.alert('Purchase', message);
@@ -401,83 +412,104 @@ export default function CartPage() {
 
           {items.length === 0 ? (
             <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color={COLORS.accent} />
               <Text style={styles.emptyText}>Your cart is empty.</Text>
             </View>
           ) : (
-            items.map((item) => {
-              const isSelected = selectedIds.has(item.productId);
-              const supplierSelected = items
-                .filter((entry) => entry.supplierId === item.supplierId)
-                .every((entry) => selectedIds.has(entry.productId));
+            (() => {
+              // Group items by supplierId, preserving insertion order
+              const groups: { supplierId: number; supplierName: string | null | undefined; items: typeof items }[] = [];
+              const seen = new Map<number, number>();
+              for (const item of items) {
+                if (!seen.has(item.supplierId)) {
+                  seen.set(item.supplierId, groups.length);
+                  groups.push({ supplierId: item.supplierId, supplierName: item.supplierName, items: [] });
+                }
+                groups[seen.get(item.supplierId)!].items.push(item);
+              }
 
-              return (
-              <View key={item.productId} style={styles.shopSection}>
-                <TouchableOpacity
-                  style={styles.shopRow}
-                  onPress={() => toggleSupplier(item.supplierId)}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[styles.checkbox, supplierSelected && styles.checkboxChecked]}
-                  >
-                    {supplierSelected ? (
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                    ) : null}
-                  </View>
-                  <Text style={styles.shopText}>Supplier #{item.supplierId} ></Text>
-                </TouchableOpacity>
-                <Swipeable
-                  renderRightActions={() => renderRightActions(item.productId)}
-                  rightThreshold={32}
-                >
-                  <View style={styles.itemCard}>
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemDesc}>{item.category}</Text>
-                      <Text style={styles.itemPrice}>
-                        {formatVnd(item.unitPrice)}vnd/{item.measurement}
-                      </Text>
-                      <View style={styles.qtyRow}>
-                        <TouchableOpacity
-                          style={styles.qtyButton}
-                          onPress={() =>
-                            updateQuantity(item.productId, Math.max(1, item.quantity - 1))
-                          }
-                        >
-                          <Ionicons name="remove" size={14} color={COLORS.text} />
-                        </TouchableOpacity>
-                        <Text style={styles.qtyValue}>{item.quantity}</Text>
-                        <TouchableOpacity
-                          style={styles.qtyButton}
-                          onPress={() => updateQuantity(item.productId, item.quantity + 1)}
-                        >
-                          <Ionicons name="add" size={14} color={COLORS.text} />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                    <Image
-                      source={{ uri: item.image ?? fallbackItemImage }}
-                      style={styles.itemImage}
-                    />
+              return groups.map((group) => {
+                const supplierSelected = group.items.every((item) =>
+                  selectedIds.has(item.productId)
+                );
+                const label = group.supplierName ?? `Supplier #${group.supplierId}`;
+
+                return (
+                  <View key={group.supplierId} style={styles.shopSection}>
+                    {/* Supplier header row */}
                     <TouchableOpacity
-                      style={styles.itemSelectOverlay}
-                      onPress={() => toggleItem(item.productId)}
+                      style={styles.shopRow}
+                      onPress={() => toggleSupplier(group.supplierId)}
                       activeOpacity={0.7}
                     >
-                      <View
-                        style={[styles.checkbox, isSelected && styles.checkboxChecked]}
-                      >
-                        {isSelected ? (
+                      <View style={[styles.checkbox, supplierSelected && styles.checkboxChecked]}>
+                        {supplierSelected ? (
                           <Ionicons name="checkmark" size={12} color={COLORS.white} />
                         ) : null}
                       </View>
+                      <Text style={styles.shopText}>{label} {'>'}</Text>
                     </TouchableOpacity>
+
+                    {/* All items from this supplier inside one rounded container */}
+                    <View style={styles.shopItemsContainer}>
+                      {group.items.map((item, idx) => {
+                        const isSelected = selectedIds.has(item.productId);
+                        return (
+                          <View key={item.productId}>
+                            {idx > 0 && <View style={styles.itemDivider} />}
+                            <Swipeable
+                              renderRightActions={() => renderRightActions(item.productId)}
+                              rightThreshold={32}
+                            >
+                              <TouchableOpacity
+                                style={[styles.itemCard, isSelected && styles.itemCardSelected]}
+                                onPress={() => toggleItem(item.productId)}
+                                activeOpacity={0.55}
+                              >
+                                <View style={styles.itemInfo}>
+                                  <Text style={styles.itemName}>{item.name}</Text>
+                                  <Text style={styles.itemDesc}>{item.category}</Text>
+                                  <Text style={styles.itemPrice}>
+                                    {formatVnd(item.unitPrice)}vnd/{item.measurement}
+                                  </Text>
+                                  <View style={styles.qtyRow}>
+                                    <TouchableOpacity
+                                      style={styles.qtyButton}
+                                      onPress={() =>
+                                        updateQuantity(item.productId, Math.max(1, item.quantity - 1))
+                                      }
+                                    >
+                                      <Ionicons name="remove" size={14} color={COLORS.text} />
+                                    </TouchableOpacity>
+                                    <Text style={styles.qtyValue}>{item.quantity}</Text>
+                                    <TouchableOpacity
+                                      style={styles.qtyButton}
+                                      onPress={() => updateQuantity(item.productId, item.quantity + 1)}
+                                    >
+                                      <Ionicons name="add" size={14} color={COLORS.text} />
+                                    </TouchableOpacity>
+                                  </View>
+                                </View>
+                                <Image
+                                  source={{ uri: item.image ?? fallbackItemImage }}
+                                  style={styles.itemImage}
+                                />
+                                <View style={styles.itemSelectOverlay}>
+                                  <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+                                    {isSelected ? (
+                                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                                    ) : null}
+                                  </View>
+                                </View>
+                              </TouchableOpacity>
+                            </Swipeable>
+                          </View>
+                        );
+                      })}
+                    </View>
                   </View>
-                </Swipeable>
-              </View>
-              );
-            })
+                );
+              });
+            })()
           )}
         </View>
       </ScrollView>
@@ -499,6 +531,12 @@ export default function CartPage() {
             <Text style={styles.summaryLabel}>Wallet balance:</Text>
             <Text style={styles.summaryValue}>{formatVnd(walletBalance)} vnd</Text>
           </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Balance after payment:</Text>
+            <Text style={[styles.summaryValue, { color: canAfford ? '#2E7D32' : COLORS.danger }]}>
+              {formatVnd(walletBalance - totals.totalAmount)} vnd
+            </Text>
+          </View>
           {showInsufficient ? (
             <Text style={styles.balanceWarning}>Not enough balance. Please top up.</Text>
           ) : null}
@@ -509,13 +547,64 @@ export default function CartPage() {
           ) : null}
           <TouchableOpacity
             style={[styles.purchaseCta, (!canAfford || isSubmitting || !hasSelection) && styles.purchaseCtaDisabled]}
-            onPress={handlePurchase}
+            onPress={() => {
+              if (!hasSelection) {
+                Alert.alert('Purchase', 'Please select at least one item.');
+                return;
+              }
+              if (!canAfford) {
+                Alert.alert('Purchase', 'Not enough wallet balance. Please top up.');
+                return;
+              }
+              setShowConfirmModal(true);
+            }}
             disabled={isSubmitting || !canAfford || !hasSelection}
           >
-            <Text style={styles.purchaseCtaText}>Purchase</Text>
+            {isSubmitting ? (
+              <ActivityIndicator size="small" color="#fff" style={{ marginRight: 8 }} />
+            ) : null}
+            <Text style={styles.purchaseCtaText}>
+              {isSubmitting ? 'Purchasing...' : 'Purchase'}
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Purchase Confirmation Modal */}
+      <Modal
+        visible={showConfirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowConfirmModal(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>Confirm Purchase</Text>
+            <Text style={styles.confirmMessage}>
+              Are you sure you want to place this order?
+            </Text>
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.confirmCancelBtn}
+                onPress={() => setShowConfirmModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.confirmOkBtn}
+                onPress={() => {
+                  setShowConfirmModal(false);
+                  handlePurchase();
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.confirmOkText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showTopupModal}
@@ -708,6 +797,19 @@ const styles = StyleSheet.create({
   shopText: {
     fontSize: 12,
     color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  shopItemsContainer: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    overflow: 'hidden',
+  },
+  itemDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginHorizontal: 10,
   },
   emptyState: {
     flexDirection: 'row',
@@ -721,14 +823,14 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     backgroundColor: COLORS.white,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
     padding: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     position: 'relative',
+  },
+  itemCardSelected: {
+    backgroundColor: '#FDF6EC',
   },
   itemInfo: {
     flex: 1,
@@ -1008,5 +1110,61 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: 12,
     fontWeight: '600',
+  },
+  confirmCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 18,
+    padding: 24,
+    marginHorizontal: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  confirmTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  confirmMessage: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  confirmCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    backgroundColor: COLORS.bg,
+  },
+  confirmCancelText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  confirmOkBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.text,
+    alignItems: 'center',
+  },
+  confirmOkText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.white,
   },
 });
