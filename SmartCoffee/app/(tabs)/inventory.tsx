@@ -24,11 +24,15 @@ interface Ingredient {
   endDate: string;
 }
 
-interface ShopRecipeIngredient {
-  id: number;
-  quantity: number;
-  cost: number;
-  ingredient: Ingredient;
+interface ShopInventoryItem {
+  inventoryDetailId: number;
+  coffeeShopId?: number;
+  ingredientId?: number;
+  quantity?: number;
+  minStock?: number;
+  expirationDate?: string;
+  measurement?: string;
+  ingredient?: Ingredient;
 }
 
 export default function InventoryScreen() {
@@ -36,15 +40,15 @@ export default function InventoryScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [ingredients, setIngredients] = useState<ShopRecipeIngredient[]>([]);
-  const [filteredIngredients, setFilteredIngredients] = useState<ShopRecipeIngredient[]>([]);
+  const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
+  const [filteredIngredients, setFilteredIngredients] = useState<ShopInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const categories = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
   const maxQuantity = 500;
-  const minStock = 100;
+  const defaultMinStock = 100;
 
   const COLORS = {
     background: '#F7F2EE',
@@ -62,9 +66,10 @@ export default function InventoryScreen() {
     try {
       setLoading(true);
       setError(null);
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients`);
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopInventory`);
       const data = await response.json();
 
+      console.log('Fetched ingredients:', data);
       if (Array.isArray(data)) {
         setIngredients(data);
         setFilteredIngredients(data);
@@ -94,9 +99,10 @@ export default function InventoryScreen() {
 
     // Filter by search query
     if (searchQuery.trim() !== '') {
-      filtered = filtered.filter((item) =>
-        (item.ingredient?.name || `Ingredient #${item.id}`).toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      filtered = filtered.filter((item) => {
+        const name = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
+        return name.toLowerCase().includes(searchQuery.toLowerCase());
+      });
     }
 
     setFilteredIngredients(filtered);
@@ -105,6 +111,11 @@ export default function InventoryScreen() {
   const onRefresh = () => {
     setRefreshing(true);
     fetchIngredients();
+  };
+
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('All');
   };
 
   const getStockStatus = (quantity: number) => {
@@ -145,18 +156,20 @@ export default function InventoryScreen() {
     return Math.min((quantity / maxQuantity) * 100, 100);
   };
 
-  const renderItem = ({ item }: { item: ShopRecipeIngredient }) => {
-    const status = getStockStatus(item.quantity);
-    const percentage = getStockPercentage(item.quantity);
+  const renderItem = ({ item }: { item: ShopInventoryItem }) => {
+    const quantity = Number(item.quantity ?? 0);
+    const status = getStockStatus(quantity);
+    const percentage = getStockPercentage(quantity);
     
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
-    const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
+    const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
     const ingredientImage = item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
+    const minStockValue = Number(item.minStock ?? defaultMinStock);
 
     return (
       <TouchableOpacity
-        onPress={() => router.push(`/ingredient-detail/${item.id}`)}
+        onPress={() => router.push(`/ingredient-detail/${item.inventoryDetailId}`)}
         style={{
           marginHorizontal: 16,
           marginBottom: 14,
@@ -186,25 +199,13 @@ export default function InventoryScreen() {
 
           {/* Content */}
           <View className="flex-1">
-            {/* Title and Badge */}
+            {/* Title */}
             <View className="flex-row items-center mb-1">
               <Text
                 style={{ flex: 1, fontSize: 16, fontWeight: '700', color: COLORS.ink }}
                 numberOfLines={1}>
                 {ingredientName}
               </Text>
-              {item.cost > 50000 && (
-                <View
-                  style={{
-                    backgroundColor: '#FFF1E0',
-                    paddingHorizontal: 8,
-                    paddingVertical: 4,
-                    borderRadius: 999,
-                    marginLeft: 8,
-                  }}>
-                  <Text style={{ color: '#9A5A1F', fontSize: 11, fontWeight: '700' }}>Premium</Text>
-                </View>
-              )}
             </View>
 
             {/* Subtitle */}
@@ -231,10 +232,10 @@ export default function InventoryScreen() {
             </View>
             <View className="flex-row items-baseline justify-between mb-2">
               <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink }}>
-                {item.quantity} Units
+                {quantity} Units
               </Text>
               <Text style={{ fontSize: 12, color: COLORS.muted }}>
-                Min: {minStock}
+                Min: {minStockValue}
               </Text>
             </View>
 
@@ -292,122 +293,176 @@ export default function InventoryScreen() {
 
   return (
     <View className="flex-1" style={{ backgroundColor: COLORS.background }}>
-      {filteredIngredients.length === 0 ? (
-        <View className="flex-1 items-center justify-center">
-          <Text style={{ color: COLORS.muted }}>No ingredients found</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredIngredients}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ paddingBottom: 120 }}
-          ListHeaderComponent={
-            <View style={{ paddingTop: 40 }}>
-              <View className="px-5" style={{ paddingBottom: 10 }}>
-                <View className="flex-row items-center justify-between">
-                  <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                    <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
-                  </TouchableOpacity>
-                  <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
-                    Inventory Dashboard
-                  </Text>
-                  <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                    <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
-                    <View
-                      style={{
-                        position: 'absolute',
-                        top: 8,
-                        right: 10,
-                        width: 8,
-                        height: 8,
-                        borderRadius: 999,
-                        backgroundColor: '#E9563A',
-                      }}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View className="px-5" style={{ paddingBottom: 14 }}>
-                <View className="flex-row items-center">
+      <FlatList
+        data={filteredIngredients}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.inventoryDetailId.toString()}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        ListHeaderComponent={
+          <View style={{ paddingTop: 40 }}>
+            <View className="px-5" style={{ paddingBottom: 10 }}>
+              <View className="flex-row items-center justify-between">
+                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
+                  <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
+                  Inventory Dashboard
+                </Text>
+                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
+                  <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
                   <View
                     style={{
-                      flex: 1,
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: COLORS.card,
-                      borderRadius: 18,
-                      paddingHorizontal: 14,
-                      paddingVertical: 12,
-                      borderWidth: 1,
-                      borderColor: COLORS.border,
-                    }}>
-                    <Ionicons name="search-outline" size={20} color={COLORS.muted} />
-                    <TextInput
-                      style={{ flex: 1, marginLeft: 10, fontSize: 14, color: COLORS.ink }}
-                      placeholder="Search inventory..."
-                      placeholderTextColor={COLORS.muted}
-                      value={searchQuery}
-                      onChangeText={setSearchQuery}
-                    />
-                  </View>
-                  <TouchableOpacity
-                    style={{
-                      marginLeft: 10,
-                      width: 46,
-                      height: 46,
-                      borderRadius: 16,
-                      backgroundColor: COLORS.chipActive,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                    <Ionicons name="options-outline" size={20} color="#FFFFFF" />
-                  </TouchableOpacity>
-                </View>
+                      position: 'absolute',
+                      top: 8,
+                      right: 10,
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      backgroundColor: '#E9563A',
+                    }}
+                  />
+                </TouchableOpacity>
               </View>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 6 }}>
-                {categories.map((category) => {
-                  const isActive = selectedCategory === category;
-                  return (
-                    <TouchableOpacity
-                      key={category}
-                      onPress={() => setSelectedCategory(category)}
-                      style={{
-                        paddingHorizontal: 18,
-                        paddingVertical: 10,
-                        borderRadius: 999,
-                        marginRight: 10,
-                        backgroundColor: isActive ? COLORS.chipActive : COLORS.chip,
-                      }}>
-                      <Text
-                        style={{
-                          fontSize: 13,
-                          fontWeight: '700',
-                          color: isActive ? '#FFFFFF' : COLORS.ink,
-                        }}>
-                        {category}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
             </View>
-          }
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#D9A05B']}
-              tintColor="#D9A05B"
-            />
-          }
-        />
-      )}
+
+            <View className="px-5" style={{ paddingBottom: 14 }}>
+              <View className="flex-row items-center">
+                <View
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: COLORS.card,
+                    borderRadius: 18,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                  }}>
+                  <Ionicons name="search-outline" size={20} color={COLORS.muted} />
+                  <TextInput
+                    style={{ flex: 1, marginLeft: 10, fontSize: 14, color: COLORS.ink }}
+                    placeholder="Search inventory..."
+                    placeholderTextColor={COLORS.muted}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={{
+                    marginLeft: 10,
+                    width: 46,
+                    height: 46,
+                    borderRadius: 16,
+                    backgroundColor: COLORS.chipActive,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                  <Ionicons name="options-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 6 }}>
+              {categories.map((category) => {
+                const isActive = selectedCategory === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    onPress={() => setSelectedCategory(category)}
+                    style={{
+                      paddingHorizontal: 18,
+                      paddingVertical: 10,
+                      borderRadius: 999,
+                      marginRight: 10,
+                      backgroundColor: isActive ? COLORS.chipActive : COLORS.chip,
+                    }}>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '700',
+                        color: isActive ? '#FFFFFF' : COLORS.ink,
+                      }}>
+                      {category}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={{ paddingHorizontal: 24, paddingTop: 28 }}>
+            <View
+              style={{
+                backgroundColor: COLORS.card,
+                borderRadius: 18,
+                paddingVertical: 28,
+                paddingHorizontal: 20,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: COLORS.border,
+              }}
+            >
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: COLORS.surface,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 14,
+                }}
+              >
+                <Ionicons name="cafe-outline" size={28} color={COLORS.muted} />
+              </View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink, marginBottom: 6 }}>
+                No ingredients yet
+              </Text>
+              <Text style={{ fontSize: 13, color: COLORS.muted, textAlign: 'center', marginBottom: 16 }}>
+                Add your first ingredient or clear filters to see all items.
+              </Text>
+              <View className="flex-row" style={{ gap: 10 }}>
+                <TouchableOpacity
+                  onPress={resetFilters}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                  }}
+                >
+                  <Text style={{ color: COLORS.ink, fontWeight: '600' }}>Clear Filters</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onRefresh}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 999,
+                    backgroundColor: COLORS.chipActive,
+                  }}
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#D9A05B']}
+            tintColor="#D9A05B"
+          />
+        }
+      />
 
       <View style={{ position: 'absolute', bottom: 18, left: 16, right: 16 }}>
         <TouchableOpacity
