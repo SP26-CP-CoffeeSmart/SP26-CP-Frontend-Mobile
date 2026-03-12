@@ -9,9 +9,7 @@ import {
   RefreshControl,
   Image,
   ScrollView,
-  Platform,
 } from 'react-native';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
@@ -26,35 +24,52 @@ interface Ingredient {
   endDate: string;
 }
 
-interface ShopRecipeIngredient {
-  id: number;
-  quantity: number;
-  cost: number;
-  ingredient: Ingredient;
+interface ShopInventoryItem {
+  inventoryDetailId: number;
+  coffeeShopId?: number;
+  ingredientId?: number;
+  quantity?: number;
+  minStock?: number;
+  expirationDate?: string;
+  measurement?: string;
+  ingredient?: Ingredient;
 }
 
 export default function InventoryScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
   const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [ingredients, setIngredients] = useState<ShopRecipeIngredient[]>([]);
-  const [filteredIngredients, setFilteredIngredients] = useState<ShopRecipeIngredient[]>([]);
+  const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
+  const [filteredIngredients, setFilteredIngredients] = useState<ShopInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const categories = ['All', 'Coffee Beans', 'Dairy', 'Syrups', 'Supplies'];
+  const categories = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
+  const maxQuantity = 500;
+  const defaultMinStock = 100;
+
+  const COLORS = {
+    background: '#F7F2EE',
+    card: '#FFFFFF',
+    ink: '#1E1B16',
+    muted: '#7A6F67',
+    accent: '#E07A2D',
+    chip: '#F2E7DA',
+    chipActive: '#2B1C15',
+    border: '#EFE4D8',
+    surface: '#FBF7F2',
+  };
 
   const fetchIngredients = async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients`);
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopInventory`);
       const data = await response.json();
 
+      console.log('Fetched ingredients:', data);
       if (Array.isArray(data)) {
         setIngredients(data);
         setFilteredIngredients(data);
@@ -84,9 +99,10 @@ export default function InventoryScreen() {
 
     // Filter by search query
     if (searchQuery.trim() !== '') {
-      filtered = filtered.filter((item) =>
-        (item.ingredient?.name || `Ingredient #${item.id}`).toLowerCase().includes(searchQuery.toLowerCase())
-      );
+      filtered = filtered.filter((item) => {
+        const name = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
+        return name.toLowerCase().includes(searchQuery.toLowerCase());
+      });
     }
 
     setFilteredIngredients(filtered);
@@ -97,64 +113,77 @@ export default function InventoryScreen() {
     fetchIngredients();
   };
 
+  const resetFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('All');
+  };
+
   const getStockStatus = (quantity: number) => {
-    const maxQuantity = 500;
     const percentage = (quantity / maxQuantity) * 100;
 
     if (percentage >= 80) {
       return {
-        label: 'GOOD',
-        color: '#10B981',
-        bgColor: '#ECFDF5',
-        barColor: '#10B981'
+        label: 'SUFFICIENT',
+        color: '#15803D',
+        bgColor: '#DCFCE7',
+        barColor: '#22C55E',
       };
     } else if (percentage >= 60) {
       return {
-        label: 'IN STOCK',
-        color: '#14B8A6',
-        bgColor: '#F0FDFA',
-        barColor: '#14B8A6'
+        label: 'STABLE',
+        color: '#0F766E',
+        bgColor: '#CCFBF1',
+        barColor: '#14B8A6',
       };
     } else if (percentage >= 30) {
       return {
         label: 'LOW STOCK',
-        color: '#F59E0B',
+        color: '#B45309',
         bgColor: '#FEF3C7',
-        barColor: '#F59E0B'
+        barColor: '#F59E0B',
       };
     } else {
       return {
-        label: 'CRITICAL',
-        color: '#EF4444',
+        label: 'OUT OF STOCK',
+        color: '#B91C1C',
         bgColor: '#FEE2E2',
-        barColor: '#EF4444'
+        barColor: '#EF4444',
       };
     }
   };
 
   const getStockPercentage = (quantity: number) => {
-    const maxQuantity = 500;
     return Math.min((quantity / maxQuantity) * 100, 100);
   };
 
-  const renderItem = ({ item }: { item: ShopRecipeIngredient }) => {
-    const status = getStockStatus(item.quantity);
-    const percentage = getStockPercentage(item.quantity);
+  const renderItem = ({ item }: { item: ShopInventoryItem }) => {
+    const quantity = Number(item.quantity ?? 0);
+    const status = getStockStatus(quantity);
+    const percentage = getStockPercentage(quantity);
     
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
-    const ingredientName = item.ingredient?.name || `Ingredient #${item.id}`;
+    const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
     const ingredientImage = item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
+    const minStockValue = Number(item.minStock ?? defaultMinStock);
 
     return (
       <TouchableOpacity
-        onPress={() => router.push(`/ingredient-detail/${item.id}`)}
-        className={`mx-4 mb-3 rounded-2xl overflow-hidden shadow-md ${
-          isDark ? 'bg-gray-800' : 'bg-white'
-        }`}>
+        onPress={() => router.push(`/ingredient-detail/${item.inventoryDetailId}`)}
+        style={{
+          marginHorizontal: 16,
+          marginBottom: 14,
+          borderRadius: 20,
+          backgroundColor: COLORS.card,
+          shadowColor: '#000',
+          shadowOpacity: 0.08,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 6 },
+          elevation: 3,
+        }}>
         <View className="flex-row p-4">
           {/* Image */}
-          <View className="w-16 h-16 rounded-xl mr-4 overflow-hidden">
+          <View className="w-16 h-16 rounded-2xl mr-4 overflow-hidden" style={{ backgroundColor: COLORS.surface }}>
             {ingredientImage ? (
               <Image
                 source={{ uri: ingredientImage }}
@@ -162,52 +191,76 @@ export default function InventoryScreen() {
                 resizeMode="cover"
               />
             ) : (
-              <View className="w-full h-full bg-gray-300 items-center justify-center">
-                <Ionicons name="cafe" size={32} color="#9CA3AF" />
+              <View className="w-full h-full items-center justify-center">
+                <Ionicons name="cafe" size={28} color={COLORS.muted} />
               </View>
             )}
           </View>
 
           {/* Content */}
           <View className="flex-1">
-            {/* Title and Badge */}
+            {/* Title */}
             <View className="flex-row items-center mb-1">
               <Text
-                className={`flex-1 text-base font-semibold ${
-                  isDark ? 'text-gray-200' : 'text-gray-900'
-                }`}
+                style={{ flex: 1, fontSize: 16, fontWeight: '700', color: COLORS.ink }}
                 numberOfLines={1}>
                 {ingredientName}
               </Text>
-              {item.cost > 50000 && (
-                <View className="bg-amber-50 px-2 py-0.5 rounded ml-2">
-                  <Text className="text-amber-700 text-xs font-semibold">Premium</Text>
-                </View>
-              )}
             </View>
 
             {/* Subtitle */}
-            <Text className="text-gray-500 text-xs mb-2">{ingredientCategory}</Text>
+            <Text style={{ color: COLORS.muted, fontSize: 12, marginBottom: 8 }}>
+              {ingredientCategory}
+            </Text>
 
             {/* Quantity and Status */}
             <View className="flex-row items-center justify-between mb-2">
-              <Text className={`text-sm font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>
-                {item.quantity} / 500 UNITS
+              <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.ink }}>
+                Current Stock
               </Text>
-              <View className={`px-2 py-1 rounded ${status.bgClass}`}>
-                <Text className={`text-xs font-bold ${status.colorClass}`}>{status.label}</Text>
+              <View
+                style={{
+                  backgroundColor: status.bgColor,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: status.color, letterSpacing: 0.3 }}>
+                  {status.label}
+                </Text>
               </View>
+            </View>
+            <View className="flex-row items-baseline justify-between mb-2">
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink }}>
+                {quantity} Units
+              </Text>
+              <Text style={{ fontSize: 12, color: COLORS.muted }}>
+                Min: {minStockValue}
+              </Text>
             </View>
 
             {/* Progress Bar */}
             <View className="flex-row items-center">
-              <View className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden mr-2">
+              <View
+                style={{
+                  flex: 1,
+                  height: 6,
+                  backgroundColor: COLORS.border,
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                  marginRight: 10,
+                }}>
                 <View
-                  className={`h-full ${status.barClass}`}
-                  style={{ width: `${percentage}%` }}
+                  style={{
+                    height: '100%',
+                    width: `${percentage}%`,
+                    backgroundColor: status.barColor,
+                  }}
                 />
               </View>
-              <Text className="text-gray-600 text-xs font-semibold">{Math.round(percentage)}%</Text>
+              <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: '700' }}>
+                {Math.round(percentage)}%
+              </Text>
             </View>
           </View>
         </View>
@@ -217,7 +270,7 @@ export default function InventoryScreen() {
 
   if (loading && !refreshing) {
     return (
-      <View className={`flex-1 items-center justify-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <View className={`flex-1 items-center justify-center`} style={{ backgroundColor: COLORS.background }}>
         <ActivityIndicator size="large" color="#D9A05B" />
       </View>
     );
@@ -225,12 +278,12 @@ export default function InventoryScreen() {
 
   if (error) {
     return (
-      <View className={`flex-1 items-center justify-center px-6 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <Text className={`text-center mb-4 ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>
+      <View className={`flex-1 items-center justify-center px-6`} style={{ backgroundColor: COLORS.background }}>
+        <Text className={`text-center mb-4`} style={{ color: COLORS.ink }}>
           {error}
         </Text>
         <TouchableOpacity
-          className="bg-amber-600 px-6 py-3 rounded-full"
+          style={{ backgroundColor: COLORS.accent, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 999 }}
           onPress={fetchIngredients}>
           <Text className="text-white font-semibold">Try Again</Text>
         </TouchableOpacity>
@@ -239,115 +292,199 @@ export default function InventoryScreen() {
   }
 
   return (
-    <View className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-      {/* Header */}
-      <View className={`pt-12 px-4 pb-4 ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
-        {/* Title and Notification */}
-        <View className="flex-row justify-between items-center mb-4">
-          <View>
-            <Text className="text-gray-500 text-xs tracking-wider uppercase mb-1">
-              MANAGEMENT
-            </Text>
-            <Text className={`text-2xl font-bold ${isDark ? 'text-gray-200' : 'text-gray-900'}`}>
-              Inventory
+    <View className="flex-1" style={{ backgroundColor: COLORS.background }}>
+      <FlatList
+        data={filteredIngredients}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.inventoryDetailId.toString()}
+        contentContainerStyle={{ paddingBottom: 120 }}
+        ListHeaderComponent={
+          <View style={{ paddingTop: 40 }}>
+            <View className="px-5" style={{ paddingBottom: 10 }}>
+              <View className="flex-row items-center justify-between">
+                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
+                  <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
+                  Inventory Dashboard
+                </Text>
+                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
+                  <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 10,
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      backgroundColor: '#E9563A',
+                    }}
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View className="px-5" style={{ paddingBottom: 14 }}>
+              <View className="flex-row items-center">
+                <View
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    backgroundColor: COLORS.card,
+                    borderRadius: 18,
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                  }}>
+                  <Ionicons name="search-outline" size={20} color={COLORS.muted} />
+                  <TextInput
+                    style={{ flex: 1, marginLeft: 10, fontSize: 14, color: COLORS.ink }}
+                    placeholder="Search inventory..."
+                    placeholderTextColor={COLORS.muted}
+                    value={searchQuery}
+                    onChangeText={setSearchQuery}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={{
+                    marginLeft: 10,
+                    width: 46,
+                    height: 46,
+                    borderRadius: 16,
+                    backgroundColor: COLORS.chipActive,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                  <Ionicons name="options-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 6 }}>
+              {categories.map((category) => {
+                const isActive = selectedCategory === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    onPress={() => setSelectedCategory(category)}
+                    style={{
+                      paddingHorizontal: 18,
+                      paddingVertical: 10,
+                      borderRadius: 999,
+                      marginRight: 10,
+                      backgroundColor: isActive ? COLORS.chipActive : COLORS.chip,
+                    }}>
+                    <Text
+                      style={{
+                        fontSize: 13,
+                        fontWeight: '700',
+                        color: isActive ? '#FFFFFF' : COLORS.ink,
+                      }}>
+                      {category}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={{ paddingHorizontal: 24, paddingTop: 28 }}>
+            <View
+              style={{
+                backgroundColor: COLORS.card,
+                borderRadius: 18,
+                paddingVertical: 28,
+                paddingHorizontal: 20,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: COLORS.border,
+              }}
+            >
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: COLORS.surface,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 14,
+                }}
+              >
+                <Ionicons name="cafe-outline" size={28} color={COLORS.muted} />
+              </View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink, marginBottom: 6 }}>
+                No ingredients yet
+              </Text>
+              <Text style={{ fontSize: 13, color: COLORS.muted, textAlign: 'center', marginBottom: 16 }}>
+                Add your first ingredient or clear filters to see all items.
+              </Text>
+              <View className="flex-row" style={{ gap: 10 }}>
+                <TouchableOpacity
+                  onPress={resetFilters}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                  }}
+                >
+                  <Text style={{ color: COLORS.ink, fontWeight: '600' }}>Clear Filters</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onRefresh}
+                  style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 999,
+                    backgroundColor: COLORS.chipActive,
+                  }}
+                >
+                  <Text style={{ color: '#FFFFFF', fontWeight: '700' }}>Refresh</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#D9A05B']}
+            tintColor="#D9A05B"
+          />
+        }
+      />
+
+      <View style={{ position: 'absolute', bottom: 18, left: 16, right: 16 }}>
+        <TouchableOpacity
+          style={{
+            backgroundColor: COLORS.chipActive,
+            borderRadius: 18,
+            paddingVertical: 14,
+            alignItems: 'center',
+            shadowColor: '#000',
+            shadowOpacity: 0.15,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 6 },
+            elevation: 5,
+          }}>
+          <View className="flex-row items-center">
+            <Ionicons name="refresh" size={18} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 16, marginLeft: 8 }}>
+              Update Stock
             </Text>
           </View>
-          <TouchableOpacity className="w-10 h-10 bg-orange-100 rounded-full items-center justify-center">
-            <Ionicons name="notifications-outline" size={22} color="#F97316" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Search */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 16,
-            paddingVertical: 12,
-            borderRadius: 12,
-            borderWidth: 1,
-            backgroundColor: isDark ? '#1E1E1E' : '#FFFFFF',
-            borderColor: isDark ? '#374151' : '#F0F0F0'
-          }}>
-          <Ionicons name="search-outline" size={20} color="#9CA3AF" />
-          <TextInput
-            className={`flex-1 ml-2 text-base ${isDark ? 'text-gray-200' : 'text-gray-900'}`}
-            placeholder="Search stock items..."
-            placeholderTextColor="#9CA3AF"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          <TouchableOpacity>
-            <Ionicons name="options-outline" size={20} color="#9CA3AF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Category Tabs */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          className="mt-4"
-          contentContainerStyle={{ paddingRight: 16 }}>
-          {categories.map((category) => (
-            <TouchableOpacity
-              key={category}
-              onPress={() => setSelectedCategory(category)}
-              style={{
-                paddingHorizontal: 20,
-                paddingVertical: 10,
-                borderRadius: 20,
-                marginRight: 8,
-                backgroundColor: selectedCategory === category
-                  ? '#3E2723'
-                  : isDark
-                    ? '#1F2937'
-                    : '#F5F5F5'
-              }}>
-              <Text
-                style={{
-                  fontSize: 14,
-                  fontWeight: '600',
-                  color: selectedCategory === category
-                    ? '#FFFFFF'
-                    : isDark
-                      ? '#9CA3AF'
-                      : '#4B5563'
-                }}>
-                {category}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+        </TouchableOpacity>
       </View>
-
-      {/* List */}
-      {filteredIngredients.length === 0 ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className={isDark ? 'text-gray-400' : 'text-gray-600'}>
-            No ingredients found
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={filteredIngredients}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={{ paddingTop: 16, paddingBottom: 100 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#D9A05B']}
-              tintColor="#D9A05B"
-            />
-          }
-        />
-      )}
-
-      {/* Floating Action Button */}
-      <TouchableOpacity className="absolute bottom-6 right-6 w-14 h-14 bg-stone-800 rounded-full items-center justify-center shadow-lg">
-        <Ionicons name="add" size={28} color="white" />
-      </TouchableOpacity>
     </View>
   );
 }

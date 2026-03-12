@@ -3,6 +3,7 @@ import {
   ScrollView,
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   Image,
   ActivityIndicator,
@@ -10,7 +11,6 @@ import {
   Switch,
   Platform,
 } from 'react-native';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
@@ -29,8 +29,7 @@ interface BatchInfo {
 }
 
 export default function IngredientDetailScreen() {
-  const colorScheme = useColorScheme() ?? 'light';
-  const isDark = colorScheme === 'dark';
+  const isDark = false;
   const { id } = useLocalSearchParams();
   const router = useRouter();
 
@@ -40,6 +39,18 @@ export default function IngredientDetailScreen() {
   const [minStockLevel, setMinStockLevel] = useState(5.0);
   const [isAutoSuggest, setIsAutoSuggest] = useState(false);
   const [aiSuggestedValue, setAiSuggestedValue] = useState(3.5);
+
+  const COLORS = {
+    background: '#F6F1EE',
+    card: '#FFFFFF',
+    ink: '#2B1C15',
+    muted: '#8E837B',
+    accent: '#5B3B35',
+    chip: '#EDE4DE',
+    success: '#E5F8E6',
+    successText: '#1B7A34',
+    border: '#EFE7E1',
+  };
 
   // Mock batch data
   const [batchInfo] = useState<BatchInfo>({
@@ -97,7 +108,7 @@ export default function IngredientDetailScreen() {
           flex: 1,
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
+          backgroundColor: COLORS.background,
         }}
       >
         <ActivityIndicator size="large" color="#B87333" />
@@ -112,11 +123,11 @@ export default function IngredientDetailScreen() {
           flex: 1,
           justifyContent: 'center',
           alignItems: 'center',
-          backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
+          backgroundColor: COLORS.background,
           padding: 20,
         }}
       >
-        <Text style={{ color: isDark ? '#fff' : '#000', fontSize: 16, textAlign: 'center' }}>
+        <Text style={{ color: COLORS.ink, fontSize: 16, textAlign: 'center' }}>
           {error || 'Ingredient not found'}
         </Text>
         <TouchableOpacity
@@ -142,36 +153,37 @@ export default function IngredientDetailScreen() {
   const ingredientImage = ingredient.ingredient?.image || null;
   const ingredientCategory = ingredient.ingredient?.category || 'Unknown';
   const ingredientEndDate = ingredient.ingredient?.endDate || new Date().toISOString();
+  const statusLabel = ingredient.quantity > 0 ? 'IN STOCK' : 'OUT OF STOCK';
 
   return (
-    <View style={{ flex: 1, backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5' }}>
+    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
       {/* Header */}
       <View
         style={{
-          backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
-          paddingTop: Platform.OS === 'ios' ? 50 : 20,
-          paddingBottom: 15,
-          paddingHorizontal: 20,
+          backgroundColor: COLORS.background,
+          paddingTop: Platform.OS === 'ios' ? 50 : 40,
+          paddingBottom: 8,
+          paddingHorizontal: 16,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}
       >
         <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={isDark ? '#fff' : '#000'} />
+          <Ionicons name="arrow-back" size={22} color={COLORS.ink} />
         </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons name="ellipsis-horizontal" size={24} color={isDark ? '#fff' : '#000'} />
-        </TouchableOpacity>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink }}>
+          Ingredient Detail
+        </Text>
+        <View style={{ width: 22 }} />
       </View>
 
       <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
         {/* Ingredient Image and Info */}
         <View
           style={{
-            backgroundColor: isDark ? '#2a2a2a' : '#ffffff',
-            padding: 16,
-            marginTop: 16,
+            backgroundColor: COLORS.card,
+            marginTop: 14,
             marginBottom: 12,
             borderRadius: 16,
             shadowColor: '#000',
@@ -181,49 +193,56 @@ export default function IngredientDetailScreen() {
             elevation: 3,
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <View
-              style={{
-                width: 80,
-                height: 80,
-                borderRadius: 40,
-                backgroundColor: '#3a2a1a',
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginRight: 15,
-              }}
-            >
-              {ingredientImage ? (
-                <Image
-                  source={{ uri: ingredientImage }}
-                  style={{ width: 60, height: 60, borderRadius: 30 }}
-                  resizeMode="cover"
-                />
-              ) : (
-                <Ionicons name="leaf" size={40} color="#B87333" />
-              )}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  fontSize: 18,
-                  fontWeight: '600',
-                  color: isDark ? '#fff' : '#000',
-                  marginBottom: 5,
-                }}
-              >
+          <View style={{ height: 150, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' }}>
+            {ingredientImage ? (
+              <Image source={{ uri: ingredientImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            ) : (
+              <View style={{ flex: 1, backgroundColor: COLORS.chip, alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name="leaf" size={48} color="#B87333" />
+              </View>
+            )}
+          </View>
+          <View style={{ padding: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.ink, flex: 1, marginRight: 10 }}>
                 {ingredientName}
               </Text>
-              <Text style={{ fontSize: 14, color: '#888', marginBottom: 3 }}>
-                Partner: Local Supplier Inc
-              </Text>
-              <Text style={{ fontSize: 14, color: '#888' }}>
-                Expiry Date: {new Date(ingredientEndDate).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </Text>
+              <View
+                style={{
+                  backgroundColor: statusLabel === 'IN STOCK' ? COLORS.success : '#FEE2E2',
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 999,
+                }}>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    fontWeight: '800',
+                    color: statusLabel === 'IN STOCK' ? COLORS.successText : '#B91C1C',
+                    letterSpacing: 0.3,
+                  }}
+                >
+                  {statusLabel}
+                </Text>
+              </View>
+            </View>
+            <View style={{ marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                <Ionicons name="business-outline" size={14} color={COLORS.muted} />
+                <Text style={{ fontSize: 13, color: COLORS.muted, marginLeft: 8 }}>
+                  Supplier: Premium Estates Co.
+                </Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="calendar-outline" size={14} color={COLORS.muted} />
+                <Text style={{ fontSize: 13, color: COLORS.muted, marginLeft: 8 }}>
+                  Expiry: {new Date(ingredientEndDate).toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </View>
             </View>
           </View>
         </View>
@@ -231,7 +250,7 @@ export default function IngredientDetailScreen() {
         {/* Usage Forecast */}
         <View
           style={{
-            backgroundColor: isDark ? '#2a2a2a' : '#ffffff',
+            backgroundColor: COLORS.card,
             padding: 16,
             marginBottom: 12,
             borderRadius: 16,
@@ -242,32 +261,31 @@ export default function IngredientDetailScreen() {
             elevation: 3,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: isDark ? '#fff' : '#000' }}>
-              Usage Forecast
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.muted, letterSpacing: 1 }}>
+              USAGE FORECAST
             </Text>
-            <TouchableOpacity>
-              <Text style={{ fontSize: 14, color: '#B87333' }}>View Calculation Details</Text>
-            </TouchableOpacity>
+            <Text style={{ fontSize: 12, color: '#9AA1B1' }}>Last 30 days vs Predicted</Text>
           </View>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: COLORS.ink, marginTop: 6 }}>42kg</Text>
           <LineChart
             data={forecastData}
             width={screenWidth - 64}
             height={180}
             chartConfig={{
-              backgroundColor: isDark ? '#2a2a2a' : '#ffffff',
-              backgroundGradientFrom: isDark ? '#2a2a2a' : '#ffffff',
-              backgroundGradientTo: isDark ? '#2a2a2a' : '#ffffff',
+              backgroundColor: COLORS.card,
+              backgroundGradientFrom: COLORS.card,
+              backgroundGradientTo: COLORS.card,
               decimalPlaces: 1,
               color: (opacity = 1) => `rgba(184, 115, 51, ${opacity})`,
-              labelColor: (opacity = 1) => (isDark ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 0, 0, ${opacity})`),
+              labelColor: (opacity = 1) => `rgba(154, 161, 177, ${opacity})`,
               style: {
                 borderRadius: 16,
               },
               propsForDots: {
                 r: '4',
                 strokeWidth: '2',
-                stroke: '#B87333',
+                stroke: COLORS.accent,
               },
             }}
             bezier
@@ -281,7 +299,7 @@ export default function IngredientDetailScreen() {
         {/* Set Minimum Stock Level */}
         <View
           style={{
-            backgroundColor: isDark ? '#2a2a2a' : '#ffffff',
+            backgroundColor: COLORS.card,
             padding: 16,
             marginBottom: 12,
             borderRadius: 16,
@@ -294,102 +312,99 @@ export default function IngredientDetailScreen() {
         >
           <Text
             style={{
-              fontSize: 16,
-              fontWeight: '600',
-              color: isDark ? '#fff' : '#000',
-              marginBottom: 20,
+              fontSize: 12,
+              fontWeight: '700',
+              color: COLORS.muted,
+              letterSpacing: 1,
+              marginBottom: 12,
             }}
           >
             Set Minimum Stock Level
           </Text>
-
-          {/* Manual Threshold / AI Auto Suggest */}
-          <View style={{ flexDirection: 'row', marginBottom: 20 }}>
-            <View style={{ flex: 1, marginRight: 10 }}>
-              <Text style={{ fontSize: 12, color: '#888', marginBottom: 5 }}>
-                MANUAL THRESHOLD
-              </Text>
-              <View
-                style={{
-                  backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
-                  padding: 12,
-                  borderRadius: 8,
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 24, fontWeight: '600', color: isDark ? '#fff' : '#000' }}>
-                  {minStockLevel.toFixed(1)}
-                </Text>
-              </View>
-            </View>
-            <View style={{ flex: 1, marginLeft: 10 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                <Text style={{ fontSize: 12, color: '#888' }}>AI AUTO SUGGEST</Text>
-                <Switch
-                  value={isAutoSuggest}
-                  onValueChange={setIsAutoSuggest}
-                  trackColor={{ false: '#767577', true: '#B87333' }}
-                  thumbColor={isAutoSuggest ? '#fff' : '#f4f3f4'}
-                />
-              </View>
-              <View
-                style={{
-                  backgroundColor: isDark ? '#1a1a1a' : '#f5f5f5',
-                  padding: 12,
-                  borderRadius: 8,
-                  alignItems: 'center',
-                }}
-              >
-                <Text style={{ fontSize: 24, fontWeight: '600', color: '#B87333' }}>
-                  {aiSuggestedValue.toFixed(1)}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Slider */}
-          <View style={{ marginBottom: 20 }}>
-            <Slider
-              style={{ width: '100%', height: 40 }}
-              minimumValue={0}
-              maximumValue={10}
-              value={isAutoSuggest ? aiSuggestedValue : minStockLevel}
-              onValueChange={(value) => {
-                if (isAutoSuggest) {
-                  setAiSuggestedValue(value);
-                } else {
-                  setMinStockLevel(value);
-                }
-              }}
-              minimumTrackTintColor="#B87333"
-              maximumTrackTintColor={isDark ? '#3a3a3a' : '#d0d0d0'}
-              thumbTintColor="#B87333"
-              disabled={false}
-            />
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 12, color: '#888' }}>0.0</Text>
-              <Text style={{ fontSize: 12, color: '#888' }}>10.0</Text>
-            </View>
-          </View>
-
-          {/* Apply Changes Button */}
-          <TouchableOpacity
-            onPress={handleApplyChanges}
+          <View
             style={{
-              backgroundColor: '#B87333',
-              padding: 15,
-              borderRadius: 12,
+              flexDirection: 'row',
               alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#F3ECE7',
+              borderRadius: 12,
+              padding: 12,
+              marginBottom: 14,
             }}
           >
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Apply Changes</Text>
-          </TouchableOpacity>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <View
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 13,
+                  backgroundColor: COLORS.accent,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginRight: 10,
+                }}
+              >
+                <Ionicons name="sparkles" size={14} color="#FFFFFF" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>AI Auto-Suggest</Text>
+                <Text style={{ fontSize: 12, color: COLORS.muted }}>Optimized based on usage trends</Text>
+              </View>
+            </View>
+            <Switch
+              value={isAutoSuggest}
+              onValueChange={setIsAutoSuggest}
+              trackColor={{ false: '#C9C1BB', true: COLORS.accent }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+
+          <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>Threshold (kg)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TextInput
+              value={(isAutoSuggest ? aiSuggestedValue : minStockLevel).toFixed(1)}
+              onChangeText={(value) => {
+                const next = Number.parseFloat(value);
+                if (Number.isNaN(next)) {
+                  return;
+                }
+                if (isAutoSuggest) {
+                  setAiSuggestedValue(next);
+                } else {
+                  setMinStockLevel(next);
+                }
+              }}
+              keyboardType="decimal-pad"
+              style={{
+                flex: 1,
+                borderWidth: 1,
+                borderColor: COLORS.border,
+                borderRadius: 10,
+                paddingVertical: 10,
+                paddingHorizontal: 12,
+                fontSize: 16,
+                color: COLORS.ink,
+                marginRight: 10,
+              }}
+            />
+            <TouchableOpacity
+              onPress={handleApplyChanges}
+              style={{
+                backgroundColor: COLORS.accent,
+                paddingHorizontal: 20,
+                paddingVertical: 12,
+                borderRadius: 10,
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Update</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Batch Information */}
         <View
           style={{
-            backgroundColor: isDark ? '#2a2a2a' : '#ffffff',
+            backgroundColor: COLORS.card,
             padding: 16,
             marginBottom: 12,
             borderRadius: 16,
@@ -400,56 +415,40 @@ export default function IngredientDetailScreen() {
             elevation: 3,
           }}
         >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-            <Text style={{ fontSize: 16, fontWeight: '600', color: isDark ? '#fff' : '#000' }}>
-              Batch information
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.muted, letterSpacing: 1 }}>
+              CURRENT BATCH
             </Text>
-            <TouchableOpacity>
-              <Text style={{ fontSize: 14, color: '#B87333' }}>view all</Text>
-            </TouchableOpacity>
+            <View style={{ backgroundColor: COLORS.chip, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.ink }}>IN USE</Text>
+            </View>
           </View>
 
           {/* Batch Details */}
-          <View style={{ marginBottom: 15 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-              <Ionicons name="cube-outline" size={20} color="#888" />
-              <Text style={{ fontSize: 14, color: '#888', marginLeft: 10 }}>Batch id:</Text>
-              <Text style={{ fontSize: 14, color: isDark ? '#fff' : '#000', marginLeft: 5, fontWeight: '500' }}>
-                {batchInfo.batchId}
-              </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
+            <View>
+              <Text style={{ fontSize: 12, color: '#9AA1B1', marginBottom: 4 }}>Batch Number</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>#{batchInfo.batchId}</Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-              <Ionicons name="calendar-outline" size={20} color="#888" />
-              <Text style={{ fontSize: 14, color: '#888', marginLeft: 10 }}>Expiry date:</Text>
-              <Text style={{ fontSize: 14, color: isDark ? '#fff' : '#000', marginLeft: 5, fontWeight: '500' }}>
-                {batchInfo.expiryDate}
-              </Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 15 }}>
-              <Ionicons name="arrow-down-circle-outline" size={20} color="#888" />
-              <Text style={{ fontSize: 14, color: '#888', marginLeft: 10 }}>Import date:</Text>
-              <Text style={{ fontSize: 14, color: isDark ? '#fff' : '#000', marginLeft: 5, fontWeight: '500' }}>
-                {batchInfo.importDate}
-              </Text>
+            <View>
+              <Text style={{ fontSize: 12, color: '#9AA1B1', marginBottom: 4 }}>Import Date</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>{batchInfo.importDate}</Text>
             </View>
           </View>
 
           {/* Weight and Progress */}
           <View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text style={{ fontSize: 18, fontWeight: '600', color: isDark ? '#fff' : '#000' }}>
-                {batchInfo.currentWeight}kg{' '}
-                <Text style={{ fontSize: 14, color: '#888', fontWeight: '400' }}>
-                  / {batchInfo.totalWeight}kg
-                </Text>
+              <Text style={{ fontSize: 12, color: '#9AA1B1' }}>Remaining stock</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>
+                {batchInfo.currentWeight}kg / {batchInfo.totalWeight}kg
               </Text>
-              <Text style={{ fontSize: 14, color: '#888' }}>REMAINING: {batchInfo.remainingPercent}%</Text>
             </View>
             <View
               style={{
                 height: 8,
-                backgroundColor: isDark ? '#1a1a1a' : '#f0f0f0',
-                borderRadius: 4,
+                backgroundColor: '#EEF1F5',
+                borderRadius: 999,
                 overflow: 'hidden',
               }}
             >
@@ -457,7 +456,7 @@ export default function IngredientDetailScreen() {
                 style={{
                   height: '100%',
                   width: `${batchInfo.remainingPercent}%`,
-                  backgroundColor: '#B87333',
+                  backgroundColor: COLORS.accent,
                 }}
               />
             </View>
