@@ -168,13 +168,56 @@ export default function CheckoutPage() {
     };
 
     const computeGroupWeight = (group: SupplierGroup) => {
-        const DEFAULT_ITEM_WEIGHT = 1; // grams per item (approximation)
-        let totalQuantity = 0;
+        const DEFAULT_ITEM_WEIGHT_GRAM = 100;
+        let totalWeight = 0;
+
         group.items.forEach((item) => {
-            totalQuantity += item.quantity;
+            const rawMeasurement = (item.measurement || '').trim().toLowerCase();
+            const packageSize =
+                typeof item.packageSize === 'number' && item.packageSize > 0
+                    ? item.packageSize
+                    : null;
+
+            let unitMultiplier = 1;
+            if (rawMeasurement === 'kg' || rawMeasurement === 'kilogram' || rawMeasurement === 'kilograms') {
+                unitMultiplier = 1000;
+            } else if (rawMeasurement === 'l' || rawMeasurement === 'liter' || rawMeasurement === 'litre') {
+                unitMultiplier = 1000;
+            } else if (rawMeasurement === 'ml') {
+                unitMultiplier = 1;
+            } else if (rawMeasurement === 'g' || rawMeasurement === 'gram' || rawMeasurement === 'grams') {
+                unitMultiplier = 1;
+            }
+
+            const perItemWeight = packageSize ?? 1;
+            const itemWeight = perItemWeight * unitMultiplier * item.quantity;
+
+            console.log('[GHN Item Weight]', {
+                supplierId: group.supplierId,
+                productId: item.productId,
+                name: item.name,
+                measurement: rawMeasurement,
+                packageSize,
+                quantity: item.quantity,
+                unitMultiplier,
+                itemWeight,
+            });
+
+            if (Number.isFinite(itemWeight) && itemWeight > 0) {
+                totalWeight += itemWeight;
+            }
         });
-        const estimated = totalQuantity * DEFAULT_ITEM_WEIGHT;
-        return estimated > 0 ? estimated : 1000; // at least 1kg
+
+        const safeTotal = Number.isFinite(totalWeight) && totalWeight > 0
+            ? Math.round(totalWeight)
+            : DEFAULT_ITEM_WEIGHT_GRAM;
+
+        console.log('[GHN Group Weight]', {
+            supplierId: group.supplierId,
+            totalWeight: safeTotal,
+        });
+
+        return safeTotal;
     };
 
     const loadShippingForGroup = async (group: SupplierGroup, overwriteServiceId?: number) => {
