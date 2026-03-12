@@ -39,6 +39,8 @@ interface SupplierProductApiItem {
   status: string;
   createDate: string;
   measurement: string;
+  // packageSize: khối lượng 1 túi (theo measurement)
+  packageSize?: number | null;
   image?: string | null;
   description?: string | null;
   ingredient?: {
@@ -95,6 +97,7 @@ export default function ProductDetail() {
         category: product.ingredient?.category ?? 'Unknown category',
         image: product.image ?? product.ingredient?.image ?? null,
         measurement: product.measurement ?? 'unit',
+        packageSize: product.packageSize ?? null,
         unitPrice: product.price ?? 0,
         quantity,
       });
@@ -153,6 +156,7 @@ export default function ProductDetail() {
   const description = String(product?.description ?? '').trim();
   const imageUrl = product?.image ?? product?.ingredient?.image ?? fallbackHeaderImage;
   const measurement = product?.measurement ?? 'unit';
+  const packageSize = product?.packageSize ?? null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -192,7 +196,10 @@ export default function ProductDetail() {
 
             <View style={styles.priceRow}>
               <Text style={styles.priceText}>
-                {totalPrice.toLocaleString('vi-VN')}vnd/{measurement}
+                {totalPrice.toLocaleString('vi-VN')}vnd/
+                {packageSize && measurement
+                  ? `(${packageSize} ${measurement})`
+                  : measurement}
               </Text>
               <View style={styles.quantityRow}>
                 <TouchableOpacity

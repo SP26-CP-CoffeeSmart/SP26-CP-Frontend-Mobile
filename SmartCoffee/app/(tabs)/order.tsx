@@ -48,6 +48,7 @@ type OrderResponse = {
   orderId?: number;
   status?: string;
   totalPrice?: number;
+  shippingFee?: number;
   createAt?: string;
   supplierId?: number;
   shipperName?: string;
@@ -297,7 +298,7 @@ export default function OrderScreen() {
                 <Ionicons name="close" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.modalBody}>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Status:</Text>
@@ -306,14 +307,23 @@ export default function OrderScreen() {
                 </Text>
               </View>
               <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Shipping Fee:</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder?.shippingFee
+                    ? `${formatVnd(selectedOrder.shippingFee)} vnd`
+                    : '0 vnd'}
+                </Text>
+              </View>
+              <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Total Price:</Text>
                 <Text style={[styles.detailValue, { color: COLORS.danger, fontWeight: '700' }]}>
                   {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} vnd
                 </Text>
               </View>
-              
+
+
               <View style={styles.divider} />
-              
+
               <Text style={styles.sectionHeading}>Shipping Info</Text>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Shipper:</Text>
