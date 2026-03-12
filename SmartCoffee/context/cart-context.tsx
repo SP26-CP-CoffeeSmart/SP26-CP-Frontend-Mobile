@@ -9,6 +9,8 @@ export type CartItem = {
   category: string;
   image: string | null;
   measurement: string;
+  // packageSize: khối lượng 1 túi (theo measurement), ví dụ 100 (g), 1 (kg)
+  packageSize?: number | null;
   unitPrice: number;
   quantity: number;
 };

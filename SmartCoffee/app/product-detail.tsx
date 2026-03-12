@@ -97,6 +97,7 @@ export default function ProductDetail() {
         category: product.ingredient?.category ?? 'Unknown category',
         image: product.image ?? product.ingredient?.image ?? null,
         measurement: product.measurement ?? 'unit',
+        packageSize: product.packageSize ?? null,
         unitPrice: product.price ?? 0,
         quantity,
       });
