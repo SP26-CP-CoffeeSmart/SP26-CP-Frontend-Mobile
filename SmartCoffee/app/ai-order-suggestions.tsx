@@ -8,133 +8,107 @@ import {
   Image,
   Pressable,
   ImageBackground,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Swipeable } from 'react-native-gesture-handler';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-
-interface SuggestedItem {
-  id: string;
-  name: string;
-  category: string;
-  priceVnd: number;
-  image: string;
-  subtitle: string;
-  qtyNeeded: number;
-  timeRange: string;
-  rating: number;
-}
-
-// Mock data - sẽ thay bằng data từ API
-const MOCK_SUGGESTIONS: SuggestedItem[] = [
-  {
-    id: '1',
-    name: 'Arabica',
-    category: 'Bean',
-    priceVnd: 100000,
-    image: 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=600',
-    subtitle: 'Hat cafe nguyen chat day vi...',
-    qtyNeeded: 1,
-    timeRange: '1-2h',
-    rating: 4.5,
-  },
-  {
-    id: '2',
-    name: 'Robusta',
-    category: 'Bean',
-    priceVnd: 100000,
-    image: 'https://images.unsplash.com/photo-1515442261605-65987783cb6a?w=600',
-    subtitle: 'Hat cafe nguyen chat day vi...',
-    qtyNeeded: 1,
-    timeRange: '1-2h',
-    rating: 4.5,
-  },
-  {
-    id: '3',
-    name: 'Oat Milk',
-    category: 'Milk',
-    priceVnd: 70000,
-    image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=600',
-    subtitle: 'Sua hat mem min cho latte...',
-    qtyNeeded: 2,
-    timeRange: '2-3h',
-    rating: 4.3,
-  },
-  {
-    id: '4',
-    name: 'Caramel Syrup',
-    category: 'Syrup',
-    priceVnd: 90000,
-    image: 'https://images.unsplash.com/photo-1541976076758-347942db197c?w=600',
-    subtitle: 'Huong caramel ngam ngot...',
-    qtyNeeded: 1,
-    timeRange: '1-2h',
-    rating: 4.6,
-  },
-  {
-    id: '5',
-    name: 'Hazelnut Syrup',
-    category: 'Syrup',
-    priceVnd: 95000,
-    image: 'https://images.unsplash.com/photo-1502740479091-635887520276?w=600',
-    subtitle: 'Huong hat de chiua...',
-    qtyNeeded: 1,
-    timeRange: '1-2h',
-    rating: 4.4,
-  },
-  {
-    id: '6',
-    name: 'Whole Milk',
-    category: 'Milk',
-    priceVnd: 60000,
-    image: 'https://images.unsplash.com/photo-1563636619-e9143da7973b?w=600',
-    subtitle: 'Sua beo tu nhien...',
-    qtyNeeded: 2,
-    timeRange: '2-3h',
-    rating: 4.1,
-  },
-];
-
-const CATEGORY_FILTERS = ['All', 'Bean', 'Milk', 'Syrup'];
+import { useSuggestions } from '@/context/suggestion-context';
 
 export default function AIOrderSuggestionsScreen() {
   const router = useRouter();
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const params = useLocalSearchParams<{ error?: string }>();
+  const { items: suggestions, setItems } = useSuggestions();
   const [selectedFilter, setSelectedFilter] = useState('All');
-
-  const toggleItemSelection = (itemId: string) => {
-    setSelectedItems((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(itemId)) {
-        newSet.delete(itemId);
-      } else {
-        newSet.add(itemId);
-      }
-      return newSet;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedItems.size === filteredSuggestions.length) {
-      setSelectedItems(new Set());
-      return;
-    }
-    setSelectedItems(new Set(filteredSuggestions.map((item) => item.id)));
-  };
+  const [error] = useState<string | null>(() => (params.error ? String(params.error) : null));
+  const [isReviewing, setIsReviewing] = useState(false);
 
   const filteredSuggestions = useMemo(() => {
+    const source = suggestions;
     if (selectedFilter === 'All') {
-      return MOCK_SUGGESTIONS;
+      return source;
     }
-    return MOCK_SUGGESTIONS.filter((item) => item.category === selectedFilter);
-  }, [selectedFilter]);
+    return source.filter((item) => {
+      const supplierLabel = item.supplierName || 'Other suppliers';
+      return supplierLabel === selectedFilter;
+    });
+  }, [selectedFilter, suggestions]);
 
-  const totalVnd = MOCK_SUGGESTIONS.filter((item) => selectedItems.has(item.id)).reduce(
-    (sum, item) => sum + item.priceVnd,
+  const categoryFilters = useMemo(() => {
+    const set = new Set<string>();
+    suggestions.forEach((item) => {
+      const supplierLabel = item.supplierName || 'Other suppliers';
+      set.add(supplierLabel);
+    });
+    return ['All', ...Array.from(set)];
+  }, [suggestions]);
+
+  const totalVnd = suggestions.reduce(
+    (sum, item) => sum + item.priceVnd * (item.qtyNeeded > 0 ? item.qtyNeeded : 1),
     0
   );
 
   const formattedVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+
+  const handlePurchase = () => {
+    if (!suggestions.length) {
+      return;
+    }
+    router.push({
+      pathname: '/checkout',
+      params: {
+        source: 'ai',
+      },
+    });
+  };
+
+  const handlePrimaryAction = () => {
+    if (!isReviewing) {
+      setIsReviewing(true);
+      return;
+    }
+
+    handlePurchase();
+  };
+
+  const handleChangeQuantity = (id: string, delta: number) => {
+    setItems((prev) => {
+      const next = [] as typeof prev;
+      prev.forEach((item) => {
+        if (item.id !== id) {
+          next.push(item);
+          return;
+        }
+
+        const currentQty = Number.isFinite(item.qtyNeeded) && item.qtyNeeded > 0
+          ? item.qtyNeeded
+          : 1;
+        const updatedQty = currentQty + delta;
+        const safeQty = updatedQty < 1 ? 1 : updatedQty;
+
+        next.push({ ...item, qtyNeeded: safeQty });
+      });
+      return next;
+    });
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const renderRightActions = (id: string) => (
+    <View style={styles.swipeActionWrap}>
+      <TouchableOpacity
+        style={styles.swipeDeleteButton}
+        onPress={() => handleRemoveItem(id)}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="trash" size={18} color="#FFF" />
+        <Text style={styles.swipeDeleteText}>Remove</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -155,6 +129,14 @@ export default function AIOrderSuggestionsScreen() {
         </View>
       </ImageBackground>
 
+      {/* loading đã xử lý ở ai-loading, nên ở đây không cần overlay */}
+      {false && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+          <Text style={styles.loadingText}>AI is analyzing your inventory...</Text>
+        </View>
+      )}
+
       {/* Filters */}
       <View style={styles.filtersWrapper}>
         <ScrollView
@@ -162,7 +144,7 @@ export default function AIOrderSuggestionsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filtersContainer}
         >
-          {CATEGORY_FILTERS.map((label) => {
+          {categoryFilters.map((label) => {
             const isActive = selectedFilter === label;
             return (
               <Pressable
@@ -179,57 +161,34 @@ export default function AIOrderSuggestionsScreen() {
         </ScrollView>
       </View>
 
-      {/* Select all row */}
-      <View style={styles.selectRow}>
-        <Pressable style={styles.selectRowLeft} onPress={toggleSelectAll}>
-          <View
-            style={[
-              styles.selectCircle,
-              selectedItems.size === filteredSuggestions.length && styles.selectCircleActive,
-            ]}
-          >
-            {selectedItems.size === filteredSuggestions.length && (
-              <Ionicons name="checkmark" size={14} color="#FFF" />
-            )}
-          </View>
-          <Text style={styles.selectText}>Select all products</Text>
-        </Pressable>
-        <TouchableOpacity style={styles.filterIconButton}>
-          <Ionicons name="options-outline" size={18} color="#2C1B13" />
-        </TouchableOpacity>
-      </View>
-
       {/* Content */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {filteredSuggestions.map((item) => {
-          const isSelected = selectedItems.has(item.id);
-          return (
-            <Pressable
-              key={item.id}
-              style={[styles.itemCard, isSelected && styles.itemCardSelected]}
-              onPress={() => toggleItemSelection(item.id)}
-            >
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        {filteredSuggestions.map((item) => (
+          <Swipeable
+            key={item.id}
+            renderRightActions={() => renderRightActions(item.id)}
+            rightThreshold={32}
+          >
+            <View style={styles.itemCard}>
               <View style={styles.itemLeft}>
-                <View style={styles.itemSelectCircle}>
-                  {isSelected ? (
-                    <View style={styles.itemSelectCircleActive}>
-                      <Ionicons name="checkmark" size={12} color="#FFF" />
-                    </View>
-                  ) : (
-                    <View style={styles.itemSelectCircleInactive} />
-                  )}
-                </View>
                 <View style={styles.itemInfo}>
                   <Text style={styles.itemName}>{item.name}</Text>
                   <Text style={styles.itemSubtitle} numberOfLines={1}>
                     {item.subtitle}
                   </Text>
                   <Text style={styles.itemPrice}>
-                    {formattedVnd(item.priceVnd)} VND/g
+                    {formattedVnd(item.priceVnd)} VND /
+                    {item.packageSize ? ` ${item.packageSize}${item.measurement}` : ''}
                   </Text>
                   <Text style={styles.itemQty}>Qty needed: {item.qtyNeeded}</Text>
                   <View style={styles.itemMetaRow}>
@@ -239,15 +198,42 @@ export default function AIOrderSuggestionsScreen() {
                     </View>
                     <View style={styles.itemMetaBadge}>
                       <Ionicons name="star" size={12} color="#D0A45C" />
-                      <Text style={styles.itemMetaText}>{item.rating.toFixed(1)}</Text>
+                      <Text style={styles.itemMetaText}>
+                        {item.productRating ? item.productRating.toFixed(1) : 'N/A'}
+                      </Text>
                     </View>
                   </View>
+                  {isReviewing && (
+                    <View style={styles.quantityRow}>
+                      <TouchableOpacity
+                        style={styles.qtyButton}
+                        onPress={() => handleChangeQuantity(item.id, -1)}
+                      >
+                        <Ionicons name="remove" size={16} color="#2C1B13" />
+                      </TouchableOpacity>
+                      <Text style={styles.qtyValue}>{item.qtyNeeded}</Text>
+                      <TouchableOpacity
+                        style={styles.qtyButton}
+                        onPress={() => handleChangeQuantity(item.id, 1)}
+                      >
+                        <Ionicons name="add" size={16} color="#2C1B13" />
+                      </TouchableOpacity>
+
+                    </View>
+                  )}
                 </View>
+                <Image
+                  source={{
+                    uri:
+                      item.image ||
+                      'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200',
+                  }}
+                  style={styles.itemImage}
+                />
               </View>
-              <Image source={{ uri: item.image }} style={styles.itemImage} />
-            </Pressable>
-          );
-        })}
+            </View>
+          </Swipeable>
+        ))}
 
         {/* Bottom spacing */}
         <View style={styles.bottomSpacer} />
@@ -255,16 +241,62 @@ export default function AIOrderSuggestionsScreen() {
 
       {/* Bottom Action Bar */}
       <View style={styles.bottomBar}>
-        <View>
-          <Text style={styles.selectedCount}>{selectedItems.size} items selected</Text>
-          <Text style={styles.selectedTotal}>{formattedVnd(totalVnd)} VND</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.reviewButton}
-          onPress={() => router.push('/ai-order-review')}
-        >
-          <Text style={styles.reviewButtonText}>Review</Text>
-        </TouchableOpacity>
+        {isReviewing ? (
+          <View style={styles.reviewSection}>
+            <View style={styles.totalInfo}>
+              <Text style={styles.selectedCount}>{suggestions.length} items</Text>
+              <Text
+                style={styles.selectedTotal}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {formattedVnd(totalVnd)} VND
+              </Text>
+            </View>
+            <View style={styles.actionsRow}>
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => {
+                  router.push({
+                    pathname: '/product-page',
+                    params: {
+                      fromSuggestions: '1',
+                    },
+                  });
+                }}
+              >
+                <Ionicons name="add" size={16} color="#2C1B13" />
+                <Text style={styles.addButtonText}>Add</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.purchaseButton}
+                onPress={handlePrimaryAction}
+              >
+                <Ionicons name="cart-outline" size={16} color="#FFF" />
+                <Text style={styles.purchaseButtonText}>Purchase</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <>
+            <View style={styles.totalInfo}>
+              <Text style={styles.selectedCount}>{suggestions.length} items</Text>
+              <Text
+                style={styles.selectedTotal}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {formattedVnd(totalVnd)} VND
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.reviewButton}
+              onPress={handlePrimaryAction}
+            >
+              <Text style={styles.reviewButtonText}>Review</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );
@@ -306,6 +338,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFF',
     letterSpacing: 0.2,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  loadingText: {
+    marginTop: 12,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   filtersWrapper: {
     backgroundColor: '#F6F2EE',
@@ -385,6 +434,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 30,
     gap: 14,
+  },
+  errorBox: {
+    marginBottom: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#FDECEC',
+    borderWidth: 1,
+    borderColor: '#F5B5B5',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#9B2C2C',
   },
   itemCard: {
     flexDirection: 'row',
@@ -497,6 +559,14 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  reviewSection: {
+    flex: 1,
+  },
+  totalInfo: {
+    flexShrink: 1,
+    minWidth: 0,
+    marginRight: 12,
+  },
   selectedCount: {
     fontSize: 12,
     color: '#8B7A6A',
@@ -517,5 +587,98 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  addButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D9CFC5',
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#FFF',
+  },
+  addButtonText: {
+    color: '#2C1B13',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  purchaseButton: {
+    flex: 1,
+    backgroundColor: '#2C1B13',
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  purchaseButtonText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  quantityRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  qtyButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E2D7CD',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF4EA',
+  },
+  qtyValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2C1B13',
+  },
+  removeButton: {
+    marginLeft: 'auto',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FDECEC',
+  },
+  swipeActionWrap: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    marginBottom: 8,
+    marginLeft: 12,
+  },
+  swipeDeleteButton: {
+    width: 100,
+    height: 100,
+    backgroundColor: '#B23B3B',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 12,
+  },
+  swipeDeleteText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
 });
