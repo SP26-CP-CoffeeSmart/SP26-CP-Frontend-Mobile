@@ -68,16 +68,27 @@ const getRecipeImage = (shopRecipe: any) => {
   return getFallbackImage();
 };
 
-const splitDescription = (description: string): { text: string; prices: string } => {
-  if (!description) return { text: '', prices: '' };
+const cleanDescription = (description: string): string => {
+  if (!description) return '';
+  // Strip [PRICES] suffix from description text
   const parts = description.split('[PRICES]');
-  if (parts.length === 2) {
-    return {
-      text: parts[0].trim(),
-      prices: '[PRICES]' + parts[1].trim(),
-    };
+  return parts[0].trim();
+};
+
+const formatPriceFromSizes = (itemSizeViewModels: any[]): string => {
+  if (!itemSizeViewModels || !Array.isArray(itemSizeViewModels) || itemSizeViewModels.length === 0) {
+    return '';
   }
-  return { text: description, prices: '' };
+  const priceParts = itemSizeViewModels
+    .filter((size) => size?.beverageSize?.sizeName && size?.sellingPrice != null)
+    .sort((a, b) => (a?.beverageSize?.volume ?? 0) - (b?.beverageSize?.volume ?? 0))
+    .map((size) => {
+      const sizeName = size.beverageSize.sizeName;
+      const price = Math.round(size.sellingPrice / 1000);
+      return `${sizeName}: ${price}k`;
+    });
+  if (priceParts.length === 0) return '';
+  return priceParts.join(' | ');
 };
 
 const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
@@ -85,14 +96,23 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
   const menuItems = toArray(menu?.menuItems ?? []);
   const menuGroups = toArray(menu?.menuGroups ?? []);
+  const configGroups = toArray(
+    menu?.config?.groups ??
+      menu?.menuConfig?.groups ??
+      menu?.requestConfig?.groups ??
+      []
+  );
+  const resolvedGroups = menuGroups.length > 0 ? menuGroups : configGroups;
 
   console.log('=== DEBUG groupMenuItemsByCategory ===');
   console.log('Total menuGroups:', menuGroups.length);
+  console.log('Total configGroups:', configGroups.length);
   console.log('Total menuItems:', menuItems.length);
   console.log('menuGroups:', JSON.stringify(menuGroups, null, 2));
+  console.log('configGroups:', JSON.stringify(configGroups, null, 2));
 
   const result: MenuItemGrouped[] = [];
-  const matchedItemIds = new Set<number>();
+  const matchedItemIndexes = new Set<number>();
 
   const getItemCategoryId = (menuItem: any) => {
     const shopBeverage = menuItem?.shopBeverage || {};
@@ -131,13 +151,14 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
       shopBeverage?.name ||
       menuItem?.name ||
       'Unknown Item';
-    const { text, prices } = splitDescription(menuItem?.description || '');
+    const description = cleanDescription(menuItem?.description || '');
+    const priceInfo = formatPriceFromSizes(toArray(menuItem?.itemSizeViewModels ?? []));
 
     return {
       menuItemId: menuItem?.menuItemId || 0,
       recipeName,
-      description: text,
-      priceInfo: prices,
+      description,
+      priceInfo,
       image: shopRecipe?.image || shopBeverage?.image || shopBeverage?.imageUrl,
       shopBeverage,
       shopRecipe: shopRecipe || {},
@@ -145,8 +166,8 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
     };
   };
 
-  // Duyet qua menuGroups
-  menuGroups.forEach((group, groupIdx) => {
+  // Duyet qua menuGroups (fallback to config groups)
+  resolvedGroups.forEach((group, groupIdx) => {
     const groupName = group?.name ?? 'Unknown Group';
     const menuGroupId = group?.menuGroupId ?? 0;
     const menuGroupCategory = toArray(group?.menuGroupCategory ?? []);
@@ -155,28 +176,34 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
     // Lay danh sach beverageCategoryIds cua group nay
     const categoryIds = new Set<number>();
-    menuGroupCategory.forEach((categoryMap) => {
-      const beverageCategoryId = categoryMap?.beverageCategroupId || categoryMap?.beverageCategoryId;
-      if (beverageCategoryId) {
-        categoryIds.add(Number(beverageCategoryId));
-      }
-    });
+    if (menuGroupCategory.length > 0) {
+      menuGroupCategory.forEach((categoryMap) => {
+        const beverageCategoryId =
+          categoryMap?.beverageCategroupId || categoryMap?.beverageCategoryId;
+        if (beverageCategoryId) {
+          categoryIds.add(Number(beverageCategoryId));
+        }
+      });
+    } else if (Array.isArray(group?.selectedBeverageCategories)) {
+      group.selectedBeverageCategories.forEach((categoryId: number) => {
+        if (categoryId) {
+          categoryIds.add(Number(categoryId));
+        }
+      });
+    }
     console.log(`  Mapped categoryIds:`, Array.from(categoryIds));
 
     // Loc menuItems thuoc group nay (co beverageCategoryId nam trong categoryIds)
     const groupItems: MenuItemGrouped['items'] = [];
-    menuItems.forEach((menuItem) => {
+    menuItems.forEach((menuItem, itemIndex) => {
       const beverageCategoryId = getItemCategoryId(menuItem);
-      const menuItemId = menuItem?.menuItemId || 0;
 
       if (categoryIds.has(Number(beverageCategoryId))) {
-        if (menuItemId && matchedItemIds.has(menuItemId)) {
+        if (matchedItemIndexes.has(itemIndex)) {
           return;
         }
         groupItems.push(buildGroupedItem(menuItem));
-        if (menuItemId) {
-          matchedItemIds.add(menuItemId);
-        }
+        matchedItemIndexes.add(itemIndex);
       }
     });
     console.log(`  Matched items:`, groupItems.length);
@@ -194,15 +221,14 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
   // Fallback: put any unmatched menuItems into an "Other" group
   const unmatchedItems: MenuItemGrouped['items'] = [];
-  menuItems.forEach((menuItem) => {
-    const menuItemId = menuItem?.menuItemId || 0;
-    if (menuItemId && matchedItemIds.has(menuItemId)) return;
+  menuItems.forEach((menuItem, itemIndex) => {
+    if (matchedItemIndexes.has(itemIndex)) return;
     unmatchedItems.push(buildGroupedItem(menuItem));
-    if (menuItemId) matchedItemIds.add(menuItemId);
+    matchedItemIndexes.add(itemIndex);
   });
   if (unmatchedItems.length > 0) {
     result.push({
-      groupName: menuGroups.length > 0 ? 'Other' : 'Menu Items',
+      groupName: resolvedGroups.length > 0 ? 'Other' : 'Menu Items',
       beverageCategoryId: -1,
       items: unmatchedItems,
     });
@@ -329,8 +355,15 @@ export default function MenuDetailScreen() {
     return {
       ...baseMenu,
       menuItems: storedMenuItems,
+      config:
+        baseMenu?.config ??
+        menuConfig ??
+        menuPayload?.config ??
+        parsedPayload?.config ??
+        parsedPayload?.request?.config ??
+        null,
     };
-  }, [currentMenu, parsedItem, storedMenuItems]);
+  }, [currentMenu, parsedItem, storedMenuItems, menuConfig, menuPayload, parsedPayload]);
 
   const groupedItems = useMemo(
     () => groupMenuItemsByCategory(menuForDisplay),

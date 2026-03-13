@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
@@ -21,38 +22,64 @@ import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
-  bg: '#F6F1EB',
-  text: '#3C2A21',
-  muted: '#8E7B6F',
-  border: '#D7C7B8',
+  bg: '#F4EFE9',
+  text: '#2E221B',
+  muted: '#7B6F67',
+  border: '#E5D8CC',
   card: '#FFFFFF',
-  accent: '#9C7A4B',
-  accentDark: '#3C2A21',
-  chip: '#E9DFD4',
+  accent: '#7C5C40',
+  accentDark: '#5C402B',
+  chip: '#F3E9DF',
+  chipActive: '#E7D3C1',
+  highlight: '#FFF7EF',
+  surface: '#F7EFE7',
 };
 
 const layoutOptions = [
   {
     key: 'vertical',
     label: 'Vertical',
-    image:
-      'https://images.unsplash.com/photo-1521017432531-fbd92d768814?w=600&q=80&auto=format&fit=crop',
+    image: require('../assets/vertical.jpg'),
   },
   {
     key: 'horizontal',
     label: 'Horizontal',
-    image:
-      'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600&q=80&auto=format&fit=crop',
+    image: require('../assets/horizontal.jpg'),
   },
   {
     key: 'descriptive',
     label: 'Descriptive',
-    image:
-      'https://images.unsplash.com/photo-1511920170033-f8396924c348?w=600&q=80&auto=format&fit=crop',
+    image: require('../assets/descriptive.png'),
   },
 ];
 
-const topics = ['Summer Refresh', 'Winter Warmers', 'Rainy Day Comfort'];
+const resolveImageSource = (image: unknown) => {
+  if (typeof image === 'number') {
+    return image;
+  }
+  if (typeof image === 'string' && image.trim()) {
+    return { uri: image };
+  }
+  return null;
+};
+
+const topics = [
+  {
+    key: 'Summer Refresh',
+    label: 'Summer Refresh',
+    image: require('../assets/summer.webp'),
+  },
+  {
+    key: 'Winter Warmers',
+    label: 'Winter Warmers',
+    image: require('../assets/winter.jpg'),
+  },
+  {
+    key: 'Rainy Day Comfort',
+    label: 'Rainy Day Comfort',
+    image: require('../assets/rainy.jpg'),
+  },
+];
 const shopStyles = [
   'Modern Minimalist',
   'Rustic & Cozy',
@@ -150,15 +177,15 @@ export default function MenuRecommendationsScreen() {
   }, [loadCategories]);
 
   const layoutValue = useMemo(
-    () => Math.max(1, layoutOptions.findIndex((option) => option.key === selectedLayout) + 1),
+    () => layoutOptions.findIndex((option) => option.key === selectedLayout),
     [selectedLayout]
   );
   const topicValue = useMemo(
-    () => Math.max(1, topics.findIndex((topic) => topic === selectedTopic) + 1),
+    () => topics.findIndex((topic) => topic.key === selectedTopic),
     [selectedTopic]
   );
   const pricingValue = useMemo(
-    () => Math.max(1, pricingOptions.findIndex((option) => option.key === selectedPricing) + 1),
+    () => pricingOptions.findIndex((option) => option.key === selectedPricing),
     [selectedPricing]
   );
   const categoryNameById = useMemo(() => {
@@ -174,6 +201,21 @@ export default function MenuRecommendationsScreen() {
 
   const selectedLayoutLabel =
     layoutOptions.find((option) => option.key === selectedLayout)?.label ?? 'Vertical';
+  const selectedShopStyleLabel =
+    selectedShopStyle || shopStyleText.trim() || 'Custom';
+
+  const renderGroupDeleteAction = (groupIndex: number) => (
+    <View style={styles.swipeActions}>
+      <TouchableOpacity
+        style={styles.swipeDelete}
+        onPress={() => handleRemoveGroup(groupIndex)}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="trash-outline" size={18} color="#FFF" />
+        <Text style={styles.swipeDeleteText}>Remove</Text>
+      </TouchableOpacity>
+    </View>
+  );
 
   const handleAddGroup = () => {
     const next = menuGroupInput.trim();
@@ -328,7 +370,11 @@ export default function MenuRecommendationsScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            activeOpacity={0.8}
+          >
             <Ionicons name="arrow-back" size={20} color={COLORS.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Menu Recommendations</Text>
@@ -368,7 +414,7 @@ export default function MenuRecommendationsScreen() {
               step={1}
               minimumTrackTintColor={COLORS.accent}
               maximumTrackTintColor={COLORS.border}
-              thumbTintColor={COLORS.accentDark}
+              thumbTintColor={COLORS.accent}
             />
             <View style={styles.rowBetween}>
               <Text style={styles.helperText}>10</Text>
@@ -413,8 +459,9 @@ export default function MenuRecommendationsScreen() {
                     key={option.key}
                     style={[styles.layoutCard, selected && styles.layoutCardActive]}
                     onPress={() => setSelectedLayout(option.key)}
+                    activeOpacity={0.85}
                   >
-                    <Image source={{ uri: option.image }} style={styles.layoutImage} />
+                    <Image source={resolveImageSource(option.image)} style={styles.layoutImage} />
                     <Text style={styles.layoutLabel}>{option.label}</Text>
                   </TouchableOpacity>
                 );
@@ -430,14 +477,20 @@ export default function MenuRecommendationsScreen() {
             <Text style={styles.helperText}>Choose a topic for your menu</Text>
             <View style={styles.topicList}>
               {topics.map((topic) => {
-                const active = selectedTopic === topic;
+                const active = selectedTopic === topic.key;
                 return (
                   <TouchableOpacity
-                    key={topic}
-                    style={[styles.topicChip, active && styles.topicChipActive]}
-                    onPress={() => setSelectedTopic(topic)}
+                    key={topic.key}
+                    style={[styles.topicCard, active && styles.topicCardActive]}
+                    onPress={() => setSelectedTopic(topic.key)}
+                    activeOpacity={0.85}
                   >
-                    <Text style={[styles.topicText, active && styles.topicTextActive]}>{topic}</Text>
+                    <Image source={resolveImageSource(topic.image)} style={styles.topicImage} />
+                    <View style={[styles.topicOverlay, active && styles.topicOverlayActive]}>
+                      <Text style={[styles.topicTitle, active && styles.topicTitleActive]}>
+                        {topic.label}
+                      </Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -447,10 +500,14 @@ export default function MenuRecommendationsScreen() {
           <View style={styles.fieldGroup}>
             <View style={styles.rowBetween}>
               <Text style={styles.label}>Shop Style</Text>
-              <Text style={styles.valueText}>{selectedShopStyle}</Text>
+              <Text style={styles.valueText}>{selectedShopStyleLabel}</Text>
             </View>
             <Text style={styles.helperText}>What vibe did your coffee shop have ?</Text>
-            <View style={styles.styleRow}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.styleRow}
+            >
               {shopStyles.map((style) => {
                 const active = selectedShopStyle === style;
                 return (
@@ -458,6 +515,7 @@ export default function MenuRecommendationsScreen() {
                     key={style}
                     style={[styles.styleChip, active && styles.styleChipActive]}
                     onPress={() => setSelectedShopStyle(style)}
+                    activeOpacity={0.85}
                   >
                     <Text style={[styles.styleChipText, active && styles.styleChipTextActive]}>
                       {style}
@@ -465,13 +523,14 @@ export default function MenuRecommendationsScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </View>
+            </ScrollView>
             <TextInput
               style={styles.input}
               placeholder="Please specify your coffee shop style"
               placeholderTextColor={COLORS.muted}
               value={shopStyleText}
               onChangeText={setShopStyleText}
+              onFocus={() => setSelectedShopStyle('')}
             />
           </View>
 
@@ -494,6 +553,7 @@ export default function MenuRecommendationsScreen() {
                     key={option.key}
                     style={[styles.pricingChip, active && styles.pricingChipActive]}
                     onPress={() => setSelectedPricing(option.key)}
+                    activeOpacity={0.85}
                   >
                     <Text style={[styles.pricingLabel, active && styles.pricingLabelActive]}>
                       {option.label}
@@ -517,28 +577,34 @@ export default function MenuRecommendationsScreen() {
             <Text style={styles.helperText}>How organizing you want for the menu ?</Text>
             <View style={styles.groupList}>
               {menuGroups.map((group, index) => (
-                <View key={`${group.name}-${index}`} style={styles.groupRow}>
-                  <Ionicons name="reorder-three" size={18} color={COLORS.muted} />
-                  <View style={styles.groupContent}>
+                <Swipeable
+                  key={`${group.name}-${index}`}
+                  renderRightActions={() => renderGroupDeleteAction(index)}
+                  overshootRight={false}
+                >
+                  <View style={styles.groupCard}>
                     <View style={styles.groupHeaderRow}>
-                      <Text style={styles.groupText}>{group.name}</Text>
-                      <TouchableOpacity
-                        style={styles.groupAddButton}
-                        onPress={() => openCategoryModal(index)}
-                      >
-                        <Ionicons name="add" size={16} color={COLORS.accent} />
-                        <Text style={styles.groupAddText}>Add beverage category</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.groupDeleteButton}
-                        onPress={() => handleRemoveGroup(index)}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={COLORS.accentDark} />
-                      </TouchableOpacity>
+                      <View style={styles.groupTitleRow}>
+                        <Ionicons name="list" size={18} color={COLORS.muted} />
+                        <Text style={styles.groupText}>{group.name}</Text>
+                      </View>
+                      <View style={styles.groupCountChip}>
+                        <Text style={styles.groupCountText}>
+                          {group.selectedBeverageCategories.length} categories
+                        </Text>
+                      </View>
                     </View>
-                    {group.selectedBeverageCategories.length === 0 ? (
-                      <Text style={styles.groupCategoryEmpty}>No beverage categories selected.</Text>
-                    ) : (
+
+                    <TouchableOpacity
+                      style={styles.groupAddButton}
+                      onPress={() => openCategoryModal(index)}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={COLORS.accent} />
+                      <Text style={styles.groupAddText}>Add beverage category</Text>
+                    </TouchableOpacity>
+
+                    {group.selectedBeverageCategories.length > 0 && (
                       <View style={styles.groupCategoryList}>
                         {group.selectedBeverageCategories.map((id) => {
                           const name = categoryNameById.get(id);
@@ -554,7 +620,7 @@ export default function MenuRecommendationsScreen() {
                       </View>
                     )}
                   </View>
-                </View>
+                </Swipeable>
               ))}
               <View style={styles.groupInputRow}>
                 <TextInput
@@ -564,7 +630,11 @@ export default function MenuRecommendationsScreen() {
                   value={menuGroupInput}
                   onChangeText={setMenuGroupInput}
                 />
-                <TouchableOpacity style={styles.groupInputAction} onPress={handleAddGroup}>
+                <TouchableOpacity
+                  style={styles.groupInputAction}
+                  onPress={handleAddGroup}
+                  activeOpacity={0.8}
+                >
                   <Ionicons name="add" size={18} color={COLORS.accentDark} />
                 </TouchableOpacity>
               </View>
@@ -610,6 +680,7 @@ export default function MenuRecommendationsScreen() {
             style={[styles.primaryButton, submitting && styles.primaryButtonDisabled]}
             onPress={handleSubmit}
             disabled={submitting}
+            activeOpacity={0.85}
           >
             <Text style={styles.primaryButtonText}>
               {submitting ? 'Submitting...' : 'Create Menu Skeleton'}
@@ -656,6 +727,7 @@ export default function MenuRecommendationsScreen() {
                       key={id}
                       style={[styles.modalRow, selected && styles.modalRowActive]}
                       onPress={() => toggleCategoryForGroup(id)}
+                      activeOpacity={0.85}
                     >
                       <Text style={[styles.modalRowText, selected && styles.modalRowTextActive]}>
                         {getCategoryName(category)}
@@ -681,9 +753,9 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.bg,
   },
   container: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 32,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 40,
   },
   headerRow: {
     flexDirection: 'row',
@@ -696,13 +768,20 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1E7DC',
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
   },
   headerSpacer: {
@@ -711,32 +790,32 @@ const styles = StyleSheet.create({
   },
   heroImage: {
     width: '100%',
-    height: 140,
-    borderRadius: 16,
-    marginBottom: 16,
+    height: 150,
+    borderRadius: 18,
+    marginBottom: 14,
   },
   card: {
     backgroundColor: COLORS.card,
-    borderRadius: 18,
-    padding: 16,
+    borderRadius: 20,
+    padding: 18,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 4,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '700',
     color: COLORS.text,
     marginBottom: 12,
   },
   fieldGroup: {
-    marginBottom: 16,
+    marginBottom: 18,
   },
   label: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.text,
     marginBottom: 6,
   },
@@ -750,12 +829,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
-    height: 44,
-    borderRadius: 10,
+    height: 46,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
-    backgroundColor: '#FFF7F0',
-    paddingHorizontal: 12,
+    backgroundColor: COLORS.highlight,
+    paddingHorizontal: 14,
     color: COLORS.text,
     marginTop: 8,
   },
@@ -766,100 +845,137 @@ const styles = StyleSheet.create({
   },
   layoutRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
+    gap: 12,
+    marginTop: 12,
   },
   layoutCard: {
     flex: 1,
-    borderRadius: 12,
+    borderRadius: 16,
     backgroundColor: COLORS.chip,
-    padding: 6,
+    padding: 8,
     borderWidth: 1,
     borderColor: 'transparent',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   layoutCardActive: {
     borderColor: COLORS.accent,
-    backgroundColor: '#F5E7D8',
+    backgroundColor: COLORS.chipActive,
   },
   layoutImage: {
     width: '100%',
-    height: 70,
-    borderRadius: 10,
-    marginBottom: 6,
+    height: 74,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   layoutLabel: {
     fontSize: 12,
     color: COLORS.text,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   topicList: {
-    gap: 10,
-    marginTop: 10,
+    gap: 12,
+    marginTop: 12,
   },
-  topicChip: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: COLORS.chip,
+  topicCard: {
+    position: 'relative',
+    borderRadius: 16,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.card,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
-  topicChipActive: {
-    backgroundColor: '#F5E7D8',
+  topicCardActive: {
     borderColor: COLORS.accent,
   },
-  topicText: {
-    fontSize: 13,
-    color: COLORS.text,
-    fontWeight: '600',
+  topicImage: {
+    width: '100%',
+    height: 120,
   },
-  topicTextActive: {
-    color: COLORS.accentDark,
+  topicOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+  },
+  topicOverlayActive: {
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  topicTitle: {
+    fontSize: 15,
+    color: '#FFF9F3',
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.45)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 6,
+  },
+  topicTitleActive: {
+    color: '#FFFDF9',
   },
   styleRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 10,
-    marginTop: 10,
+    marginTop: 12,
+    paddingRight: 12,
   },
   styleChip: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 14,
+    borderRadius: 16,
     backgroundColor: COLORS.chip,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   styleChipActive: {
-    backgroundColor: COLORS.accentDark,
+    backgroundColor: COLORS.chipActive,
+    borderColor: COLORS.accent,
   },
   styleChipText: {
     fontSize: 12,
     color: COLORS.text,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   styleChipTextActive: {
-    color: '#FFF',
+    color: COLORS.text,
   },
   pricingRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
+    gap: 12,
+    marginTop: 12,
   },
   pricingChip: {
     minWidth: 150,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     backgroundColor: COLORS.chip,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
   pricingChipActive: {
-    backgroundColor: COLORS.accentDark,
+    backgroundColor: COLORS.chipActive,
+    borderColor: COLORS.accent,
   },
   pricingLabel: {
     fontSize: 12,
     color: COLORS.text,
-    fontWeight: '600',
+    fontWeight: '700',
     textAlign: 'center',
   },
   pricingRange: {
@@ -868,16 +984,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   pricingLabelActive: {
-    color: '#FFF',
+    color: COLORS.text,
   },
   optionRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
+    gap: 12,
+    marginTop: 12,
   },
   optionChip: {
     flex: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
     backgroundColor: COLORS.chip,
@@ -885,22 +1001,22 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   optionChipActive: {
-    backgroundColor: '#F5E7D8',
+    backgroundColor: COLORS.chipActive,
     borderColor: COLORS.accent,
   },
   optionChipText: {
     fontSize: 12,
     color: COLORS.text,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   optionChipTextActive: {
-    color: COLORS.accentDark,
+    color: COLORS.text,
   },
   groupBadge: {
-    backgroundColor: '#F2E7DC',
-    paddingHorizontal: 8,
+    backgroundColor: COLORS.chipActive,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 10,
+    borderRadius: 12,
   },
   groupBadgeText: {
     fontSize: 10,
@@ -908,50 +1024,55 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   groupList: {
-    marginTop: 10,
+    marginTop: 12,
+    gap: 12,
+  },
+  groupCard: {
+    backgroundColor: COLORS.chip,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     gap: 10,
   },
-  groupRow: {
+  groupHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: COLORS.chip,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  groupContent: {
-    flex: 1,
+    justifyContent: 'space-between',
     gap: 6,
   },
-  groupHeaderRow: {
+  groupTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   groupText: {
-    flex: 1,
     fontSize: 12,
     color: COLORS.text,
+    fontWeight: '700',
+  },
+  groupCountChip: {
+    backgroundColor: COLORS.highlight,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  groupCountText: {
+    fontSize: 10,
+    color: COLORS.muted,
     fontWeight: '600',
   },
   groupAddButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    alignSelf: 'flex-start',
   },
   groupAddText: {
     fontSize: 11,
     color: COLORS.accent,
-    fontWeight: '600',
-  },
-  groupDeleteButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F1E3D5',
+    fontWeight: '700',
   },
   groupCategoryEmpty: {
     fontSize: 11,
@@ -971,7 +1092,26 @@ const styles = StyleSheet.create({
   groupCategoryText: {
     fontSize: 10,
     color: COLORS.text,
-    fontWeight: '600',
+    fontWeight: '700',
+  },
+  swipeActions: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  swipeDelete: {
+    backgroundColor: '#B65A4A',
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  swipeDeleteText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   groupInputRow: {
     flexDirection: 'row',
@@ -981,18 +1121,20 @@ const styles = StyleSheet.create({
   groupInput: {
     flex: 1,
     height: 40,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
     paddingHorizontal: 12,
-    backgroundColor: '#FFF7F0',
+    backgroundColor: COLORS.highlight,
     color: COLORS.text,
   },
   groupInputAction: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#F1E7DC',
+    backgroundColor: COLORS.card,
+    borderWidth: 1,
+    borderColor: COLORS.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1023,13 +1165,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.card,
   },
   recipeRadioOuterActive: {
-    borderColor: COLORS.accentDark,
+    borderColor: COLORS.accent,
   },
   recipeRadioInner: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.accentDark,
+    backgroundColor: COLORS.accent,
   },
   recipeToggleText: {
     fontSize: 12,
@@ -1038,18 +1180,25 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     marginTop: 8,
-    backgroundColor: COLORS.accentDark,
+    backgroundColor: '#2A1810',
     borderRadius: 18,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#2A1810',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   primaryButtonDisabled: {
     opacity: 0.7,
   },
   primaryButtonText: {
-    color: '#FFF',
+    color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,
@@ -1059,7 +1208,7 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     backgroundColor: COLORS.card,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     maxHeight: '80%',
   },
@@ -1080,7 +1229,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1E7DC',
+    backgroundColor: COLORS.chip,
   },
   modalHint: {
     fontSize: 12,
@@ -1096,13 +1245,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 12,
-    backgroundColor: '#F6F1EB',
+    backgroundColor: COLORS.highlight,
     marginBottom: 8,
   },
   modalRowActive: {
     borderWidth: 1,
     borderColor: COLORS.accent,
-    backgroundColor: '#F5E7D8',
+    backgroundColor: COLORS.chipActive,
   },
   modalRowText: {
     fontSize: 13,
