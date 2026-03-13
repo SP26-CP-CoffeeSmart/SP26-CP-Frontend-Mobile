@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -405,16 +406,28 @@ export default function ImportRequestScreen() {
           throw new Error(`Request failed: ${response.status}`);
         }
 
-        Alert.alert('Import request submitted', 'Inventory was imported from the selected order.');
+        Toast.show({
+          type: 'success',
+          text1: 'Import successful',
+          text2: 'Inventory was imported from the selected order.',
+        });
       } catch (error) {
-        Alert.alert('Import failed', 'Unable to import inventory from this order.');
+        Toast.show({
+          type: 'error',
+          text1: 'Import failed',
+          text2: 'Unable to import inventory from this order.',
+        });
       } finally {
         setIsSubmitting(false);
       }
       return;
     }
 
-    Alert.alert('Import request submitted', 'This is a mock manual request for now.');
+    Toast.show({
+      type: 'success',
+      text1: 'Import request submitted',
+      text2: 'This is a mock manual request for now.',
+    });
   };
 
   return (
