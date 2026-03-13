@@ -11,6 +11,7 @@ import Toast from 'react-native-toast-message';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { BeverageCategoryProvider } from '@/context/beverage-category-context';
 import { CartProvider } from '@/context/cart-context';
+import { SuggestionProvider } from '@/context/suggestion-context';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -29,7 +30,7 @@ function RootLayoutNav() {
 
     const firstSegment = segments[0];
     const authScreens = ['sign-in', 'sign-up', 'forgot-password', 'otp', 'reset-password', 'index', 'loading'];
-    const nestedScreens = ['change-password', 'ai-order-suggestions', 'ai-order-review', 'ai-order-add-ingredients', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales', 'daily-sale-item', 'product-page', 'product-detail', 'cart'];
+    const nestedScreens = ['change-password', 'ai-order-suggestions', 'ai-order-add-ingredients', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales', 'daily-sale-item', 'product-page', 'product-detail', 'cart'];
     const isOnAuthScreen = authScreens.includes(firstSegment);
     const isOnNestedScreen = nestedScreens.includes(firstSegment);
 
@@ -79,7 +80,6 @@ function RootLayoutNav() {
         <Stack.Screen name="ai-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="ai-result" options={{ headerShown: false }} />
         <Stack.Screen name="ai-order-suggestions" options={{ headerShown: false }} />
-        <Stack.Screen name="ai-order-review" options={{ headerShown: false }} />
         <Stack.Screen name="ai-order-add-ingredients" options={{ headerShown: false }} />
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
@@ -104,7 +104,9 @@ export default function RootLayout() {
       <AuthProvider>
         <CartProvider>
           <BeverageCategoryProvider>
-            <RootLayoutNav />
+            <SuggestionProvider>
+              <RootLayoutNav />
+            </SuggestionProvider>
           </BeverageCategoryProvider>
         </CartProvider>
       </AuthProvider>
