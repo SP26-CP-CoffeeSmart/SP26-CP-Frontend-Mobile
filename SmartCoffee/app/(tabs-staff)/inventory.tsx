@@ -11,6 +11,7 @@ import {
     View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,6 +52,7 @@ const COLORS = {
 };
 
 export default function InventoryScreen() {
+    const router = useRouter();
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
@@ -208,7 +210,10 @@ export default function InventoryScreen() {
                         </View>
 
                         <View style={styles.requestRow}>
-                            <TouchableOpacity style={[styles.requestCard, { backgroundColor: COLORS.accent }]}>
+                            <TouchableOpacity
+                                style={[styles.requestCard, { backgroundColor: COLORS.accent }]}
+                                onPress={() => router.push('/import-request')}
+                            >
                                 <Ionicons name="download-outline" size={20} color="#FFFFFF" />
                                 <Text style={styles.requestLabel}>Request{`\n`}Import</Text>
                             </TouchableOpacity>
