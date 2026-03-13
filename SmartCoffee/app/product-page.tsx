@@ -9,12 +9,14 @@ import {
   TextInput,
   TouchableOpacity,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -45,6 +47,7 @@ interface SupplierProductApiItem {
   stock: number;
   status: string;
   createDate: string;
+  rating?: number;
   measurement: string;
   // packageSize: khối lượng 1 túi (theo measurement)
   packageSize?: number | null;
@@ -74,11 +77,16 @@ const cardWidth = (width - 32 - cardGap) / 2;
 
 export default function ProductPage() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ fromSuggestions?: string; existingIds?: string }>();
+  const fromSuggestions =
+    params.fromSuggestions === '1' || params.fromSuggestions === 'true';
+  const { items: suggestionItems, addItems } = useSuggestions();
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [products, setProducts] = useState<SupplierProductApiItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedForSuggestion, setSelectedForSuggestion] = useState<SupplierProductApiItem[]>([]);
 
   const dynamicCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -89,6 +97,14 @@ export default function ProductPage() {
     });
     return Array.from(cats);
   }, [products]);
+
+  const excludedIdsFromSuggestions = useMemo(() => {
+    if (!fromSuggestions) return new Set<number>();
+    const ids = suggestionItems
+      .map((item) => item.productId)
+      .filter((id) => Number.isFinite(id) && id > 0);
+    return new Set<number>(ids);
+  }, [fromSuggestions, suggestionItems]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -137,11 +153,48 @@ export default function ProductPage() {
       );
     }
 
+    // Nếu đi từ suggestions sang thì loại bỏ các product
+    // đã có trong suggestion list.
+    if (fromSuggestions) {
+      const excluded = new Set<number>();
+      excludedIdsFromSuggestions.forEach((id) => excluded.add(id));
+
+      result = result.filter((item) => !excluded.has(item.productId));
+    }
+
     return result;
-  }, [products, search, activeCategory]);
+  }, [products, search, activeCategory, fromSuggestions, excludedIdsFromSuggestions]);
 
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+
+  const handleAddToSuggestedList = (item: SupplierProductApiItem) => {
+    const name = item?.ingredient?.name ?? 'Unknown';
+    const category = item?.ingredient?.category ?? (item.measurement || 'Other');
+    const imageUrl = item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
+
+    const suggestion: SuggestionItem = {
+      id: `extra-${item.productId}`,
+      productId: item.productId,
+      supplierId: item.supplierId,
+      supplierName: item.supplierName ?? null,
+      name,
+      category,
+      priceVnd: item.price,
+      image: imageUrl,
+      subtitle: item.description ?? '',
+      qtyNeeded: 1,
+      timeRange: 'Manual',
+      productRating: typeof item.rating === 'number' ? item.rating : undefined,
+      rating: 0,
+      measurement: item.measurement || 'unit',
+      packageSize: item.packageSize ?? null,
+    };
+
+    addItems([suggestion]);
+
+    Alert.alert('Đã thêm', `${name} đã được thêm vào danh sách gợi ý.`);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -158,9 +211,19 @@ export default function ProductPage() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.headerIconButton}
-              onPress={() => router.push('/cart')}
+              onPress={() => {
+                if (fromSuggestions) {
+                  router.back();
+                } else {
+                  router.push('/cart');
+                }
+              }}
             >
-              <Ionicons name="bag-outline" size={20} color={COLORS.white} />
+              <Ionicons
+                name={fromSuggestions ? 'checkmark' : 'bag-outline'}
+                size={20}
+                color={COLORS.white}
+              />
             </TouchableOpacity>
           </View>
         </View>
@@ -217,7 +280,14 @@ export default function ProductPage() {
         </View>
 
         <View style={styles.suggestionBox}>
-          <TouchableOpacity onPress={() => router.push('/ai-order-suggestions')}>
+          <TouchableOpacity
+            onPress={() =>
+              router.push({
+                pathname: '/ai-loading',
+                params: { mode: 'order-suggestions' },
+              })
+            }
+          >
             <Ionicons name="sparkles" size={14} color={COLORS.text} />
             <Text style={styles.suggestionText}>
               AI suggestion: Helping you make purchases quickly based on inventory analysis.
@@ -247,39 +317,58 @@ export default function ProductPage() {
                 : `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
 
               return (
-                <TouchableOpacity
-                  key={item.productId}
-                  style={styles.card}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/product-detail',
-                      params: { productId: String(item.productId) },
-                    })
-                  }
-                  activeOpacity={0.9}
-                >
-                  <Image source={{ uri: imageUrl }} style={styles.cardImage} />
-                  <Text style={styles.cardTitle}>{name}</Text>
-                  <Text style={styles.cardDesc}>{category}</Text>
-                  {description ? (
-                    <Text style={styles.cardDesc} numberOfLines={1}>
-                      {description}
-                    </Text>
-                  ) : null}
-                  <Text style={styles.cardPrice}>{priceText}</Text>
-                  <View style={styles.metaRow}>
-                    <View style={styles.metaItem}>
-                      <Ionicons name="storefront-outline" size={12} color={COLORS.textSecondary} />
-                      <Text style={styles.metaText} numberOfLines={1}>
-                        {item.supplierName ?? `Supplier #${item.supplierId}`}
+                <View key={item.productId} style={styles.card}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() =>
+                      router.push({
+                        pathname: '/product-detail',
+                        params: { productId: String(item.productId) },
+                      })
+                    }
+                  >
+                    <Image source={{ uri: imageUrl }} style={styles.cardImage} />
+                    <Text style={styles.cardTitle}>{name}</Text>
+                    <Text style={styles.cardDesc}>{category}</Text>
+                    {description ? (
+                      <Text style={styles.cardDesc} numberOfLines={1}>
+                        {description}
                       </Text>
+                    ) : null}
+                    <Text style={styles.cardPrice}>{priceText}</Text>
+                    <View style={styles.metaRow}>
+                      <View style={[styles.metaItem, styles.metaItemSupplier]}>
+                        <Ionicons name="storefront-outline" size={12} color={COLORS.textSecondary} />
+                        <Text style={styles.metaText} numberOfLines={1}>
+                          {item.supplierName ?? `Supplier #${item.supplierId}`}
+                        </Text>
+                      </View>
+                      <View style={[styles.metaItem, styles.metaItemStatus]}>
+                        <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />
+                        <Text style={styles.metaText}>{item.status}</Text>
+                      </View>
+                      <View style={[styles.metaItem, styles.metaItemRating]}>
+                        <Ionicons name="star" size={12} color={COLORS.accent} />
+                        <Text style={styles.metaText}>
+                          {typeof item.rating === 'number'
+                            ? item.rating.toFixed(1)
+                            : 'N/A'}
+                        </Text>
+                      </View>
                     </View>
-                    <View style={styles.metaItem}>
-                      <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />
-                      <Text style={styles.metaText}>{item.status}</Text>
-                    </View>
-                  </View>
-                </TouchableOpacity>
+                  </TouchableOpacity>
+                  {fromSuggestions && (
+                    <TouchableOpacity
+                      style={styles.addSuggestedButton}
+                      onPress={() => handleAddToSuggestedList(item)}
+                    >
+                      <Ionicons name="add" size={12} color={COLORS.text} />
+                      <Text style={styles.addSuggestedButtonText}>
+                        Add to suggested list
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })
           )}
@@ -445,7 +534,7 @@ const styles = StyleSheet.create({
   metaRow: {
     marginTop: 6,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   metaItem: {
     flexDirection: 'row',
@@ -455,5 +544,31 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 10,
     color: COLORS.textSecondary,
+    flexShrink: 1,
+  },
+  metaItemSupplier: {
+    flex: 1,
+    minWidth: 0,
+  },
+  metaItemStatus: {
+    marginLeft: 8,
+  },
+  metaItemRating: {
+    marginLeft: 8,
+  },
+  addSuggestedButton: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: COLORS.chip,
+  },
+  addSuggestedButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.chipText,
   },
 });
