@@ -1,10 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, StyleSheet, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
 import { Fonts } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
+
+interface SupplierProductRecommendation {
+  productId: number;
+  ingredientId: number;
+  ingredientName: string;
+  currentStock: number;
+  minStock: number;
+  recommendedProductId: number;
+  productDescription?: string | null;
+  supplierId: number;
+  supplierName?: string | null;
+  supplierRating?: number | null;
+  productRating?: number | null;
+  price: number;
+  packageSize?: number | null;
+  measurement?: string | null;
+  image?: string | null;
+}
 
 export default function AiLoadingScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ mode?: string }>();
+  const { coffeeShopId } = useAuth();
+  const { setItems, clear } = useSuggestions();
   const [messageIndex, setMessageIndex] = useState(0);
   const textOpacity = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
@@ -62,6 +89,108 @@ export default function AiLoadingScreen() {
       pulseAnimation.stop();
     };
   }, [messages.length, pulse, textOpacity]);
+
+  useEffect(() => {
+    if (params.mode !== 'order-suggestions') {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const runOrderSuggestionsFlow = async () => {
+      const MIN_DURATION_MS = 3000;
+      const startedAt = Date.now();
+
+      const ensureMinDisplayTime = async () => {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed < MIN_DURATION_MS) {
+          await new Promise((resolve) => setTimeout(resolve, MIN_DURATION_MS - elapsed));
+        }
+      };
+
+      if (!coffeeShopId) {
+        if (isCancelled) return;
+        clear();
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+        router.replace({
+          pathname: '/ai-order-suggestions',
+          params: { error: 'Không tìm thấy Coffee Shop của bạn.' },
+        });
+        return;
+      }
+
+      try {
+        const url = `${AUTH_BASE_URL}/SupplierProduct/recommendations/shop/${coffeeShopId}?threshold=10`;
+        const response = await authorizedFetch(url, {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        const text = await response.text();
+        if (isCancelled) return;
+
+        if (!response.ok) {
+          throw new Error(text || `Request failed (${response.status})`);
+        }
+
+        const data = text ? (JSON.parse(text) as SupplierProductRecommendation[]) : [];
+
+        const mapped: SuggestionItem[] = (Array.isArray(data) ? data : []).map(
+          (item, index) => {
+            const qtyNeeded = Math.max(item.minStock - item.currentStock, 0);
+            const shortDescription = (item.productDescription || '').split('\n')[0];
+            const image = String(item.image || '').trim();
+
+            return {
+              id: String(item.recommendedProductId || item.ingredientId || index),
+              productId: item.productId,
+              supplierId: item.supplierId,
+              supplierName: item.supplierName ?? null,
+              name: item.ingredientName || 'Unknown ingredient',
+              category: item.measurement || 'Other',
+              image: image || '',
+              subtitle: shortDescription || 'Recommended by inventory AI.',
+              qtyNeeded,
+              productRating:
+                typeof item.productRating === 'number' ? item.productRating : undefined,
+              timeRange: qtyNeeded > 0 ? 'Need restock' : 'OK',
+              rating: Number(item.supplierRating || 0),
+              measurement: item.measurement ?? null,
+              packageSize: item.packageSize ?? null,
+              priceVnd: item.price,
+            };
+          }
+        );
+
+        setItems(mapped);
+
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+
+        router.replace({
+          pathname: '/ai-order-suggestions',
+        });
+      } catch (error) {
+        console.error('Failed to load AI order suggestions:', error);
+        if (isCancelled) return;
+        clear();
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+        router.replace({
+          pathname: '/ai-order-suggestions',
+          params: { error: 'Không thể tải gợi ý mua hàng từ AI.' },
+        });
+      }
+    };
+
+    runOrderSuggestionsFlow();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [coffeeShopId, params.mode, router]);
 
   return (
     <View style={styles.root}>

@@ -21,6 +21,7 @@ import { useCart, CartItem } from '@/context/cart-context';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
 const COLORS = {
     bg: '#F7F3EF',
@@ -33,6 +34,9 @@ const COLORS = {
     orange: '#F05D23',
     green: '#2E7D32',
 };
+
+const FALLBACK_PRODUCT_IMAGE =
+    'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
 type ShippingOption = {
     id: string;
     label: string;
@@ -73,6 +77,7 @@ export default function CheckoutPage() {
     const { walletBalance, walletId, refreshProfile, fullAddress, profile, shopName } = useAuth();
 
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
+    const { items: suggestionItems } = useSuggestions();
 
     // State for each supplier group
     const [shippingOptions, setShippingOptions] = useState<Record<number, ShippingOption>>({});
@@ -116,6 +121,14 @@ export default function CheckoutPage() {
         }
     }, [params.selectedIds]);
 
+    const isFromAi = params.source === 'ai';
+
+    useEffect(() => {
+        if (!isFromAi) return;
+        if (!suggestionItems.length) return;
+        setSelectedIds(suggestionItems.map((item) => item.productId));
+    }, [isFromAi, suggestionItems]);
+
     // Load suppliers to map supplierId -> GHN address info
     useEffect(() => {
         const loadSuppliers = async () => {
@@ -143,7 +156,26 @@ export default function CheckoutPage() {
         loadSuppliers();
     }, []);
 
-    const selectedItems = items.filter((item) => selectedIds.includes(item.productId));
+    const sourceItems: CartItem[] = useMemo(() => {
+        if (!isFromAi) {
+            return items;
+        }
+        const mapped: CartItem[] = suggestionItems.map((s) => ({
+            productId: s.productId,
+            supplierId: s.supplierId,
+            supplierName: s.supplierName ?? undefined,
+            name: s.name,
+            category: s.category,
+            image: s.image || FALLBACK_PRODUCT_IMAGE,
+            measurement: s.measurement || 'unit',
+            packageSize: s.packageSize ?? null,
+            unitPrice: s.priceVnd,
+            quantity: s.qtyNeeded > 0 ? s.qtyNeeded : 1,
+        }));
+        return mapped;
+    }, [isFromAi, items, suggestionItems]);
+
+    const selectedItems = sourceItems.filter((item) => selectedIds.includes(item.productId));
 
     // Group items by supplier
     const groupedItems = useMemo(() => {
@@ -507,8 +539,10 @@ export default function CheckoutPage() {
                 throw new Error(`Order failed: ${text || response.status}`);
             }
 
-            // Remove purchased items from cart
-            selectedItems.forEach((item) => removeItem(item.productId));
+            // Remove purchased items from cart only for cart-based checkout
+            if (!isFromAi) {
+                selectedItems.forEach((item) => removeItem(item.productId));
+            }
 
             Toast.show({
                 type: 'success',
@@ -706,7 +740,10 @@ export default function CheckoutPage() {
 
                             {group.items.map((item, index) => (
                                 <View key={item.productId} style={[styles.itemCard, index > 0 && styles.itemBorderTop]}>
-                                    <Image source={{ uri: item.image || 'https://via.placeholder.com/60' }} style={styles.itemImage} />
+                                    <Image
+                                        source={{ uri: item.image || FALLBACK_PRODUCT_IMAGE }}
+                                        style={styles.itemImage}
+                                    />
                                     <View style={styles.itemDetails}>
                                         <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
                                         <Text style={styles.itemCategory}>{item.category}</Text>
