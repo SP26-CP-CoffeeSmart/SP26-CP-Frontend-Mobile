@@ -192,6 +192,22 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
   });
 
 
+  // Fallback: put any unmatched menuItems into an "Other" group
+  const unmatchedItems: MenuItemGrouped['items'] = [];
+  menuItems.forEach((menuItem) => {
+    const menuItemId = menuItem?.menuItemId || 0;
+    if (menuItemId && matchedItemIds.has(menuItemId)) return;
+    unmatchedItems.push(buildGroupedItem(menuItem));
+    if (menuItemId) matchedItemIds.add(menuItemId);
+  });
+  if (unmatchedItems.length > 0) {
+    result.push({
+      groupName: menuGroups.length > 0 ? 'Other' : 'Menu Items',
+      beverageCategoryId: -1,
+      items: unmatchedItems,
+    });
+  }
+
   console.log('Final result groups:', result.length);
   console.log('=====================================\n');
 
