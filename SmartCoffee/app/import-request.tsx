@@ -191,6 +191,7 @@ export default function ImportRequestScreen() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
@@ -374,9 +375,12 @@ export default function ImportRequestScreen() {
     );
   });
 
-  const handleSubmit = () => {
-    if (activeTab === 'order' && !orderLoaded) {
-      Alert.alert('Load order first', 'Please load an order before submitting.');
+  const handleSubmit = async () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (activeTab === 'order' && (!orderLoaded || !selectedOrder)) {
+      Alert.alert('Load order first', 'Please select and load an order before submitting.');
       return;
     }
     if (!details.length) {
@@ -384,8 +388,33 @@ export default function ImportRequestScreen() {
       return;
     }
 
-    const modeLabel = activeTab === 'order' ? 'from order' : 'manual';
-    Alert.alert('Import request submitted', `This is a mock ${modeLabel} request for now.`);
+    if (activeTab === 'order' && selectedOrder) {
+      try {
+        setIsSubmitting(true);
+        const response = await authorizedFetch(
+          API_ENDPOINTS.shopInventory.importFromOrder(selectedOrder.orderId),
+          {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        Alert.alert('Import request submitted', 'Inventory was imported from the selected order.');
+      } catch (error) {
+        Alert.alert('Import failed', 'Unable to import inventory from this order.');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    Alert.alert('Import request submitted', 'This is a mock manual request for now.');
   };
 
   return (
@@ -678,7 +707,11 @@ export default function ImportRequestScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
+        <TouchableOpacity
+          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+        >
           <Ionicons name="document-text" size={18} color="#FFFFFF" />
           <Text style={styles.submitText}>Submit Import Request</Text>
         </TouchableOpacity>
@@ -1148,6 +1181,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 14,
     gap: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
   },
   submitText: {
     color: '#FFFFFF',
