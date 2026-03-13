@@ -218,7 +218,9 @@ export default function InventoryScreen() {
                                 <Text style={styles.requestLabel}>Request{`\n`}Import</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
-                                style={[styles.requestCard, { backgroundColor: COLORS.accentAlt, marginRight: 0 }]}>
+                                style={[styles.requestCard, { backgroundColor: COLORS.accentAlt, marginRight: 0 }]}
+                                onPress={() => router.push('/export-request')}
+                                >
                                 <Ionicons name="arrow-up-circle-outline" size={20} color="#FFFFFF" />
                                 <Text style={styles.requestLabel}>Request{`\n`}Export</Text>
                             </TouchableOpacity>
