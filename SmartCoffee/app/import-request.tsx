@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Image,
   ScrollView,
   StyleSheet,
@@ -11,7 +12,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useAuth } from '@/context/auth-context';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
   background: '#F7F2EE',
@@ -57,10 +61,32 @@ type OrderSummary = {
   orderId: number;
   orderCode: string;
   supplier: string;
-  status: 'Awaiting' | 'In Transit' | 'Pending';
+  status: string;
   orderDate: string;
   expectedDate: string;
   items: OrderItem[];
+};
+
+type OrderDetailResponse = {
+  orderDetailId?: number;
+  ingredientId?: number;
+  ingredientName?: string;
+  quantity?: number;
+  price?: number;
+};
+
+type OrderResponse = {
+  orderId?: number;
+  status?: string;
+  createAt?: string;
+  expectedDeliveryTime?: string;
+  supplierId?: number;
+  ghnOrderCode?: string;
+  orderDetails?: OrderDetailResponse[];
+};
+
+type PagedOrderResponse = {
+  items?: OrderResponse[];
 };
 
 const MOCK_INGREDIENTS: Ingredient[] = [
@@ -100,96 +126,58 @@ const MOCK_INGREDIENTS: Ingredient[] = [
 
 const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
 
-const MOCK_ORDERS: OrderSummary[] = [
-  {
-    orderId: 2024001,
-    orderCode: 'ORD-2024-001',
-    supplier: 'Highland Roasters',
-    status: 'Awaiting',
-    orderDate: 'Oct 24, 2023',
-    expectedDate: 'Oct 26, 2023',
-    items: [
-      {
-        id: 1,
-        name: 'Arabica Dark Roast',
-        category: 'Coffee Beans',
-        orderedQty: 25,
-        receivedQty: 25,
-        unitLabel: 'bags',
-        price: 18.5,
-      },
-      {
-        id: 2,
-        name: 'Whole Milk (Gallon)',
-        category: 'Milk',
-        orderedQty: 12,
-        receivedQty: 12,
-        unitLabel: 'units',
-        price: 4.2,
-      },
-      {
-        id: 3,
-        name: 'Paper Cups 12oz',
-        category: 'Supplies',
-        orderedQty: 50,
-        receivedQty: 48,
-        unitLabel: 'packs',
-        price: 12,
-        shortage: 2,
-      },
-    ],
-  },
-  {
-    orderId: 2024005,
-    orderCode: 'ORD-2024-005',
-    supplier: 'Alpine Dairy Supplies',
-    status: 'Awaiting',
-    orderDate: 'Oct 25, 2023',
-    expectedDate: 'Oct 27, 2023',
-    items: [
-      {
-        id: 4,
-        name: 'Oat Milk (Litres)',
-        category: 'Milk',
-        orderedQty: 20,
-        receivedQty: 20,
-        unitLabel: 'units',
-        price: 3.5,
-      },
-      {
-        id: 5,
-        name: 'Vanilla Syrup',
-        category: 'Syrup',
-        orderedQty: 10,
-        receivedQty: 10,
-        unitLabel: 'bottles',
-        price: 7.4,
-      },
-    ],
-  },
-  {
-    orderId: 2023998,
-    orderCode: 'ORD-2023-998',
-    supplier: 'Ethical Bean Co.',
-    status: 'In Transit',
-    orderDate: 'Oct 21, 2023',
-    expectedDate: 'Oct 25, 2023',
-    items: [
-      {
-        id: 6,
-        name: 'Colombian Supremo',
-        category: 'Coffee Beans',
-        orderedQty: 28,
-        receivedQty: 28,
-        unitLabel: 'bags',
-        price: 19.8,
-      },
-    ],
-  },
-];
+const formatOrderDate = (value?: string) => {
+  if (!value) {
+    return '—';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+};
+
+const mapOrderToSummary = (order: OrderResponse): OrderSummary => {
+  const items = (order.orderDetails ?? []).map((detail, index) => {
+    const orderedQty = Number(detail.quantity ?? 0);
+    return {
+      id: detail.orderDetailId ?? index,
+      name: detail.ingredientName ?? 'Unknown item',
+      category: 'Ingredient',
+      orderedQty,
+      receivedQty: orderedQty,
+      unitLabel: 'units',
+      price: Number(detail.price ?? 0),
+    };
+  });
+
+  const orderId = order.orderId ?? 0;
+  return {
+    orderId,
+    orderCode: order.ghnOrderCode ?? `ORD-${orderId || 'N/A'}`,
+    supplier: order.supplierId ? `Supplier #${order.supplierId}` : 'Supplier',
+    status: order.status ?? 'Pending',
+    orderDate: formatOrderDate(order.createAt),
+    expectedDate: formatOrderDate(order.expectedDeliveryTime),
+    items,
+  };
+};
+
+const getStatusStyle = (status?: string) => {
+  const normalized = String(status ?? '').toLowerCase();
+  if (normalized.includes('await') || normalized.includes('pending')) {
+    return styles.statusAwaiting;
+  }
+  return styles.statusTransit;
+};
 
 export default function ImportRequestScreen() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const [activeTab, setActiveTab] = useState<'order' | 'manual'>('order');
   const [noteTitle, setNoteTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -200,6 +188,9 @@ export default function ImportRequestScreen() {
   const [orderLoaded, setOrderLoaded] = useState(false);
   const [orderSearchQuery, setOrderSearchQuery] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<OrderSummary | null>(null);
+  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
@@ -327,7 +318,52 @@ export default function ImportRequestScreen() {
     }
   };
 
-  const filteredOrders = MOCK_ORDERS.filter((order) => {
+  const loadOrders = useCallback(async () => {
+    if (!coffeeShopId) {
+      setOrders([]);
+      return;
+    }
+
+    try {
+      setOrderLoading(true);
+      setOrderError(null);
+      const url = `${API_ENDPOINTS.order.byOwner(coffeeShopId)}?page=1&pageSize=20&orderStatus=Delivered`;
+      const response = await authorizedFetch(url, {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
+      const list = Array.isArray(data) ? data : data.items ?? [];
+      const mapped = list.map(mapOrderToSummary);
+      console.log('Fetched orders:', mapped);
+      setOrders(mapped);
+
+      if (selectedOrder && !mapped.some((order) => order.orderId === selectedOrder.orderId)) {
+        setSelectedOrder(null);
+        setOrderLoaded(false);
+      }
+    } catch (error) {
+      setOrderError('Unable to load orders from the server.');
+    } finally {
+      setOrderLoading(false);
+    }
+  }, [coffeeShopId, selectedOrder]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab === 'order') {
+        loadOrders();
+      }
+    }, [activeTab, loadOrders])
+  );
+
+  const filteredOrders = orders.filter((order) => {
     const query = orderSearchQuery.trim().toLowerCase();
     if (!query) {
       return true;
@@ -394,7 +430,7 @@ export default function ImportRequestScreen() {
 
         {activeTab === 'order' ? (
           <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Pending orders</Text>
+            <Text style={styles.sectionLabel}>Delivered orders</Text>
             <View style={styles.searchRow}>
               <Ionicons name="search" size={18} color={COLORS.muted} />
               <TextInput
@@ -407,40 +443,46 @@ export default function ImportRequestScreen() {
             </View>
 
             <View style={styles.orderList}>
-              {filteredOrders.map((order) => {
-                const isActive = selectedOrder?.orderId === order.orderId;
-                const statusStyle =
-                  order.status === 'Awaiting' ? styles.statusAwaiting : styles.statusTransit;
-                return (
-                  <TouchableOpacity
-                    key={order.orderId}
-                    style={[styles.orderCard, isActive && styles.orderCardActive]}
-                    onPress={() => handleSelectOrder(order)}
-                  >
-                    <View style={styles.orderHeader}>
-                      <Text style={styles.orderCode}>{order.orderCode}</Text>
-                      <View style={[styles.statusPill, statusStyle]}
-                        >
-                        <Text style={styles.statusText}>{order.status}</Text>
+              {orderLoading ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                  <Text style={styles.emptyText}>Loading orders...</Text>
+                </View>
+              ) : orderError ? (
+                <Text style={styles.emptyText}>{orderError}</Text>
+              ) : filteredOrders.length ? (
+                filteredOrders.map((order) => {
+                  const isActive = selectedOrder?.orderId === order.orderId;
+                  const statusStyle = getStatusStyle(order.status);
+                  return (
+                    <TouchableOpacity
+                      key={order.orderId}
+                      style={[styles.orderCard, isActive && styles.orderCardActive]}
+                      onPress={() => handleSelectOrder(order)}
+                    >
+                      <View style={styles.orderHeader}>
+                        <Text style={styles.orderCode}>{order.orderCode}</Text>
+                        <View style={[styles.statusPill, statusStyle]}>
+                          <Text style={styles.statusText}>{order.status}</Text>
+                        </View>
                       </View>
-                    </View>
-                    <Text style={styles.orderSupplier}>{order.supplier}</Text>
-                    <View style={styles.orderMetaRow}>
-                      <View style={styles.orderMetaItem}>
-                        <Ionicons name="time-outline" size={14} color={COLORS.muted} />
-                        <Text style={styles.orderMetaText}>{order.orderDate}</Text>
+                      <Text style={styles.orderSupplier}>{order.supplier}</Text>
+                      <View style={styles.orderMetaRow}>
+                        <View style={styles.orderMetaItem}>
+                          <Ionicons name="time-outline" size={14} color={COLORS.muted} />
+                          <Text style={styles.orderMetaText}>{order.orderDate}</Text>
+                        </View>
+                        <View style={styles.orderMetaItem}>
+                          <Ionicons name="cube-outline" size={14} color={COLORS.muted} />
+                          <Text style={styles.orderMetaText}>{order.items.length} items</Text>
+                        </View>
                       </View>
-                      <View style={styles.orderMetaItem}>
-                        <Ionicons name="cube-outline" size={14} color={COLORS.muted} />
-                        <Text style={styles.orderMetaText}>{order.items.length} items</Text>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-              {!filteredOrders.length ? (
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
                 <Text style={styles.emptyText}>No orders found for this search.</Text>
-              ) : null}
+              )}
             </View>
           </View>
         ) : (
@@ -509,7 +551,7 @@ export default function ImportRequestScreen() {
                 <View style={styles.orderSummaryCard}>
                   <View style={styles.orderSummaryHeader}>
                     <Text style={styles.orderSummaryCode}>{selectedOrder.orderCode}</Text>
-                    <View style={[styles.statusPill, styles.statusAwaiting]}>
+                    <View style={[styles.statusPill, getStatusStyle(selectedOrder.status)]}>
                       <Text style={styles.statusText}>{selectedOrder.status}</Text>
                     </View>
                   </View>
@@ -760,6 +802,12 @@ const styles = StyleSheet.create({
   },
   orderList: {
     gap: 12,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
   },
   orderCard: {
     padding: 14,
