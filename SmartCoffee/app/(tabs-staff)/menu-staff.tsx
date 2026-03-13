@@ -51,7 +51,7 @@ interface MenuItem {
         recipeId: number;
         recipeName: string;
         image: string | null;
-    };
+    } | null;
 }
 
 interface MenuGroup {
@@ -173,7 +173,7 @@ export default function MenuStaffScreen() {
     const handleViewRecipe = (item: MenuItem) => {
         Toast.show({
             type: 'info',
-            text1: 'Recipe: ' + item.shopRecipe.recipeName,
+            text1: 'Recipe: ' + (item.shopRecipe?.recipeName ?? 'Chưa có tên'),
             text2: item.shopBeverage.name,
         });
     };
@@ -183,7 +183,7 @@ export default function MenuStaffScreen() {
             pathname: '/daily-sale-item/[menuItemId]',
             params: {
                 menuItemId: item.menuItemId.toString(),
-                recipeName: item.shopRecipe.recipeName,
+                recipeName: item.shopRecipe?.recipeName ?? 'Chưa có tên',
                 beverageName: item.shopBeverage.name,
             },
         });
@@ -217,7 +217,7 @@ export default function MenuStaffScreen() {
 
                     {/* Center: Details */}
                     <View style={styles.menuItemDetails}>
-                        <Text style={styles.beverageName}>{item.shopRecipe.recipeName}</Text>
+                        <Text style={styles.beverageName}>{item.shopRecipe?.recipeName ?? 'Chưa có tên'}</Text>
 
                         <View style={styles.priceRow}>
                             <Text style={styles.price}>

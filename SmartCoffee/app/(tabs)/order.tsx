@@ -51,9 +51,9 @@ type OrderResponse = {
   shippingFee?: number;
   createAt?: string;
   supplierId?: number;
-  shipperName?: string;
+  expectedDeliveryTime?: string;
   shipDate?: string;
-  receiDate?: string;
+  receiveDate?: string;
   shipAddress?: string;
   receiveAddress?: string;
   orderDetails?: { ingredientName?: string; quantity?: number; price?: number }[];
@@ -326,8 +326,12 @@ export default function OrderScreen() {
 
               <Text style={styles.sectionHeading}>Shipping Info</Text>
               <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Shipper:</Text>
-                <Text style={styles.detailValue}>{selectedOrder?.shipperName || 'N/A'}</Text>
+                <Text style={styles.detailLabel}>Expected Delivery:</Text>
+                <Text style={styles.detailValue}>
+                  {selectedOrder?.expectedDeliveryTime
+                    ? new Date(selectedOrder.expectedDeliveryTime).toLocaleString()
+                    : 'N/A'}
+                </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Ship Date:</Text>
@@ -338,7 +342,7 @@ export default function OrderScreen() {
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Receive Date:</Text>
                 <Text style={styles.detailValue}>
-                  {selectedOrder?.receiDate ? new Date(selectedOrder.receiDate).toLocaleString() : 'N/A'}
+                  {selectedOrder?.receiveDate ? new Date(selectedOrder.receiveDate).toLocaleString() : 'N/A'}
                 </Text>
               </View>
               <View style={styles.detailRow}>

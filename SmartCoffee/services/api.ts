@@ -22,9 +22,9 @@ const getAuthBaseUrl = () => {
   }
 
   return Platform.select({
-    android: normalizeApiBaseUrl('http://10.0.2.2:5080'),
+    android: normalizeApiBaseUrl('http://10.0.2.2:sp26-cp-backend-production.up.railway.app'),
     ios: normalizeApiBaseUrl('http://192.168.2.2:5080'),
-    default: normalizeApiBaseUrl('http://localhost:5080'),
+    default: normalizeApiBaseUrl('https://sp26-cp-backend-production.up.railway.app'),
   });
 };
 
