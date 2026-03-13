@@ -42,6 +42,27 @@ type ImportDetail = {
   supplier: string;
 };
 
+type OrderItem = {
+  id: number;
+  name: string;
+  category: string;
+  orderedQty: number;
+  receivedQty: number;
+  unitLabel: string;
+  price: number;
+  shortage?: number;
+};
+
+type OrderSummary = {
+  orderId: number;
+  orderCode: string;
+  supplier: string;
+  status: 'Awaiting' | 'In Transit' | 'Pending';
+  orderDate: string;
+  expectedDate: string;
+  items: OrderItem[];
+};
+
 const MOCK_INGREDIENTS: Ingredient[] = [
   {
     ingredientId: 1,
@@ -79,12 +100,110 @@ const MOCK_INGREDIENTS: Ingredient[] = [
 
 const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
 
+const MOCK_ORDERS: OrderSummary[] = [
+  {
+    orderId: 2024001,
+    orderCode: 'ORD-2024-001',
+    supplier: 'Highland Roasters',
+    status: 'Awaiting',
+    orderDate: 'Oct 24, 2023',
+    expectedDate: 'Oct 26, 2023',
+    items: [
+      {
+        id: 1,
+        name: 'Arabica Dark Roast',
+        category: 'Coffee Beans',
+        orderedQty: 25,
+        receivedQty: 25,
+        unitLabel: 'bags',
+        price: 18.5,
+      },
+      {
+        id: 2,
+        name: 'Whole Milk (Gallon)',
+        category: 'Milk',
+        orderedQty: 12,
+        receivedQty: 12,
+        unitLabel: 'units',
+        price: 4.2,
+      },
+      {
+        id: 3,
+        name: 'Paper Cups 12oz',
+        category: 'Supplies',
+        orderedQty: 50,
+        receivedQty: 48,
+        unitLabel: 'packs',
+        price: 12,
+        shortage: 2,
+      },
+    ],
+  },
+  {
+    orderId: 2024005,
+    orderCode: 'ORD-2024-005',
+    supplier: 'Alpine Dairy Supplies',
+    status: 'Awaiting',
+    orderDate: 'Oct 25, 2023',
+    expectedDate: 'Oct 27, 2023',
+    items: [
+      {
+        id: 4,
+        name: 'Oat Milk (Litres)',
+        category: 'Milk',
+        orderedQty: 20,
+        receivedQty: 20,
+        unitLabel: 'units',
+        price: 3.5,
+      },
+      {
+        id: 5,
+        name: 'Vanilla Syrup',
+        category: 'Syrup',
+        orderedQty: 10,
+        receivedQty: 10,
+        unitLabel: 'bottles',
+        price: 7.4,
+      },
+    ],
+  },
+  {
+    orderId: 2023998,
+    orderCode: 'ORD-2023-998',
+    supplier: 'Ethical Bean Co.',
+    status: 'In Transit',
+    orderDate: 'Oct 21, 2023',
+    expectedDate: 'Oct 25, 2023',
+    items: [
+      {
+        id: 6,
+        name: 'Colombian Supremo',
+        category: 'Coffee Beans',
+        orderedQty: 28,
+        receivedQty: 28,
+        unitLabel: 'bags',
+        price: 19.8,
+      },
+    ],
+  },
+];
+
 export default function ImportRequestScreen() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'order' | 'manual'>('order');
   const [noteTitle, setNoteTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [details, setDetails] = useState<ImportDetail[]>([]);
+  const [manualDetails, setManualDetails] = useState<ImportDetail[]>([]);
+  const [orderDetails, setOrderDetails] = useState<ImportDetail[]>([]);
+  const [orderId, setOrderId] = useState('');
+  const [orderLoaded, setOrderLoaded] = useState(false);
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState<OrderSummary | null>(null);
+
+  const selectedItemCount = selectedOrder?.items.length ?? 0;
+
+  const details = activeTab === 'manual' ? manualDetails : orderDetails;
 
   const filteredIngredients = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -97,7 +216,7 @@ export default function ImportRequestScreen() {
   }, [searchQuery, selectedCategory]);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
-    setDetails((prev) => {
+    setManualDetails((prev) => {
       const existing = prev.find((detail) => detail.ingredientId === ingredient.ingredientId);
       if (existing) {
         return prev.map((detail) =>
@@ -121,7 +240,7 @@ export default function ImportRequestScreen() {
   };
 
   const handleUpdateQuantity = (ingredientId: number, delta: number) => {
-    setDetails((prev) =>
+    setManualDetails((prev) =>
       prev.map((detail) => {
         if (detail.ingredientId !== ingredientId) {
           return detail;
@@ -133,7 +252,7 @@ export default function ImportRequestScreen() {
   };
 
   const handleRemoveDetail = (ingredientId: number) => {
-    setDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
+    setManualDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
   };
 
   const handleUpdateDetailField = (
@@ -141,20 +260,96 @@ export default function ImportRequestScreen() {
     field: 'expirationDate' | 'supplier',
     value: string
   ) => {
-    setDetails((prev) =>
+    setManualDetails((prev) =>
       prev.map((detail) =>
         detail.ingredientId === ingredientId ? { ...detail, [field]: value } : detail
       )
     );
   };
 
+  const handleLoadOrder = () => {
+    if (!orderId.trim()) {
+      Alert.alert('Missing order ID', 'Please enter an order ID to continue.');
+      return;
+    }
+
+    const mockDetails: ImportDetail[] = [
+      {
+        ingredientId: MOCK_INGREDIENTS[0].ingredientId,
+        ingredient: MOCK_INGREDIENTS[0],
+        importQuantity: 12,
+        expirationDate: '',
+        supplier: 'Auto from order',
+      },
+      {
+        ingredientId: MOCK_INGREDIENTS[1].ingredientId,
+        ingredient: MOCK_INGREDIENTS[1],
+        importQuantity: 6,
+        expirationDate: '',
+        supplier: 'Auto from order',
+      },
+    ];
+
+    setOrderDetails(mockDetails);
+    setOrderLoaded(true);
+    if (!noteTitle.trim()) {
+      setNoteTitle(`Import from order #${orderId.trim()}`);
+    }
+    Alert.alert('Order loaded', 'Mock import details were generated from the order.');
+  };
+
+  const handleSelectOrder = (order: OrderSummary) => {
+    setSelectedOrder(order);
+    setOrderId(String(order.orderId));
+    const mappedDetails: ImportDetail[] = order.items.map((item) => {
+      const ingredient = MOCK_INGREDIENTS.find((mock) => mock.name === item.name) ?? {
+        ingredientId: item.id,
+        name: item.name,
+        image: null,
+        category: item.category,
+        measurement: item.unitLabel,
+        currentQuantity: 0,
+      };
+
+      return {
+        ingredientId: ingredient.ingredientId,
+        ingredient,
+        importQuantity: item.receivedQty,
+        expirationDate: '',
+        supplier: order.supplier,
+      };
+    });
+
+    setOrderDetails(mappedDetails);
+    setOrderLoaded(true);
+    if (!noteTitle.trim()) {
+      setNoteTitle(`Import from order #${order.orderCode}`);
+    }
+  };
+
+  const filteredOrders = MOCK_ORDERS.filter((order) => {
+    const query = orderSearchQuery.trim().toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return (
+      order.orderCode.toLowerCase().includes(query) ||
+      order.supplier.toLowerCase().includes(query)
+    );
+  });
+
   const handleSubmit = () => {
+    if (activeTab === 'order' && !orderLoaded) {
+      Alert.alert('Load order first', 'Please load an order before submitting.');
+      return;
+    }
     if (!details.length) {
       Alert.alert('Missing items', 'Please add at least one ingredient.');
       return;
     }
 
-    Alert.alert('Import request submitted', 'This is a mock request for now.');
+    const modeLabel = activeTab === 'order' ? 'from order' : 'manual';
+    Alert.alert('Import request submitted', `This is a mock ${modeLabel} request for now.`);
   };
 
   return (
@@ -166,6 +361,23 @@ export default function ImportRequestScreen() {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Import Request</Text>
           <View style={styles.headerIconSpacer} />
+        </View>
+
+        <View style={styles.tabRow}>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'order' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('order')}
+          >
+            <Ionicons name="receipt-outline" size={16} color={activeTab === 'order' ? '#FFFFFF' : COLORS.muted} />
+            <Text style={[styles.tabText, activeTab === 'order' && styles.tabTextActive]}>From Order</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabButton, activeTab === 'manual' && styles.tabButtonActive]}
+            onPress={() => setActiveTab('manual')}
+          >
+            <Ionicons name="create-outline" size={16} color={activeTab === 'manual' ? '#FFFFFF' : COLORS.muted} />
+            <Text style={[styles.tabText, activeTab === 'manual' && styles.tabTextActive]}>Manual</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
@@ -180,66 +392,185 @@ export default function ImportRequestScreen() {
           <Text style={styles.helperText}>Created today - staff can update later.</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionLabel}>Search ingredients</Text>
-          <View style={styles.searchRow}>
-            <Ionicons name="search" size={18} color={COLORS.muted} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Search inventory items"
-              placeholderTextColor={COLORS.muted}
-              style={styles.searchInput}
-            />
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {CATEGORY_OPTIONS.map((category) => {
-              const isActive = selectedCategory === category;
-              return (
-                <TouchableOpacity
-                  key={category}
-                  style={[styles.chip, isActive && styles.chipActive]}
-                  onPress={() => setSelectedCategory(category)}
-                >
-                  <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{category}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+        {activeTab === 'order' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Pending orders</Text>
+            <View style={styles.searchRow}>
+              <Ionicons name="search" size={18} color={COLORS.muted} />
+              <TextInput
+                value={orderSearchQuery}
+                onChangeText={setOrderSearchQuery}
+                placeholder="Search supplier or order ID"
+                placeholderTextColor={COLORS.muted}
+                style={styles.searchInput}
+              />
+            </View>
 
-          <View style={styles.ingredientList}>
-            {filteredIngredients.map((ingredient) => (
-              <TouchableOpacity
-                key={ingredient.ingredientId}
-                style={styles.ingredientRow}
-                onPress={() => handleAddIngredient(ingredient)}
-              >
-                <View style={styles.ingredientImageWrap}>
-                  {ingredient.image ? (
-                    <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
-                  ) : (
-                    <Ionicons name="cafe" size={22} color={COLORS.muted} />
-                  )}
-                </View>
-                <View style={styles.ingredientInfo}>
-                  <Text style={styles.ingredientName}>{ingredient.name}</Text>
-                  <Text style={styles.ingredientMeta}>
-                    {ingredient.category} - {ingredient.currentQuantity} {ingredient.measurement}
-                  </Text>
-                </View>
-                <Ionicons name="add-circle" size={22} color={COLORS.accent} />
-              </TouchableOpacity>
-            ))}
-            {!filteredIngredients.length ? (
-              <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
-            ) : null}
+            <View style={styles.orderList}>
+              {filteredOrders.map((order) => {
+                const isActive = selectedOrder?.orderId === order.orderId;
+                const statusStyle =
+                  order.status === 'Awaiting' ? styles.statusAwaiting : styles.statusTransit;
+                return (
+                  <TouchableOpacity
+                    key={order.orderId}
+                    style={[styles.orderCard, isActive && styles.orderCardActive]}
+                    onPress={() => handleSelectOrder(order)}
+                  >
+                    <View style={styles.orderHeader}>
+                      <Text style={styles.orderCode}>{order.orderCode}</Text>
+                      <View style={[styles.statusPill, statusStyle]}
+                        >
+                        <Text style={styles.statusText}>{order.status}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.orderSupplier}>{order.supplier}</Text>
+                    <View style={styles.orderMetaRow}>
+                      <View style={styles.orderMetaItem}>
+                        <Ionicons name="time-outline" size={14} color={COLORS.muted} />
+                        <Text style={styles.orderMetaText}>{order.orderDate}</Text>
+                      </View>
+                      <View style={styles.orderMetaItem}>
+                        <Ionicons name="cube-outline" size={14} color={COLORS.muted} />
+                        <Text style={styles.orderMetaText}>{order.items.length} items</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+              {!filteredOrders.length ? (
+                <Text style={styles.emptyText}>No orders found for this search.</Text>
+              ) : null}
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>Search ingredients</Text>
+            <View style={styles.searchRow}>
+              <Ionicons name="search" size={18} color={COLORS.muted} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search inventory items"
+                placeholderTextColor={COLORS.muted}
+                style={styles.searchInput}
+              />
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
+              {CATEGORY_OPTIONS.map((category) => {
+                const isActive = selectedCategory === category;
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    style={[styles.chip, isActive && styles.chipActive]}
+                    onPress={() => setSelectedCategory(category)}
+                  >
+                    <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{category}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View style={styles.ingredientList}>
+              {filteredIngredients.map((ingredient) => (
+                <TouchableOpacity
+                  key={ingredient.ingredientId}
+                  style={styles.ingredientRow}
+                  onPress={() => handleAddIngredient(ingredient)}
+                >
+                  <View style={styles.ingredientImageWrap}>
+                    {ingredient.image ? (
+                      <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
+                    ) : (
+                      <Ionicons name="cafe" size={22} color={COLORS.muted} />
+                    )}
+                  </View>
+                  <View style={styles.ingredientInfo}>
+                    <Text style={styles.ingredientName}>{ingredient.name}</Text>
+                    <Text style={styles.ingredientMeta}>
+                      {ingredient.category} - {ingredient.currentQuantity} {ingredient.measurement}
+                    </Text>
+                  </View>
+                  <Ionicons name="add-circle" size={22} color={COLORS.accent} />
+                </TouchableOpacity>
+              ))}
+              {!filteredIngredients.length ? (
+                <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
+              ) : null}
+            </View>
+          </View>
+        )}
 
         <View style={styles.card}>
           <Text style={styles.sectionLabel}>Import details</Text>
-          {details.length === 0 ? (
-            <Text style={styles.emptyText}>Select ingredients above to build the import note.</Text>
+          {activeTab === 'order' ? (
+            selectedOrder ? (
+              <>
+                <View style={styles.orderSummaryCard}>
+                  <View style={styles.orderSummaryHeader}>
+                    <Text style={styles.orderSummaryCode}>{selectedOrder.orderCode}</Text>
+                    <View style={[styles.statusPill, styles.statusAwaiting]}>
+                      <Text style={styles.statusText}>{selectedOrder.status}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.orderSummaryRow}>
+                    <Text style={styles.orderSummaryLabel}>Supplier</Text>
+                    <Text style={styles.orderSummaryValue}>{selectedOrder.supplier}</Text>
+                  </View>
+                  <View style={styles.orderSummaryRow}>
+                    <Text style={styles.orderSummaryLabel}>Order date</Text>
+                    <Text style={styles.orderSummaryValue}>{selectedOrder.orderDate}</Text>
+                  </View>
+                  <View style={styles.orderSummaryRow}>
+                    <Text style={styles.orderSummaryLabel}>Expected</Text>
+                    <Text style={styles.orderSummaryValue}>{selectedOrder.expectedDate}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.orderItemsHeader}>
+                  <Text style={styles.orderItemsTitle}>Items to receive</Text>
+                  <Text style={styles.orderItemsCount}>{selectedItemCount} items</Text>
+                </View>
+
+                <View style={styles.orderItemsList}>
+                  {selectedOrder.items.map((item) => (
+                    <View key={item.id} style={styles.orderItemCard}>
+                      <View style={styles.orderItemHeader}>
+                        <Text style={styles.orderItemTitle}>{item.name}</Text>
+                        <View style={styles.orderQtyPill}>
+                          <Text style={styles.orderQtyText}>
+                            Receive {item.receivedQty} {item.unitLabel}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.orderItemMeta}>
+                        Category: {item.category} • Ordered: {item.orderedQty} {item.unitLabel}
+                      </Text>
+                      <Text style={styles.orderItemMeta}>
+                        To receive: {item.receivedQty} {item.unitLabel}
+                      </Text>
+                      <Text style={styles.orderItemMeta}>
+                        ${item.price.toFixed(2)}/unit
+                      </Text>
+                      {item.shortage ? (
+                        <View style={styles.orderShortage}>
+                          <Ionicons name="alert-circle" size={14} color="#B91C1C" />
+                          <Text style={styles.orderShortageText}>
+                            Shortage: {item.shortage} {item.unitLabel} missing
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : (
+              <Text style={styles.emptyText}>Select an order to view details.</Text>
+            )
+          ) : details.length === 0 ? (
+            <Text style={styles.emptyText}>
+              Select ingredients above to build the import note.
+            </Text>
           ) : (
             details.map((detail) => {
               const newTotal = detail.ingredient.currentQuantity + detail.importQuantity;
@@ -279,7 +610,9 @@ export default function ImportRequestScreen() {
                   <Text style={styles.fieldLabel}>Expiry date</Text>
                   <TextInput
                     value={detail.expirationDate}
-                    onChangeText={(value) => handleUpdateDetailField(detail.ingredientId, 'expirationDate', value)}
+                    onChangeText={(value) =>
+                      handleUpdateDetailField(detail.ingredientId, 'expirationDate', value)
+                    }
                     placeholder="MM/DD/YYYY"
                     placeholderTextColor={COLORS.muted}
                     style={styles.input}
@@ -288,7 +621,9 @@ export default function ImportRequestScreen() {
                   <Text style={styles.fieldLabel}>Supplier</Text>
                   <TextInput
                     value={detail.supplier}
-                    onChangeText={(value) => handleUpdateDetailField(detail.ingredientId, 'supplier', value)}
+                    onChangeText={(value) =>
+                      handleUpdateDetailField(detail.ingredientId, 'supplier', value)
+                    }
                     placeholder="Highland Roasters Co."
                     placeholderTextColor={COLORS.muted}
                     style={styles.input}
@@ -344,6 +679,35 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.ink,
   },
+  tabRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 4,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  tabButtonActive: {
+    backgroundColor: COLORS.accent,
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.muted,
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+  },
   card: {
     backgroundColor: COLORS.card,
     borderRadius: 18,
@@ -374,6 +738,192 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 12,
     color: COLORS.muted,
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  orderInput: {
+    flex: 1,
+  },
+  orderButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: COLORS.accent,
+  },
+  orderButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  orderList: {
+    gap: 12,
+  },
+  orderCard: {
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  orderCardActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: '#FFF6EC',
+  },
+  orderHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  orderCode: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: COLORS.accent,
+    letterSpacing: 0.6,
+  },
+  statusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  statusAwaiting: {
+    backgroundColor: '#FFE9CC',
+  },
+  statusTransit: {
+    backgroundColor: '#E3ECFF',
+  },
+  statusText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: COLORS.ink,
+  },
+  orderSupplier: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginBottom: 8,
+  },
+  orderMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  orderMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  orderMetaText: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+  orderSummaryCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#FFF6EC',
+    padding: 14,
+    marginBottom: 16,
+  },
+  orderSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  orderSummaryCode: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.ink,
+  },
+  orderSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#F0DED0',
+  },
+  orderSummaryLabel: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+  orderSummaryValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.ink,
+  },
+  orderItemsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  orderItemsTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.ink,
+  },
+  orderItemsCount: {
+    fontSize: 12,
+    color: COLORS.muted,
+  },
+  orderItemsList: {
+    gap: 12,
+  },
+  orderItemCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    padding: 12,
+  },
+  orderItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  orderItemTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.ink,
+    flex: 1,
+    marginRight: 8,
+  },
+  orderQtyPill: {
+    minWidth: 56,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: '#FFE9CC',
+    alignItems: 'center',
+  },
+  orderQtyText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.ink,
+  },
+  orderItemMeta: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginBottom: 4,
+  },
+  orderShortage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: '#FFE4E4',
+    marginTop: 6,
+  },
+  orderShortageText: {
+    fontSize: 12,
+    color: '#B91C1C',
+    fontWeight: '700',
   },
   searchRow: {
     flexDirection: 'row',
@@ -521,6 +1071,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.ink,
     marginHorizontal: 6,
+  },
+  readonlyValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.ink,
   },
   fieldLabel: {
     marginTop: 10,
