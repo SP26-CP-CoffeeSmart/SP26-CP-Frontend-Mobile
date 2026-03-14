@@ -5,6 +5,7 @@ import {
     Image,
     Modal,
     RefreshControl,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -55,7 +56,12 @@ const COLORS = {
 export default function InventoryScreen() {
     const router = useRouter();
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+    const [sortOption, setSortOption] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
+    const [draftCategory, setDraftCategory] = useState('All');
+    const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+    const [draftSort, setDraftSort] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
     const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -68,8 +74,10 @@ export default function InventoryScreen() {
         const unique = Array.from(
             new Set(ingredients.map((item) => item.ingredient?.category || 'Uncategorized'))
         );
-        return unique.filter((value) => value);
+        return ['All', ...unique.filter((value) => value)];
     }, [ingredients]);
+
+    const hasInventory = ingredients.length > 0;
 
     const fetchIngredients = async () => {
         try {
@@ -99,10 +107,19 @@ export default function InventoryScreen() {
     const filteredIngredients = useMemo(() => {
         let filtered = ingredients;
 
-        if (selectedCategories.length > 0) {
+        if (selectedCategory !== 'All') {
             filtered = filtered.filter((item) => {
                 const category = item.ingredient?.category || 'Uncategorized';
-                return selectedCategories.includes(category);
+                return category === selectedCategory;
+            });
+        }
+
+        if (selectedStatus !== 'all') {
+            filtered = filtered.filter((item) => {
+                const label = getStatus(item).label;
+                if (label === 'OUT OF STOCK') return selectedStatus === 'out';
+                if (label === 'LOW STOCK') return selectedStatus === 'low';
+                return selectedStatus === 'in';
             });
         }
 
@@ -113,17 +130,45 @@ export default function InventoryScreen() {
             );
         }
 
-        return filtered;
-    }, [ingredients, searchQuery, selectedCategories]);
+        if (sortOption !== 'alpha') {
+            filtered = [...filtered].sort((a, b) => {
+                const qtyA = Number(a.quantity ?? 0);
+                const qtyB = Number(b.quantity ?? 0);
+                return sortOption === 'qty-asc' ? qtyA - qtyB : qtyB - qtyA;
+            });
+        } else {
+            filtered = [...filtered].sort((a, b) => {
+                const nameA = (a.ingredient?.name || `Inventory #${a.inventoryDetailId}`).toLowerCase();
+                const nameB = (b.ingredient?.name || `Inventory #${b.inventoryDetailId}`).toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+        }
 
-    const toggleCategory = (category: string) => {
-        setSelectedCategories((prev) =>
-            prev.includes(category) ? prev.filter((value) => value !== category) : [...prev, category]
-        );
+        return filtered;
+    }, [ingredients, searchQuery, selectedCategory, selectedStatus, sortOption]);
+
+    const openFilter = () => {
+        setDraftCategory(selectedCategory);
+        setDraftStatus(selectedStatus);
+        setDraftSort(sortOption);
+        setFilterVisible(true);
     };
 
-    const clearCategories = () => {
-        setSelectedCategories([]);
+    const applyFilter = () => {
+        setSelectedCategory(draftCategory);
+        setSelectedStatus(draftStatus);
+        setSortOption(draftSort);
+        setFilterVisible(false);
+    };
+
+    const resetFilters = () => {
+        setSelectedCategory('All');
+        setSelectedStatus('all');
+        setSortOption('alpha');
+        setDraftCategory('All');
+        setDraftStatus('all');
+        setDraftSort('alpha');
+        setFilterVisible(false);
     };
 
     const onRefresh = () => {
@@ -257,28 +302,41 @@ export default function InventoryScreen() {
                                 />
                             </View>
                             <TouchableOpacity
-                                style={[styles.filterButton, categoryOptions.length === 0 && styles.filterButtonDisabled]}
-                                onPress={() => setFilterVisible(true)}
-                                disabled={categoryOptions.length === 0}
+                                style={[styles.filterButton, !hasInventory && styles.filterButtonDisabled]}
+                                onPress={openFilter}
+                                disabled={!hasInventory}
                             >
                                 <Ionicons name="options-outline" size={18} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
 
-                        {selectedCategories.length > 0 ? (
+                        {(selectedCategory !== 'All' || selectedStatus !== 'all' || sortOption !== 'alpha') ? (
                             <View style={styles.badgeRow}>
-                                {selectedCategories.map((category) => (
-                                    <TouchableOpacity
-                                        key={category}
-                                        style={styles.badge}
-                                        onPress={() => toggleCategory(category)}
-                                    >
-                                        <Text style={styles.badgeText}>{category}</Text>
-                                        <Ionicons name="close" size={12} color="#FFFFFF" />
-                                    </TouchableOpacity>
-                                ))}
-                                <TouchableOpacity style={styles.badgeClear} onPress={clearCategories}>
-                                    <Text style={styles.badgeClearText}>Clear</Text>
+                                {selectedCategory !== 'All' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{selectedCategory}</Text>
+                                    </View>
+                                ) : null}
+                                {selectedStatus !== 'all' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>
+                                            {selectedStatus === 'in'
+                                                ? 'In Stock'
+                                                : selectedStatus === 'low'
+                                                    ? 'Low Stock'
+                                                    : 'Out of Stock'}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                                {sortOption !== 'alpha' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>
+                                            {sortOption === 'qty-asc' ? 'Stock: Low to High' : 'Stock: High to Low'}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                                <TouchableOpacity style={styles.badgeClear} onPress={resetFilters}>
+                                    <Text style={styles.badgeClearText}>Reset</Text>
                                 </TouchableOpacity>
                             </View>
                         ) : null}
@@ -300,46 +358,99 @@ export default function InventoryScreen() {
             >
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalSheet}>
+                        <View style={styles.modalHandle} />
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Filter categories</Text>
+                            <Text style={styles.modalTitle}>Filter & Sort</Text>
                             <TouchableOpacity onPress={() => setFilterVisible(false)}>
                                 <Ionicons name="close" size={18} color={COLORS.ink} />
                             </TouchableOpacity>
                         </View>
-                        {categoryOptions.length === 0 ? (
-                            <Text style={styles.modalEmpty}>No categories available.</Text>
-                        ) : (
-                            <View style={styles.modalChips}>
+                        <ScrollView showsVerticalScrollIndicator={false} style={styles.modalBody}>
+                            <Text style={styles.sectionLabel}>Category</Text>
+                            <View style={styles.chipGrid}>
                                 {categoryOptions.map((category) => {
-                                    const isActive = selectedCategories.includes(category);
+                                    const isActive = draftCategory === category;
                                     return (
                                         <TouchableOpacity
                                             key={category}
-                                            onPress={() => toggleCategory(category)}
-                                            style={[
-                                                styles.modalChip,
-                                                isActive && styles.modalChipActive,
-                                            ]}
+                                            onPress={() => setDraftCategory(category)}
+                                            style={[styles.filterChip, isActive && styles.filterChipActive]}
                                         >
-                                            <Text style={[styles.modalChipText, isActive && styles.modalChipTextActive]}>
+                                            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
                                                 {category}
                                             </Text>
                                         </TouchableOpacity>
                                     );
                                 })}
                             </View>
-                        )}
-                        <View style={styles.modalActions}>
-                            <TouchableOpacity style={styles.modalClear} onPress={clearCategories}>
-                                <Text style={styles.modalClearText}>Clear</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={styles.modalApply}
-                                onPress={() => setFilterVisible(false)}
-                            >
-                                <Text style={styles.modalApplyText}>Apply</Text>
-                            </TouchableOpacity>
-                        </View>
+
+                            <Text style={styles.sectionLabel}>Stock Status</Text>
+                            <View style={styles.chipGrid}>
+                                {[
+                                    { key: 'in', label: 'In Stock', icon: 'checkmark-circle' as const },
+                                    { key: 'low', label: 'Low Stock', icon: 'alert-circle' as const },
+                                    { key: 'out', label: 'Out of Stock', icon: 'close-circle' as const },
+                                ].map((item) => {
+                                    const isActive = draftStatus === item.key;
+                                    return (
+                                        <TouchableOpacity
+                                            key={item.key}
+                                            onPress={() => setDraftStatus(item.key)}
+                                            style={[styles.filterChip, isActive && styles.filterChipActive]}
+                                        >
+                                            <Ionicons
+                                                name={item.icon}
+                                                size={14}
+                                                color={isActive ? '#FFFFFF' : COLORS.ink}
+                                            />
+                                            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                                                {item.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                                <TouchableOpacity
+                                    onPress={() => setDraftStatus('all')}
+                                    style={[styles.filterChip, draftStatus === 'all' && styles.filterChipActive]}
+                                >
+                                    <Text style={[styles.filterChipText, draftStatus === 'all' && styles.filterChipTextActive]}>
+                                        All Status
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.sectionLabel}>Sort By</Text>
+                            {[{
+                                key: 'alpha' as const,
+                                label: 'Alphabetical (A-Z)',
+                            }, {
+                                key: 'qty-asc' as const,
+                                label: 'Stock Level: Low to High',
+                            }, {
+                                key: 'qty-desc' as const,
+                                label: 'Stock Level: High to Low',
+                            }].map((item) => {
+                                const isActive = draftSort === item.key;
+                                return (
+                                    <TouchableOpacity
+                                        key={item.key}
+                                        style={styles.sortRow}
+                                        onPress={() => setDraftSort(item.key)}
+                                    >
+                                        <Text style={styles.sortLabel}>{item.label}</Text>
+                                        <View style={[styles.radioOuter, isActive && styles.radioOuterActive]}>
+                                            {isActive ? <View style={styles.radioInner} /> : null}
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                        <TouchableOpacity style={styles.applyButton} onPress={applyFilter}>
+                            <Text style={styles.applyButtonText}>Apply Filters</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.resetButton} onPress={resetFilters}>
+                            <Text style={styles.resetButtonText}>Reset to Default</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>
@@ -499,82 +610,126 @@ const styles = StyleSheet.create({
     },
     modalSheet: {
         backgroundColor: COLORS.card,
-        padding: 20,
+        paddingHorizontal: 20,
+        paddingTop: 14,
+        paddingBottom: 20,
         borderTopLeftRadius: 22,
         borderTopRightRadius: 22,
         borderWidth: 1,
         borderColor: COLORS.border,
     },
+    modalHandle: {
+        alignSelf: 'center',
+        width: 44,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: '#DED5CC',
+        marginBottom: 16,
+    },
     modalHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: 18,
     },
     modalTitle: {
-        fontSize: 16,
+        fontSize: 20,
         fontWeight: '800',
         color: COLORS.ink,
     },
-    modalEmpty: {
-        color: COLORS.muted,
+    modalBody: {
+        maxHeight: 420,
+    },
+    sectionLabel: {
         fontSize: 13,
+        fontWeight: '700',
+        color: COLORS.muted,
+        letterSpacing: 1.2,
         marginBottom: 12,
     },
-    modalChips: {
+    chipGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        marginBottom: 12,
+        gap: 10,
+        marginBottom: 22,
     },
-    modalChip: {
+    filterChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingHorizontal: 14,
         paddingVertical: 8,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        marginRight: 8,
-        marginBottom: 8,
-        backgroundColor: COLORS.surface,
+        borderRadius: 16,
+        backgroundColor: COLORS.chip,
+        gap: 6,
     },
-    modalChipActive: {
-        backgroundColor: COLORS.chipActive,
-        borderColor: COLORS.chipActive,
+    filterChipActive: {
+        backgroundColor: COLORS.accent,
     },
-    modalChipText: {
+    filterChipText: {
         fontSize: 12,
         fontWeight: '700',
         color: COLORS.ink,
     },
-    modalChipTextActive: {
+    filterChipTextActive: {
         color: '#FFFFFF',
     },
-    modalActions: {
+    sortRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
     },
-    modalClear: {
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-    },
-    modalClearText: {
-        fontSize: 13,
-        fontWeight: '700',
+    sortLabel: {
+        fontSize: 15,
+        fontWeight: '600',
         color: COLORS.ink,
     },
-    modalApply: {
-        paddingHorizontal: 18,
-        paddingVertical: 10,
-        borderRadius: 999,
-        backgroundColor: COLORS.chipActive,
+    radioOuter: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 2,
+        borderColor: '#D9CEC3',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    modalApplyText: {
+    radioOuterActive: {
+        borderColor: COLORS.accent,
+    },
+    radioInner: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.accent,
+    },
+    applyButton: {
+        marginTop: 18,
+        backgroundColor: COLORS.accent,
+        paddingVertical: 16,
+        borderRadius: 18,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 4,
+    },
+    applyButtonText: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#FFFFFF',
+    },
+    resetButton: {
+        marginTop: 12,
+        alignItems: 'center',
+        paddingVertical: 6,
+    },
+    resetButtonText: {
         fontSize: 13,
         fontWeight: '700',
-        color: '#FFFFFF',
+        color: COLORS.muted,
     },
     cardItem: {
         flexDirection: 'row',
