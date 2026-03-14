@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Image,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
   background: '#F7F2EE',
@@ -34,6 +39,19 @@ type Ingredient = {
   currentQuantity: number;
 };
 
+type ShopInventoryItem = {
+  inventoryDetailId: number;
+  ingredientId?: number;
+  quantity?: number;
+  measurement?: string;
+  ingredient?: {
+    ingredientId: number;
+    name: string;
+    category: string;
+    image: string | null;
+  } | null;
+};
+
 type ExportDetail = {
   ingredientId: number;
   ingredient: Ingredient;
@@ -41,60 +59,85 @@ type ExportDetail = {
   reason: string;
 };
 
-const MOCK_INGREDIENTS: Ingredient[] = [
-  {
-    ingredientId: 1,
-    name: 'Arabica Coffee Beans',
-    image: 'https://images.unsplash.com/photo-1459755486867-b55449bb39ff?auto=format&fit=crop&w=200&q=60',
-    category: 'Coffee Beans',
-    measurement: 'kg',
-    currentQuantity: 45,
-  },
-  {
-    ingredientId: 2,
-    name: 'Full Cream Milk',
-    image: 'https://images.unsplash.com/photo-1505576399279-565b52d4ac54?auto=format&fit=crop&w=200&q=60',
-    category: 'Milk',
-    measurement: 'liters',
-    currentQuantity: 32,
-  },
-  {
-    ingredientId: 3,
-    name: 'Vanilla Syrup',
-    image: 'https://images.unsplash.com/photo-1499636136210-6f4ee915583e?auto=format&fit=crop&w=200&q=60',
-    category: 'Syrup',
-    measurement: 'bottles',
-    currentQuantity: 18,
-  },
-  {
-    ingredientId: 4,
-    name: 'Paper Cups 12oz',
-    image: 'https://images.unsplash.com/photo-1520315342629-6ea920342047?auto=format&fit=crop&w=200&q=60',
-    category: 'Supplies',
-    measurement: 'packs',
-    currentQuantity: 22,
-  },
-];
-
-const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
 const REASONS = ['Daily Sales', 'Internal Use', 'Expired', 'Damaged'];
 
 export default function ExportRequestScreen() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const [noteTitle, setNoteTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [details, setDetails] = useState<ExportDetail[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const categoryOptions = useMemo(() => {
+    const unique = Array.from(
+      new Set(ingredients.map((item) => item.category).filter((category) => category))
+    );
+    return ['All', ...unique];
+  }, [ingredients]);
 
   const filteredIngredients = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return MOCK_INGREDIENTS.filter((item) => {
+    return ingredients.filter((item) => {
       const matchesCategory =
         selectedCategory === 'All' || item.category.toLowerCase() === selectedCategory.toLowerCase();
       const matchesQuery = !query || item.name.toLowerCase().includes(query);
       return matchesCategory && matchesQuery;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [ingredients, searchQuery, selectedCategory]);
+
+  const loadInventory = useCallback(async () => {
+    if (!coffeeShopId) {
+      setIngredients([]);
+      setLoadError('Missing shop information. Please log in again.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setLoadError(null);
+      const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as ShopInventoryItem[];
+      const mapped: Ingredient[] = (Array.isArray(data) ? data : []).map((item) => {
+        const rawId = item.ingredientId ?? item.ingredient?.ingredientId ?? item.inventoryDetailId;
+        const ingredientId = Number.isFinite(rawId) ? Number(rawId) : item.inventoryDetailId;
+        return {
+          ingredientId,
+          name: item.ingredient?.name || `Ingredient #${item.inventoryDetailId}`,
+          image: item.ingredient?.image ?? null,
+          category: item.ingredient?.category || 'Uncategorized',
+          measurement: item.measurement || 'unit',
+          currentQuantity: Number(item.quantity ?? 0),
+        };
+      });
+      setIngredients(mapped);
+      if (selectedCategory !== 'All' && !mapped.some((item) => item.category === selectedCategory)) {
+        setSelectedCategory('All');
+      }
+    } catch (error) {
+      setLoadError('Unable to load inventory for this shop.');
+      setIngredients([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [coffeeShopId, selectedCategory]);
+
+  useEffect(() => {
+    loadInventory();
+  }, [loadInventory]);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
     setDetails((prev) => {
@@ -143,13 +186,66 @@ export default function ExportRequestScreen() {
     );
   };
 
-  const handleSubmit = () => {
-    if (!details.length) {
+  const handleSubmit = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
+    const invalidDetail = details.find(
+      (detail) => detail.exportQuantity > detail.ingredient.currentQuantity
+    );
+
+    if (invalidDetail) {
+      Toast.show({
+        type: 'error',
+        text1: 'Export failed',
+        text2: `${invalidDetail.ingredient.name} exceeds available stock.`,
+      });
+      return;
+    }
+
+    const itemsToExport = details
+      .filter((detail) => detail.exportQuantity > 0)
+      .map((detail) => ({
+        ingredientId: detail.ingredientId,
+        quantityToSubtract: detail.exportQuantity,
+      }));
+
+    if (!itemsToExport.length) {
       Alert.alert('Missing items', 'Please add at least one ingredient.');
       return;
     }
 
-    Alert.alert('Export request submitted', 'This is a mock request for now.');
+    try {
+      setIsSubmitting(true);
+      const response = await authorizedFetch(API_ENDPOINTS.shopInventory.export(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ items: itemsToExport }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      Toast.show({
+        type: 'success',
+        text1: 'Export request submitted',
+        text2: 'Inventory was updated successfully.',
+      });
+      setDetails([]);
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Export failed',
+        text2: 'Unable to export inventory right now.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -188,7 +284,7 @@ export default function ExportRequestScreen() {
             />
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {CATEGORY_OPTIONS.map((category) => {
+            {categoryOptions.map((category) => {
               const isActive = selectedCategory === category;
               return (
                 <TouchableOpacity
@@ -203,29 +299,42 @@ export default function ExportRequestScreen() {
           </ScrollView>
 
           <View style={styles.ingredientList}>
-            {filteredIngredients.map((ingredient) => (
-              <TouchableOpacity
-                key={ingredient.ingredientId}
-                style={styles.ingredientRow}
-                onPress={() => handleAddIngredient(ingredient)}
-              >
-                <View style={styles.ingredientImageWrap}>
-                  {ingredient.image ? (
-                    <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
-                  ) : (
-                    <Ionicons name="cafe" size={22} color={COLORS.muted} />
-                  )}
-                </View>
-                <View style={styles.ingredientInfo}>
-                  <Text style={styles.ingredientName}>{ingredient.name}</Text>
-                  <Text style={styles.ingredientMeta}>
-                    {ingredient.category} - {ingredient.currentQuantity} {ingredient.measurement}
-                  </Text>
-                </View>
-                <Ionicons name="remove-circle" size={22} color={COLORS.warning} />
-              </TouchableOpacity>
-            ))}
-            {!filteredIngredients.length ? (
+            {loading ? (
+              <View style={styles.loadingWrap}>
+                <ActivityIndicator size="small" color={COLORS.accent} />
+              </View>
+            ) : loadError ? (
+              <View style={styles.loadingWrap}>
+                <Text style={styles.emptyText}>{loadError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={loadInventory}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              filteredIngredients.map((ingredient) => (
+                <TouchableOpacity
+                  key={ingredient.ingredientId}
+                  style={styles.ingredientRow}
+                  onPress={() => handleAddIngredient(ingredient)}
+                >
+                  <View style={styles.ingredientImageWrap}>
+                    {ingredient.image ? (
+                      <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
+                    ) : (
+                      <Ionicons name="cafe" size={22} color={COLORS.muted} />
+                    )}
+                  </View>
+                  <View style={styles.ingredientInfo}>
+                    <Text style={styles.ingredientName}>{ingredient.name}</Text>
+                    <Text style={styles.ingredientMeta}>
+                      {ingredient.category} - {ingredient.currentQuantity} {ingredient.measurement}
+                    </Text>
+                  </View>
+                  <Ionicons name="remove-circle" size={22} color={COLORS.warning} />
+                </TouchableOpacity>
+              ))
+            )}
+            {!loading && !loadError && !filteredIngredients.length ? (
               <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
             ) : null}
           </View>
@@ -296,9 +405,15 @@ export default function ExportRequestScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
+        <TouchableOpacity
+          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+        >
           <Ionicons name="log-out" size={18} color="#FFFFFF" />
-          <Text style={styles.submitText}>Submit Export Request</Text>
+          <Text style={styles.submitText}>
+            {isSubmitting ? 'Submitting...' : 'Submit Export Request'}
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -413,6 +528,24 @@ const styles = StyleSheet.create({
   },
   ingredientList: {
     gap: 12,
+  },
+  loadingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  retryButton: {
+    marginTop: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  retryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.ink,
   },
   ingredientRow: {
     flexDirection: 'row',
@@ -565,6 +698,9 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 14,
     gap: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
   },
   submitText: {
     color: '#FFFFFF',

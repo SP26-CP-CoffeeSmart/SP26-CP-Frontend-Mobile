@@ -15,9 +15,39 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { LineChart } from 'react-native-chart-kit';
-import shopRecipeIngredientsService, {
-  type ShopRecipeIngredient,
-} from '@/services/shopRecipeIngredientsService';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+
+interface IngredientInfo {
+  ingredientId: number;
+  name: string;
+  image: string | null;
+  category: string;
+  createDate: string;
+  endDate: string;
+}
+
+interface CoffeeShopInfo {
+  coffeeShopId: number;
+  shopName: string;
+  address: string;
+  provinceId: number | null;
+  districtId: number | null;
+  wardCode: string | null;
+  timestamp: string;
+}
+
+interface ShopInventoryDetail {
+  inventoryDetailId: number;
+  coffeeShopId: number;
+  ingredientId: number;
+  quantity: number;
+  minStock: number;
+  expirationDate: string | null;
+  measurement: string;
+  ingredient: IngredientInfo | null;
+  coffeeShop: CoffeeShopInfo | null;
+}
 
 interface BatchInfo {
   batchId: string;
@@ -33,7 +63,7 @@ export default function IngredientDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
 
-  const [ingredient, setIngredient] = useState<ShopRecipeIngredient | null>(null);
+  const [inventoryDetail, setInventoryDetail] = useState<ShopInventoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [minStockLevel, setMinStockLevel] = useState(5.0);
@@ -82,10 +112,19 @@ export default function IngredientDetailScreen() {
     try {
       setLoading(true);
       setError(null);
-      console.log('Fetching ingredient detail for ID:', id);
-      const data = await shopRecipeIngredientsService.getById(Number(id));
-      console.log('Ingredient detail response:', data);
-      setIngredient(data);
+      console.log('Fetching shop inventory detail for ID:', id);
+      const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getById(Number(id)), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = (await response.json()) as ShopInventoryDetail;
+      console.log('Shop inventory detail response:', data);
+      setInventoryDetail(data);
+      setMinStockLevel(Number(data.minStock ?? 0));
     } catch (err) {
       console.error('Error fetching ingredient:', err);
       setError('Failed to load ingredient details');
@@ -97,8 +136,9 @@ export default function IngredientDetailScreen() {
   const handleApplyChanges = () => {
     // TODO: Implement API call to update minimum stock level
     const valueToApply = isAutoSuggest ? aiSuggestedValue : minStockLevel;
+    const unitLabel = inventoryDetail?.measurement || 'unit';
     console.log('Applying minimum stock level:', valueToApply);
-    alert(`Minimum stock level set to ${valueToApply.toFixed(1)}kg`);
+    alert(`Minimum stock level set to ${valueToApply.toFixed(1)} ${unitLabel}`);
   };
 
   if (loading) {
@@ -116,7 +156,7 @@ export default function IngredientDetailScreen() {
     );
   }
 
-  if (error || !ingredient) {
+  if (error || !inventoryDetail) {
     return (
       <View
         style={{
@@ -147,13 +187,15 @@ export default function IngredientDetailScreen() {
   }
 
   const screenWidth = Dimensions.get('window').width;
-  
+
   // Extract ingredient info with fallbacks
-  const ingredientName = ingredient.ingredient?.name || `Ingredient #${ingredient.id}`;
-  const ingredientImage = ingredient.ingredient?.image || null;
-  const ingredientCategory = ingredient.ingredient?.category || 'Unknown';
-  const ingredientEndDate = ingredient.ingredient?.endDate || new Date().toISOString();
-  const statusLabel = ingredient.quantity > 0 ? 'IN STOCK' : 'OUT OF STOCK';
+  const ingredientName = inventoryDetail.ingredient?.name || `Ingredient #${inventoryDetail.inventoryDetailId}`;
+  const ingredientImage = inventoryDetail.ingredient?.image || null;
+  const ingredientCategory = inventoryDetail.ingredient?.category || 'Unknown';
+  const ingredientEndDate = inventoryDetail.ingredient?.endDate || new Date().toISOString();
+  const measurementUnit = inventoryDetail.measurement || 'unit';
+  const quantityValue = Number(inventoryDetail.quantity ?? 0);
+  const statusLabel = quantityValue > 0 ? 'IN STOCK' : 'OUT OF STOCK';
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.background }}>
@@ -230,7 +272,7 @@ export default function IngredientDetailScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
                 <Ionicons name="business-outline" size={14} color={COLORS.muted} />
                 <Text style={{ fontSize: 13, color: COLORS.muted, marginLeft: 8 }}>
-                  Supplier: Premium Estates Co.
+                  Shop: {inventoryDetail.coffeeShop?.shopName || 'Unknown'}
                 </Text>
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -267,7 +309,9 @@ export default function IngredientDetailScreen() {
             </Text>
             <Text style={{ fontSize: 12, color: '#9AA1B1' }}>Last 30 days vs Predicted</Text>
           </View>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: COLORS.ink, marginTop: 6 }}>42kg</Text>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: COLORS.ink, marginTop: 6 }}>
+            42 {measurementUnit}
+          </Text>
           <LineChart
             data={forecastData}
             width={screenWidth - 64}
@@ -359,7 +403,9 @@ export default function IngredientDetailScreen() {
             />
           </View>
 
-          <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>Threshold (kg)</Text>
+          <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
+            Threshold ({measurementUnit})
+          </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TextInput
               value={(isAutoSuggest ? aiSuggestedValue : minStockLevel).toFixed(1)}

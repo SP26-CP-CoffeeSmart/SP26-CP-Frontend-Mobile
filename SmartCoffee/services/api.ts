@@ -110,6 +110,9 @@ export const API_ENDPOINTS = {
     list: () => `${AUTH_BASE_URL}/Supplier`,
   },
   shopInventory: {
+    getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopInventory/by-shop/${shopId}`,
+    export: () => `${AUTH_BASE_URL}/ShopInventory/export`,
     importFromOrder: (orderId: number) => `${AUTH_BASE_URL}/ShopInventory/import-from-order/${orderId}`,
   },
 };
