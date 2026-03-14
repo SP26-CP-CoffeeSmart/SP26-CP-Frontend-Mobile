@@ -380,6 +380,10 @@ export default function ImportRequestScreen() {
     if (isSubmitting) {
       return;
     }
+    if (!coffeeShopId) {
+      Alert.alert('Missing shop', 'Please sign in again to continue.');
+      return;
+    }
     if (activeTab === 'order' && (!orderLoaded || !selectedOrder)) {
       Alert.alert('Load order first', 'Please select and load an order before submitting.');
       return;
@@ -389,9 +393,31 @@ export default function ImportRequestScreen() {
       return;
     }
 
+    const titleToUse = noteTitle.trim() || 'Import Note';
+
+    const createImportNote = async () => {
+      const response = await authorizedFetch(API_ENDPOINTS.importNote.create(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          coffeeShopId,
+          title: titleToUse,
+          createdAt: new Date().toISOString(),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+    };
+
     if (activeTab === 'order' && selectedOrder) {
       try {
         setIsSubmitting(true);
+        await createImportNote();
         const response = await authorizedFetch(
           API_ENDPOINTS.shopInventory.importFromOrder(selectedOrder.orderId),
           {
@@ -423,11 +449,23 @@ export default function ImportRequestScreen() {
       return;
     }
 
-    Toast.show({
-      type: 'success',
-      text1: 'Import request submitted',
-      text2: 'This is a mock manual request for now.',
-    });
+    try {
+      setIsSubmitting(true);
+      await createImportNote();
+      Toast.show({
+        type: 'success',
+        text1: 'Import request submitted',
+        text2: 'Import note created successfully.',
+      });
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Import failed',
+        text2: 'Unable to create import note.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

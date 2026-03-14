@@ -3,7 +3,9 @@ import {
     ActivityIndicator,
     FlatList,
     Image,
+    Modal,
     RefreshControl,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -55,13 +57,27 @@ export default function InventoryScreen() {
     const router = useRouter();
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
+    const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+    const [sortOption, setSortOption] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
+    const [draftCategory, setDraftCategory] = useState('All');
+    const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+    const [draftSort, setDraftSort] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
     const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [filterVisible, setFilterVisible] = useState(false);
 
-    const categories = ['All', 'Beans', 'Milk', 'Syrups', 'Supplies'];
     const defaultMinStock = 10;
+
+    const categoryOptions = useMemo(() => {
+        const unique = Array.from(
+            new Set(ingredients.map((item) => item.ingredient?.category || 'Uncategorized'))
+        );
+        return ['All', ...unique.filter((value) => value)];
+    }, [ingredients]);
+
+    const hasInventory = ingredients.length > 0;
 
     const fetchIngredients = async () => {
         try {
@@ -92,9 +108,19 @@ export default function InventoryScreen() {
         let filtered = ingredients;
 
         if (selectedCategory !== 'All') {
-            filtered = filtered.filter((item) =>
-                (item.ingredient?.category || '').toLowerCase().includes(selectedCategory.toLowerCase())
-            );
+            filtered = filtered.filter((item) => {
+                const category = item.ingredient?.category || 'Uncategorized';
+                return category === selectedCategory;
+            });
+        }
+
+        if (selectedStatus !== 'all') {
+            filtered = filtered.filter((item) => {
+                const label = getStatus(item).label;
+                if (label === 'OUT OF STOCK') return selectedStatus === 'out';
+                if (label === 'LOW STOCK') return selectedStatus === 'low';
+                return selectedStatus === 'in';
+            });
         }
 
         if (searchQuery.trim()) {
@@ -104,8 +130,46 @@ export default function InventoryScreen() {
             );
         }
 
+        if (sortOption !== 'alpha') {
+            filtered = [...filtered].sort((a, b) => {
+                const qtyA = Number(a.quantity ?? 0);
+                const qtyB = Number(b.quantity ?? 0);
+                return sortOption === 'qty-asc' ? qtyA - qtyB : qtyB - qtyA;
+            });
+        } else {
+            filtered = [...filtered].sort((a, b) => {
+                const nameA = (a.ingredient?.name || `Inventory #${a.inventoryDetailId}`).toLowerCase();
+                const nameB = (b.ingredient?.name || `Inventory #${b.inventoryDetailId}`).toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+        }
+
         return filtered;
-    }, [ingredients, searchQuery, selectedCategory]);
+    }, [ingredients, searchQuery, selectedCategory, selectedStatus, sortOption]);
+
+    const openFilter = () => {
+        setDraftCategory(selectedCategory);
+        setDraftStatus(selectedStatus);
+        setDraftSort(sortOption);
+        setFilterVisible(true);
+    };
+
+    const applyFilter = () => {
+        setSelectedCategory(draftCategory);
+        setSelectedStatus(draftStatus);
+        setSortOption(draftSort);
+        setFilterVisible(false);
+    };
+
+    const resetFilters = () => {
+        setSelectedCategory('All');
+        setSelectedStatus('all');
+        setSortOption('alpha');
+        setDraftCategory('All');
+        setDraftStatus('all');
+        setDraftSort('alpha');
+        setFilterVisible(false);
+    };
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -237,29 +301,45 @@ export default function InventoryScreen() {
                                     onChangeText={setSearchQuery}
                                 />
                             </View>
-                            <TouchableOpacity style={styles.filterButton}>
+                            <TouchableOpacity
+                                style={[styles.filterButton, !hasInventory && styles.filterButtonDisabled]}
+                                onPress={openFilter}
+                                disabled={!hasInventory}
+                            >
                                 <Ionicons name="options-outline" size={18} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
 
-                        <View style={styles.chipRow}>
-                            {categories.map((category) => {
-                                const isActive = selectedCategory === category;
-                                return (
-                                    <TouchableOpacity
-                                        key={category}
-                                        onPress={() => setSelectedCategory(category)}
-                                        style={[
-                                            styles.chip,
-                                            { backgroundColor: isActive ? COLORS.chipActive : '#FFFFFF' },
-                                        ]}>
-                                        <Text style={[styles.chipText, { color: isActive ? '#FFFFFF' : COLORS.ink }]}> 
-                                            {category}
+                        {(selectedCategory !== 'All' || selectedStatus !== 'all' || sortOption !== 'alpha') ? (
+                            <View style={styles.badgeRow}>
+                                {selectedCategory !== 'All' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>{selectedCategory}</Text>
+                                    </View>
+                                ) : null}
+                                {selectedStatus !== 'all' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>
+                                            {selectedStatus === 'in'
+                                                ? 'In Stock'
+                                                : selectedStatus === 'low'
+                                                    ? 'Low Stock'
+                                                    : 'Out of Stock'}
                                         </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
+                                    </View>
+                                ) : null}
+                                {sortOption !== 'alpha' ? (
+                                    <View style={styles.badge}>
+                                        <Text style={styles.badgeText}>
+                                            {sortOption === 'qty-asc' ? 'Stock: Low to High' : 'Stock: High to Low'}
+                                        </Text>
+                                    </View>
+                                ) : null}
+                                <TouchableOpacity style={styles.badgeClear} onPress={resetFilters}>
+                                    <Text style={styles.badgeClearText}>Reset</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
                     </View>
                 }
                 ListEmptyComponent={
@@ -270,6 +350,110 @@ export default function InventoryScreen() {
                     </View>
                 }
             />
+            <Modal
+                animationType="slide"
+                transparent
+                visible={filterVisible}
+                onRequestClose={() => setFilterVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalSheet}>
+                        <View style={styles.modalHandle} />
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Filter & Sort</Text>
+                            <TouchableOpacity onPress={() => setFilterVisible(false)}>
+                                <Ionicons name="close" size={18} color={COLORS.ink} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView showsVerticalScrollIndicator={false} style={styles.modalBody}>
+                            <Text style={styles.sectionLabel}>Category</Text>
+                            <View style={styles.chipGrid}>
+                                {categoryOptions.map((category) => {
+                                    const isActive = draftCategory === category;
+                                    return (
+                                        <TouchableOpacity
+                                            key={category}
+                                            onPress={() => setDraftCategory(category)}
+                                            style={[styles.filterChip, isActive && styles.filterChipActive]}
+                                        >
+                                            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                                                {category}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            <Text style={styles.sectionLabel}>Stock Status</Text>
+                            <View style={styles.chipGrid}>
+                                {[
+                                    { key: 'in', label: 'In Stock', icon: 'checkmark-circle' as const },
+                                    { key: 'low', label: 'Low Stock', icon: 'alert-circle' as const },
+                                    { key: 'out', label: 'Out of Stock', icon: 'close-circle' as const },
+                                ].map((item) => {
+                                    const isActive = draftStatus === item.key;
+                                    return (
+                                        <TouchableOpacity
+                                            key={item.key}
+                                            onPress={() => setDraftStatus(item.key)}
+                                            style={[styles.filterChip, isActive && styles.filterChipActive]}
+                                        >
+                                            <Ionicons
+                                                name={item.icon}
+                                                size={14}
+                                                color={isActive ? '#FFFFFF' : COLORS.ink}
+                                            />
+                                            <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                                                {item.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                                <TouchableOpacity
+                                    onPress={() => setDraftStatus('all')}
+                                    style={[styles.filterChip, draftStatus === 'all' && styles.filterChipActive]}
+                                >
+                                    <Text style={[styles.filterChipText, draftStatus === 'all' && styles.filterChipTextActive]}>
+                                        All Status
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.sectionLabel}>Sort By</Text>
+                            {[{
+                                key: 'alpha' as const,
+                                label: 'Alphabetical (A-Z)',
+                            }, {
+                                key: 'qty-asc' as const,
+                                label: 'Stock Level: Low to High',
+                            }, {
+                                key: 'qty-desc' as const,
+                                label: 'Stock Level: High to Low',
+                            }].map((item) => {
+                                const isActive = draftSort === item.key;
+                                return (
+                                    <TouchableOpacity
+                                        key={item.key}
+                                        style={styles.sortRow}
+                                        onPress={() => setDraftSort(item.key)}
+                                    >
+                                        <Text style={styles.sortLabel}>{item.label}</Text>
+                                        <View style={[styles.radioOuter, isActive && styles.radioOuterActive]}>
+                                            {isActive ? <View style={styles.radioInner} /> : null}
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                        <TouchableOpacity style={styles.applyButton} onPress={applyFilter}>
+                            <Text style={styles.applyButtonText}>Apply Filters</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.resetButton} onPress={resetFilters}>
+                            <Text style={styles.resetButtonText}>Reset to Default</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -382,23 +566,170 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    chipRow: {
-        flexDirection: 'row',
-        marginBottom: 16,
-        flexWrap: 'wrap',
+    filterButtonDisabled: {
+        opacity: 0.5,
     },
-    chip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+    badgeRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginBottom: 16,
+    },
+    badge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.chipActive,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        marginRight: 8,
+        marginBottom: 8,
+        gap: 6,
+    },
+    badgeText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    badgeClear: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 999,
         borderWidth: 1,
         borderColor: COLORS.border,
-        marginRight: 8,
         marginBottom: 8,
     },
-    chipText: {
+    badgeClearText: {
+        color: COLORS.ink,
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        justifyContent: 'flex-end',
+    },
+    modalSheet: {
+        backgroundColor: COLORS.card,
+        paddingHorizontal: 20,
+        paddingTop: 14,
+        paddingBottom: 20,
+        borderTopLeftRadius: 22,
+        borderTopRightRadius: 22,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    modalHandle: {
+        alignSelf: 'center',
+        width: 44,
+        height: 5,
+        borderRadius: 999,
+        backgroundColor: '#DED5CC',
+        marginBottom: 16,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 18,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: COLORS.ink,
+    },
+    modalBody: {
+        maxHeight: 420,
+    },
+    sectionLabel: {
         fontSize: 13,
         fontWeight: '700',
+        color: COLORS.muted,
+        letterSpacing: 1.2,
+        marginBottom: 12,
+    },
+    chipGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginBottom: 22,
+    },
+    filterChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 16,
+        backgroundColor: COLORS.chip,
+        gap: 6,
+    },
+    filterChipActive: {
+        backgroundColor: COLORS.accent,
+    },
+    filterChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: COLORS.ink,
+    },
+    filterChipTextActive: {
+        color: '#FFFFFF',
+    },
+    sortRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
+    },
+    sortLabel: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: COLORS.ink,
+    },
+    radioOuter: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 2,
+        borderColor: '#D9CEC3',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    radioOuterActive: {
+        borderColor: COLORS.accent,
+    },
+    radioInner: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.accent,
+    },
+    applyButton: {
+        marginTop: 18,
+        backgroundColor: COLORS.accent,
+        paddingVertical: 16,
+        borderRadius: 18,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 4,
+    },
+    applyButtonText: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#FFFFFF',
+    },
+    resetButton: {
+        marginTop: 12,
+        alignItems: 'center',
+        paddingVertical: 6,
+    },
+    resetButtonText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: COLORS.muted,
     },
     cardItem: {
         flexDirection: 'row',
