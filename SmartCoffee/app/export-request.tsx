@@ -190,6 +190,24 @@ export default function ExportRequestScreen() {
     if (isSubmitting) {
       return;
     }
+    if (!coffeeShopId) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing shop',
+        text2: 'Please sign in again to continue.',
+      });
+      return;
+    }
+
+    const titleToUse = noteTitle.trim();
+    if (!titleToUse) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing title',
+        text2: 'Please enter an export note title.',
+      });
+      return;
+    }
 
     const invalidDetail = details.find(
       (detail) => detail.exportQuantity > detail.ingredient.currentQuantity
@@ -218,6 +236,23 @@ export default function ExportRequestScreen() {
 
     try {
       setIsSubmitting(true);
+      const noteResponse = await authorizedFetch(API_ENDPOINTS.exportNote.create(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          coffeeShopId,
+          title: titleToUse,
+          createdAt: new Date().toISOString(),
+        }),
+      });
+
+      if (!noteResponse.ok) {
+        throw new Error(`Request failed: ${noteResponse.status}`);
+      }
+
       const response = await authorizedFetch(API_ENDPOINTS.shopInventory.export(), {
         method: 'POST',
         headers: {

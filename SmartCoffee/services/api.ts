@@ -112,6 +112,9 @@ export const API_ENDPOINTS = {
   importNote: {
     create: () => `${AUTH_BASE_URL}/ImportNote`,
   },
+  exportNote: {
+    create: () => `${AUTH_BASE_URL}/ExportNote`,
+  },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopInventory/by-shop/${shopId}`,
