@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Image,
+  Modal,
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,14 +40,14 @@ export default function InventoryScreen() {
   const router = useRouter();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
   const [filteredIngredients, setFilteredIngredients] = useState<ShopInventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [filterVisible, setFilterVisible] = useState(false);
 
-  const categories = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
   const maxQuantity = 500;
   const defaultMinStock = 100;
 
@@ -87,14 +88,19 @@ export default function InventoryScreen() {
     fetchIngredients();
   }, []);
 
+  const categoryOptions = Array.from(
+    new Set(ingredients.map((item) => item.ingredient?.category || 'Uncategorized'))
+  ).filter((value) => value);
+
   useEffect(() => {
     let filtered = ingredients;
 
     // Filter by category
-    if (selectedCategory !== 'All') {
-      filtered = filtered.filter((item) =>
-        (item.ingredient?.category || 'Unknown Category').toLowerCase().includes(selectedCategory.toLowerCase())
-      );
+    if (selectedCategories.length > 0) {
+      filtered = filtered.filter((item) => {
+        const category = item.ingredient?.category || 'Uncategorized';
+        return selectedCategories.includes(category);
+      });
     }
 
     // Filter by search query
@@ -106,7 +112,7 @@ export default function InventoryScreen() {
     }
 
     setFilteredIngredients(filtered);
-  }, [searchQuery, selectedCategory, ingredients]);
+  }, [searchQuery, selectedCategories, ingredients]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -115,7 +121,13 @@ export default function InventoryScreen() {
 
   const resetFilters = () => {
     setSearchQuery('');
-    setSelectedCategory('All');
+    setSelectedCategories([]);
+  };
+
+  const toggleCategory = (category: string) => {
+    setSelectedCategories((prev) =>
+      prev.includes(category) ? prev.filter((value) => value !== category) : [...prev, category]
+    );
   };
 
   const getStockStatus = (quantity: number) => {
@@ -357,41 +369,50 @@ export default function InventoryScreen() {
                     backgroundColor: COLORS.chipActive,
                     alignItems: 'center',
                     justifyContent: 'center',
-                  }}>
+                    opacity: categoryOptions.length === 0 ? 0.5 : 1,
+                  }}
+                  onPress={() => setFilterVisible(true)}
+                  disabled={categoryOptions.length === 0}
+                >
                   <Ionicons name="options-outline" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
             </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 6 }}>
-              {categories.map((category) => {
-                const isActive = selectedCategory === category;
-                return (
+            {selectedCategories.length > 0 ? (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 6 }}>
+                {selectedCategories.map((category) => (
                   <TouchableOpacity
                     key={category}
-                    onPress={() => setSelectedCategory(category)}
+                    onPress={() => toggleCategory(category)}
                     style={{
-                      paddingHorizontal: 18,
-                      paddingVertical: 10,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      paddingHorizontal: 12,
+                      paddingVertical: 6,
                       borderRadius: 999,
-                      marginRight: 10,
-                      backgroundColor: isActive ? COLORS.chipActive : COLORS.chip,
+                      marginRight: 8,
+                      marginBottom: 8,
+                      gap: 6,
+                      backgroundColor: COLORS.chipActive,
                     }}>
-                    <Text
-                      style={{
-                        fontSize: 13,
-                        fontWeight: '700',
-                        color: isActive ? '#FFFFFF' : COLORS.ink,
-                      }}>
-                      {category}
-                    </Text>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>{category}</Text>
+                    <Ionicons name="close" size={12} color="#FFFFFF" />
                   </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                ))}
+                <TouchableOpacity
+                  onPress={resetFilters}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 999,
+                    borderWidth: 1,
+                    borderColor: COLORS.border,
+                    marginBottom: 8,
+                  }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.ink }}>Clear</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
         }
         ListEmptyComponent={
@@ -485,6 +506,87 @@ export default function InventoryScreen() {
           </View>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        animationType="slide"
+        transparent
+        visible={filterVisible}
+        onRequestClose={() => setFilterVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.35)', justifyContent: 'flex-end' }}>
+          <View
+            style={{
+              backgroundColor: COLORS.card,
+              padding: 20,
+              borderTopLeftRadius: 22,
+              borderTopRightRadius: 22,
+              borderWidth: 1,
+              borderColor: COLORS.border,
+            }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: COLORS.ink }}>Filter categories</Text>
+              <TouchableOpacity onPress={() => setFilterVisible(false)}>
+                <Ionicons name="close" size={18} color={COLORS.ink} />
+              </TouchableOpacity>
+            </View>
+
+            {categoryOptions.length === 0 ? (
+              <Text style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12 }}>No categories available.</Text>
+            ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
+                {categoryOptions.map((category) => {
+                  const isActive = selectedCategories.includes(category);
+                  return (
+                    <TouchableOpacity
+                      key={category}
+                      onPress={() => toggleCategory(category)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor: isActive ? COLORS.chipActive : COLORS.border,
+                        marginRight: 8,
+                        marginBottom: 8,
+                        backgroundColor: isActive ? COLORS.chipActive : COLORS.surface,
+                      }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: isActive ? '#FFFFFF' : COLORS.ink }}>
+                        {category}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                }}
+                onPress={resetFilters}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.ink }}>Clear</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{
+                  paddingHorizontal: 18,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  backgroundColor: COLORS.chipActive,
+                }}
+                onPress={() => setFilterVisible(false)}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>Apply</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

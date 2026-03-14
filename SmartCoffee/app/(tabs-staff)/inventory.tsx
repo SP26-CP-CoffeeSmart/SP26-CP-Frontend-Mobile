@@ -3,6 +3,7 @@ import {
     ActivityIndicator,
     FlatList,
     Image,
+    Modal,
     RefreshControl,
     StyleSheet,
     Text,
@@ -54,14 +55,21 @@ const COLORS = {
 export default function InventoryScreen() {
     const router = useRouter();
     const [searchQuery, setSearchQuery] = useState('');
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
     const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [filterVisible, setFilterVisible] = useState(false);
 
-    const categories = ['All', 'Beans', 'Milk', 'Syrups', 'Supplies'];
     const defaultMinStock = 10;
+
+    const categoryOptions = useMemo(() => {
+        const unique = Array.from(
+            new Set(ingredients.map((item) => item.ingredient?.category || 'Uncategorized'))
+        );
+        return unique.filter((value) => value);
+    }, [ingredients]);
 
     const fetchIngredients = async () => {
         try {
@@ -91,10 +99,11 @@ export default function InventoryScreen() {
     const filteredIngredients = useMemo(() => {
         let filtered = ingredients;
 
-        if (selectedCategory !== 'All') {
-            filtered = filtered.filter((item) =>
-                (item.ingredient?.category || '').toLowerCase().includes(selectedCategory.toLowerCase())
-            );
+        if (selectedCategories.length > 0) {
+            filtered = filtered.filter((item) => {
+                const category = item.ingredient?.category || 'Uncategorized';
+                return selectedCategories.includes(category);
+            });
         }
 
         if (searchQuery.trim()) {
@@ -105,7 +114,17 @@ export default function InventoryScreen() {
         }
 
         return filtered;
-    }, [ingredients, searchQuery, selectedCategory]);
+    }, [ingredients, searchQuery, selectedCategories]);
+
+    const toggleCategory = (category: string) => {
+        setSelectedCategories((prev) =>
+            prev.includes(category) ? prev.filter((value) => value !== category) : [...prev, category]
+        );
+    };
+
+    const clearCategories = () => {
+        setSelectedCategories([]);
+    };
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -237,29 +256,32 @@ export default function InventoryScreen() {
                                     onChangeText={setSearchQuery}
                                 />
                             </View>
-                            <TouchableOpacity style={styles.filterButton}>
+                            <TouchableOpacity
+                                style={[styles.filterButton, categoryOptions.length === 0 && styles.filterButtonDisabled]}
+                                onPress={() => setFilterVisible(true)}
+                                disabled={categoryOptions.length === 0}
+                            >
                                 <Ionicons name="options-outline" size={18} color="#FFFFFF" />
                             </TouchableOpacity>
                         </View>
 
-                        <View style={styles.chipRow}>
-                            {categories.map((category) => {
-                                const isActive = selectedCategory === category;
-                                return (
+                        {selectedCategories.length > 0 ? (
+                            <View style={styles.badgeRow}>
+                                {selectedCategories.map((category) => (
                                     <TouchableOpacity
                                         key={category}
-                                        onPress={() => setSelectedCategory(category)}
-                                        style={[
-                                            styles.chip,
-                                            { backgroundColor: isActive ? COLORS.chipActive : '#FFFFFF' },
-                                        ]}>
-                                        <Text style={[styles.chipText, { color: isActive ? '#FFFFFF' : COLORS.ink }]}> 
-                                            {category}
-                                        </Text>
+                                        style={styles.badge}
+                                        onPress={() => toggleCategory(category)}
+                                    >
+                                        <Text style={styles.badgeText}>{category}</Text>
+                                        <Ionicons name="close" size={12} color="#FFFFFF" />
                                     </TouchableOpacity>
-                                );
-                            })}
-                        </View>
+                                ))}
+                                <TouchableOpacity style={styles.badgeClear} onPress={clearCategories}>
+                                    <Text style={styles.badgeClearText}>Clear</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
                     </View>
                 }
                 ListEmptyComponent={
@@ -270,6 +292,57 @@ export default function InventoryScreen() {
                     </View>
                 }
             />
+            <Modal
+                animationType="slide"
+                transparent
+                visible={filterVisible}
+                onRequestClose={() => setFilterVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalSheet}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Filter categories</Text>
+                            <TouchableOpacity onPress={() => setFilterVisible(false)}>
+                                <Ionicons name="close" size={18} color={COLORS.ink} />
+                            </TouchableOpacity>
+                        </View>
+                        {categoryOptions.length === 0 ? (
+                            <Text style={styles.modalEmpty}>No categories available.</Text>
+                        ) : (
+                            <View style={styles.modalChips}>
+                                {categoryOptions.map((category) => {
+                                    const isActive = selectedCategories.includes(category);
+                                    return (
+                                        <TouchableOpacity
+                                            key={category}
+                                            onPress={() => toggleCategory(category)}
+                                            style={[
+                                                styles.modalChip,
+                                                isActive && styles.modalChipActive,
+                                            ]}
+                                        >
+                                            <Text style={[styles.modalChipText, isActive && styles.modalChipTextActive]}>
+                                                {category}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        )}
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity style={styles.modalClear} onPress={clearCategories}>
+                                <Text style={styles.modalClearText}>Clear</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.modalApply}
+                                onPress={() => setFilterVisible(false)}
+                            >
+                                <Text style={styles.modalApplyText}>Apply</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -382,23 +455,126 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    chipRow: {
-        flexDirection: 'row',
-        marginBottom: 16,
-        flexWrap: 'wrap',
+    filterButtonDisabled: {
+        opacity: 0.5,
     },
-    chip: {
-        paddingHorizontal: 16,
+    badgeRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginBottom: 16,
+    },
+    badge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.chipActive,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        marginRight: 8,
+        marginBottom: 8,
+        gap: 6,
+    },
+    badgeText: {
+        color: '#FFFFFF',
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    badgeClear: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        marginBottom: 8,
+    },
+    badgeClearText: {
+        color: COLORS.ink,
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.35)',
+        justifyContent: 'flex-end',
+    },
+    modalSheet: {
+        backgroundColor: COLORS.card,
+        padding: 20,
+        borderTopLeftRadius: 22,
+        borderTopRightRadius: 22,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: COLORS.ink,
+    },
+    modalEmpty: {
+        color: COLORS.muted,
+        fontSize: 13,
+        marginBottom: 12,
+    },
+    modalChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        marginBottom: 12,
+    },
+    modalChip: {
+        paddingHorizontal: 14,
         paddingVertical: 8,
         borderRadius: 999,
         borderWidth: 1,
         borderColor: COLORS.border,
         marginRight: 8,
         marginBottom: 8,
+        backgroundColor: COLORS.surface,
     },
-    chipText: {
+    modalChipActive: {
+        backgroundColor: COLORS.chipActive,
+        borderColor: COLORS.chipActive,
+    },
+    modalChipText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: COLORS.ink,
+    },
+    modalChipTextActive: {
+        color: '#FFFFFF',
+    },
+    modalActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalClear: {
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    modalClearText: {
         fontSize: 13,
         fontWeight: '700',
+        color: COLORS.ink,
+    },
+    modalApply: {
+        paddingHorizontal: 18,
+        paddingVertical: 10,
+        borderRadius: 999,
+        backgroundColor: COLORS.chipActive,
+    },
+    modalApplyText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#FFFFFF',
     },
     cardItem: {
         flexDirection: 'row',
