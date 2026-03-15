@@ -83,6 +83,7 @@ type OrderResponse = {
   expectedDeliveryTime?: string;
   supplierId?: number;
   ghnOrderCode?: string;
+  notes?: string;
   orderDetails?: OrderDetailResponse[];
 };
 
@@ -175,6 +176,9 @@ const getStatusStyle = (status?: string) => {
   }
   return styles.statusTransit;
 };
+
+const isImportedOrder = (order: OrderResponse) =>
+  (order.notes ?? '').toLowerCase().includes('[imported]');
 
 export default function ImportRequestScreen() {
   const router = useRouter();
@@ -342,7 +346,8 @@ export default function ImportRequestScreen() {
 
       const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
       const list = Array.isArray(data) ? data : data.items ?? [];
-      const mapped = list.map(mapOrderToSummary);
+      const filtered = list.filter((order) => !isImportedOrder(order));
+      const mapped = filtered.map(mapOrderToSummary);
       console.log('Fetched orders:', mapped);
       setOrders(mapped);
 
@@ -432,6 +437,7 @@ export default function ImportRequestScreen() {
         }
 
         await createImportNote();
+        await loadOrders();
 
         Toast.show({
           type: 'success',
@@ -487,13 +493,6 @@ export default function ImportRequestScreen() {
           >
             <Ionicons name="receipt-outline" size={16} color={activeTab === 'order' ? '#FFFFFF' : COLORS.muted} />
             <Text style={[styles.tabText, activeTab === 'order' && styles.tabTextActive]}>From Order</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tabButton, activeTab === 'manual' && styles.tabButtonActive]}
-            onPress={() => setActiveTab('manual')}
-          >
-            <Ionicons name="create-outline" size={16} color={activeTab === 'manual' ? '#FFFFFF' : COLORS.muted} />
-            <Text style={[styles.tabText, activeTab === 'manual' && styles.tabTextActive]}>Manual</Text>
           </TouchableOpacity>
         </View>
 
