@@ -11,6 +11,7 @@ import {
     View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/auth-context';
@@ -46,6 +47,28 @@ const FILTERS = [
     { key: 'import', label: 'Import' },
     { key: 'export', label: 'Export' },
 ];
+
+LocaleConfig.locales.en = {
+    monthNames: [
+        'January',
+        'February',
+        'March',
+        'April',
+        'May',
+        'June',
+        'July',
+        'August',
+        'September',
+        'October',
+        'November',
+        'December',
+    ],
+    monthNamesShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+    dayNames: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+    dayNamesShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+    today: 'Today',
+};
+LocaleConfig.defaultLocale = 'en';
 
 const getTypeConfig = (type: HistoryType) => {
     if (type === 'import') {
@@ -132,6 +155,14 @@ export default function InventoryHistoryScreen() {
         });
     };
 
+    const formatDateInputValue = (value?: Date | null) => {
+        if (!value) return '';
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, '0');
+        const day = String(value.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
     const parseDateInput = (value: string) => {
         const trimmed = value.trim();
         if (!trimmed) return null;
@@ -161,7 +192,73 @@ export default function InventoryHistoryScreen() {
         setDraftToDate('');
         setAppliedFromDate('');
         setAppliedToDate('');
-        setDateFilterVisible(false);
+    };
+
+    const calendarTheme = useMemo(
+        () => ({
+            calendarBackground: COLORS.card,
+            textSectionTitleColor: COLORS.muted,
+            dayTextColor: COLORS.ink,
+            monthTextColor: COLORS.ink,
+            arrowColor: COLORS.accent,
+            todayTextColor: COLORS.accent,
+            textDisabledColor: '#CBBEB3',
+            selectedDayBackgroundColor: COLORS.accent,
+            selectedDayTextColor: '#FFFFFF',
+            textDayFontWeight: '600',
+            textMonthFontWeight: '700',
+            textDayHeaderFontWeight: '600',
+        }),
+        []
+    );
+
+    const buildMarkedDates = (startDate?: string, endDate?: string) => {
+        if (!startDate) return {} as Record<string, any>;
+        if (!endDate) {
+            return {
+                [startDate]: {
+                    customStyles: {
+                        container: styles.calendarMarkedCircle,
+                        text: styles.calendarMarkedText,
+                    },
+                },
+            };
+        }
+
+        const marks: Record<string, any> = {};
+        const start = parseDateInput(startDate);
+        const end = parseDateInput(endDate);
+        if (!start || !end) return marks;
+
+        const current = new Date(start.getTime());
+        while (current <= end) {
+            const dateString = formatDateInputValue(current);
+            marks[dateString] = {
+                customStyles: {
+                    container: styles.calendarMarkedCircle,
+                    text: styles.calendarMarkedText,
+                },
+            };
+            current.setDate(current.getDate() + 1);
+        }
+
+        return marks;
+    };
+
+    const handleCalendarPress = (dateString: string) => {
+        if (!draftFromDate || (draftFromDate && draftToDate)) {
+            setDraftFromDate(dateString);
+            setDraftToDate('');
+            return;
+        }
+
+        if (dateString < draftFromDate) {
+            setDraftFromDate(dateString);
+            setDraftToDate('');
+            return;
+        }
+
+        setDraftToDate(dateString);
     };
 
     const isToday = (value?: string | null) => {
@@ -270,9 +367,10 @@ export default function InventoryHistoryScreen() {
             })
             .filter((item) => {
                 if (!fromMs && !toMs) return true;
-                if (!item.createdAtMs) return false;
-                if (fromMs && item.createdAtMs < fromMs) return false;
-                if (toMs && item.createdAtMs > toMs) return false;
+                const itemTime = item.createdAtMs || parseDate(item.createdAt)?.getTime() || 0;
+                if (!itemTime) return false;
+                if (fromMs && itemTime < fromMs) return false;
+                if (toMs && itemTime > toMs) return false;
                 return true;
             });
 
@@ -534,24 +632,22 @@ export default function InventoryHistoryScreen() {
                             </TouchableOpacity>
                         </View>
                         <View style={styles.dateInputGroup}>
-                            <View style={styles.dateInputBlock}>
-                                <Text style={styles.dateInputLabel}>From</Text>
-                                <TextInput
-                                    placeholder="2026-03-01"
-                                    placeholderTextColor={COLORS.muted}
-                                    value={draftFromDate}
-                                    onChangeText={setDraftFromDate}
-                                    style={styles.dateInput}
-                                />
+                            <View style={styles.rangeRow}>
+                                <View style={styles.rangeChip}>
+                                    <Text style={styles.rangeLabel}>From</Text>
+                                    <Text style={styles.rangeValue}>{draftFromDate || 'Any'}</Text>
+                                </View>
+                                <View style={styles.rangeChip}>
+                                    <Text style={styles.rangeLabel}>To</Text>
+                                    <Text style={styles.rangeValue}>{draftToDate || 'Any'}</Text>
+                                </View>
                             </View>
-                            <View style={styles.dateInputBlock}>
-                                <Text style={styles.dateInputLabel}>To</Text>
-                                <TextInput
-                                    placeholder="2026-03-31"
-                                    placeholderTextColor={COLORS.muted}
-                                    value={draftToDate}
-                                    onChangeText={setDraftToDate}
-                                    style={styles.dateInput}
+                            <View style={styles.calendarContainer}>
+                                <Calendar
+                                    markingType="custom"
+                                    markedDates={buildMarkedDates(draftFromDate, draftToDate)}
+                                    onDayPress={(day) => handleCalendarPress(day.dateString)}
+                                    theme={calendarTheme}
                                 />
                             </View>
                         </View>
@@ -923,23 +1019,48 @@ const styles = StyleSheet.create({
         marginTop: 16,
         gap: 12,
     },
-    dateInputBlock: {
-        gap: 6,
+    rangeRow: {
+        flexDirection: 'row',
+        gap: 12,
     },
-    dateInputLabel: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: COLORS.muted,
-    },
-    dateInput: {
+    rangeChip: {
+        flex: 1,
         paddingHorizontal: 12,
         paddingVertical: 10,
         borderRadius: 12,
         borderWidth: 1,
         borderColor: COLORS.border,
         backgroundColor: COLORS.surface,
-        color: COLORS.ink,
+    },
+    rangeLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: COLORS.muted,
+    },
+    rangeValue: {
+        marginTop: 4,
         fontSize: 13,
+        fontWeight: '600',
+        color: COLORS.ink,
+    },
+    calendarContainer: {
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        overflow: 'hidden',
+    },
+    calendarMarkedCircle: {
+        backgroundColor: COLORS.accent,
+        borderRadius: 999,
+        width: 34,
+        height: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+        alignSelf: 'center',
+    },
+    calendarMarkedText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
     },
     filterActions: {
         flexDirection: 'row',
