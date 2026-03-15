@@ -364,20 +364,29 @@ export default function InventoryScreen() {
                 <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
                   Inventory Dashboard
                 </Text>
-                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                  <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
-                  <View
-                    style={{
-                      position: 'absolute',
-                      top: 8,
-                      right: 10,
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      backgroundColor: '#E9563A',
-                    }}
-                  />
-                </TouchableOpacity>
+                <View className="flex-row items-center" style={{ gap: 10 }}>
+                  <TouchableOpacity
+                    className="w-10 h-10 items-center justify-center"
+                    style={{ backgroundColor: COLORS.card, borderRadius: 14 }}
+                    onPress={() => router.push('/inventory-history')}
+                  >
+                    <Ionicons name="time-outline" size={19} color={COLORS.ink} />
+                  </TouchableOpacity>
+                  <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
+                    <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 10,
+                        width: 8,
+                        height: 8,
+                        borderRadius: 999,
+                        backgroundColor: '#E9563A',
+                      }}
+                    />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 

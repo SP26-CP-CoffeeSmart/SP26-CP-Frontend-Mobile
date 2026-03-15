@@ -417,7 +417,6 @@ export default function ImportRequestScreen() {
     if (activeTab === 'order' && selectedOrder) {
       try {
         setIsSubmitting(true);
-        await createImportNote();
         const response = await authorizedFetch(
           API_ENDPOINTS.shopInventory.importFromOrder(selectedOrder.orderId),
           {
@@ -431,6 +430,8 @@ export default function ImportRequestScreen() {
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
+
+        await createImportNote();
 
         Toast.show({
           type: 'success',
