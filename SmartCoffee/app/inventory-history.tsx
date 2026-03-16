@@ -100,17 +100,6 @@ LocaleConfig.locales.en = {
 };
 LocaleConfig.defaultLocale = 'en';
 
-const APP_TIME_ZONE = 'Asia/Ho_Chi_Minh';
-const APP_TIME_ZONE_OFFSET_MINUTES = 7 * 60;
-
-const formatDateKey = (date: Date) =>
-    new Intl.DateTimeFormat('en-CA', {
-        timeZone: APP_TIME_ZONE,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).format(date);
-
 const getTypeConfig = (type: HistoryType) => {
     if (type === 'import') {
         return {
@@ -160,73 +149,44 @@ export default function InventoryHistoryScreen() {
 
     const parseDate = (value?: string | null) => {
         if (!value) return null;
-        const trimmed = value.trim();
-        if (!trimmed) return null;
-
-        const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(trimmed);
-        if (hasTimezone) {
-            const parsed = new Date(trimmed);
-            return Number.isNaN(parsed.getTime()) ? null : parsed;
-        }
-
-        const match = trimmed.match(
-            /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/
-        );
-        if (!match) {
-            const parsed = new Date(trimmed);
-            return Number.isNaN(parsed.getTime()) ? null : parsed;
-        }
-
-        const year = Number(match[1]);
-        const month = Number(match[2]);
-        const day = Number(match[3]);
-        const hour = Number(match[4]);
-        const minute = Number(match[5]);
-        const second = Number(match[6] ?? '0');
-        const milli = Number(String(match[7] ?? '0').padEnd(3, '0'));
-
-        const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, milli);
-        const adjusted = new Date(utcMs - APP_TIME_ZONE_OFFSET_MINUTES * 60 * 1000);
-        return Number.isNaN(adjusted.getTime()) ? null : adjusted;
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
 
     const formatTime = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return '--:--';
-        return new Intl.DateTimeFormat('en-US', {
-            timeZone: APP_TIME_ZONE,
-            hour: '2-digit',
-            minute: '2-digit',
-        }).format(parsed);
+        return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     };
 
     const formatDateLabel = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown date';
-        const todayKey = formatDateKey(new Date());
-        const yesterdayKey = formatDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
-        const parsedKey = formatDateKey(parsed);
-        if (parsedKey === todayKey) return 'Today';
-        if (parsedKey === yesterdayKey) return 'Yesterday';
-        return new Intl.DateTimeFormat('en-US', {
-            timeZone: APP_TIME_ZONE,
+        const today = new Date();
+        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const startOfYesterday = new Date(startOfToday);
+        startOfYesterday.setDate(startOfToday.getDate() - 1);
+
+        const startOfDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+        if (startOfDate.getTime() === startOfToday.getTime()) return 'Today';
+        if (startOfDate.getTime() === startOfYesterday.getTime()) return 'Yesterday';
+        return parsed.toLocaleDateString('en-US', {
             day: '2-digit',
             month: 'long',
             year: 'numeric',
-        }).format(parsed);
+        });
     };
 
     const formatDateTime = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown time';
-        return new Intl.DateTimeFormat('en-US', {
-            timeZone: APP_TIME_ZONE,
+        return parsed.toLocaleString('en-US', {
             day: '2-digit',
             month: 'long',
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-        }).format(parsed);
+        });
     };
 
     const formatDateInputValue = (value?: Date | null) => {
@@ -343,7 +303,12 @@ export default function InventoryHistoryScreen() {
     const isToday = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return false;
-        return formatDateKey(parsed) === formatDateKey(new Date());
+        const today = new Date();
+        return (
+            parsed.getFullYear() === today.getFullYear() &&
+            parsed.getMonth() === today.getMonth() &&
+            parsed.getDate() === today.getDate()
+        );
     };
 
     const loadInventoryLookup = async () => {

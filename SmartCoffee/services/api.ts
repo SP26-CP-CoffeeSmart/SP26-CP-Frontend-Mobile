@@ -93,6 +93,10 @@ export const API_ENDPOINTS = {
     getAll: () => `${AUTH_BASE_URL}/MenuItem`,
     getById: (id: number) => `${AUTH_BASE_URL}/MenuItem/${id}`,
   },
+  ingredient: {
+    getAll: () => `${AUTH_BASE_URL}/Ingredient`,
+    getById: (id: number) => `${AUTH_BASE_URL}/Ingredient/${id}`,
+  },
   shopStaff: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopStaff/by-shop/${shopId}`,
     create: () => `${AUTH_BASE_URL}/Auth/register-staff`,
@@ -130,5 +134,7 @@ export const API_ENDPOINTS = {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopInventory/by-shop/${shopId}`,
     export: () => `${AUTH_BASE_URL}/ShopInventory/export`,
     importFromOrder: (orderId: number) => `${AUTH_BASE_URL}/ShopInventory/import-from-order/${orderId}`,
+    manualImport: () => `${AUTH_BASE_URL}/ShopInventory/manual-import`,
+    manualExport: () => `${AUTH_BASE_URL}/ShopInventory/manual-export`,
   },
 };
