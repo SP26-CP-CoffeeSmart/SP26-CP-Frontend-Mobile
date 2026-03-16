@@ -1,8 +1,10 @@
-import React, { useEffect } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, ImageBackground, StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_BASE_URL } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
@@ -15,9 +17,16 @@ export default function AIRecommendationsScreen() {
   }>();
   const fallbackImage =
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
+  const [recipeItems, setRecipeItems] = useState<any[]>([]);
+  const [recipeLoading, setRecipeLoading] = useState<Record<number, boolean>>({});
+  const [beverageName, setBeverageName] = useState('AI Recommendations');
+  const [hasRequestedImages, setHasRequestedImages] = useState(false);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       AsyncStorage.removeItem(SAVED_RECIPES_KEY).catch(() => undefined);
     };
   }, []);
@@ -50,112 +59,282 @@ export default function AIRecommendationsScreen() {
     return '-';
   };
 
-  let recipes: any[] = [];
-  let beverageName = 'AI Recommendations';
-  if (data) {
+  const resolveUniquenessStatus = (uniqueness: any): boolean | null => {
+    if (!uniqueness) return null;
+    if (typeof uniqueness.isUnique === 'boolean') return uniqueness.isUnique;
+    if (typeof uniqueness.maxJaccardSimilarity === 'number') {
+      return uniqueness.maxJaccardSimilarity === 0;
+    }
+    if (typeof uniqueness.uniquenessScore === 'number') {
+      return uniqueness.uniquenessScore >= 1;
+    }
+    return null;
+  };
+
+  useEffect(() => {
+    if (!data) {
+      setRecipeItems([]);
+      setBeverageName('AI Recommendations');
+      setHasRequestedImages(false);
+      return;
+    }
+
     try {
       const parsed = JSON.parse(String(data));
-      recipes = parsed?.recipes ?? [];
-      // Get beverage name from first recipe
-      if (recipes.length > 0 && recipes[0]?.recipe?.beverage?.name) {
-        beverageName = `Recipes of ${recipes[0].recipe.beverage.name}`;
+      const parsedRecipes = parsed?.recipes ?? [];
+      const normalized = parsedRecipes.map((item: any, index: number) => ({
+        ...item,
+        __id: index,
+      }));
+      setRecipeItems(normalized);
+      setRecipeLoading({});
+      setHasRequestedImages(false);
+
+      if (normalized.length > 0 && normalized[0]?.recipe?.beverage?.name) {
+        setBeverageName(`Recipes of ${normalized[0].recipe.beverage.name}`);
+      } else {
+        setBeverageName('AI Recommendations');
       }
     } catch {
-      recipes = [];
+      setRecipeItems([]);
+      setRecipeLoading({});
+      setBeverageName('AI Recommendations');
+      setHasRequestedImages(false);
     }
-  }
+  }, [data]);
+
+  const recipesForRender = useMemo(() => recipeItems.slice(0, 3), [recipeItems]);
+
+  useEffect(() => {
+    const generateImages = async () => {
+      if (recipesForRender.length === 0 || hasRequestedImages) return;
+
+      const requests = recipesForRender
+        .map((item) => ({
+          recipeName: item?.recipe?.recipeName ?? item?.recipeName,
+          imagePrompt: item?.imagePrompt ?? item?.recipe?.imagePrompt,
+          __id: item.__id,
+        }))
+        .filter((item) => item.recipeName && item.imagePrompt);
+
+      if (requests.length === 0) return;
+
+      setHasRequestedImages(true);
+
+      setRecipeLoading((prev) => {
+        const next = { ...prev };
+        requests.forEach((req) => {
+          next[req.__id] = true;
+        });
+        return next;
+      });
+
+      try {
+        console.log('AI generate image request:', JSON.stringify(
+          requests.map((req) => ({
+            recipeName: req.recipeName,
+            imagePrompt: req.imagePrompt,
+          })),
+          null,
+          2
+        ));
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/generate-recipe-images`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            requests.map((req) => ({
+              recipeName: req.recipeName,
+              imagePrompt: req.imagePrompt,
+            }))
+          ),
+        });
+
+        const responseText = await response.text();
+        console.log('AI generate image response:', responseText);
+        if (!response.ok) {
+          throw new Error(responseText || `Request failed (${response.status})`);
+        }
+
+        const payload = responseText ? JSON.parse(responseText) : null;
+        const results = Array.isArray(payload?.results) ? payload.results : [];
+        if (!isMountedRef.current) return;
+
+        setRecipeItems((prev) =>
+          prev.map((item) => {
+            const requestIndex = requests.findIndex((req) => req.__id === item.__id);
+            if (requestIndex === -1) return item;
+
+            const result = results[requestIndex];
+            const imageUrl = result?.imageUrl;
+            if (!imageUrl) return item;
+
+            return {
+              ...item,
+              generatedImageUrl: imageUrl,
+              recipe: {
+                ...item.recipe,
+                image: imageUrl,
+              },
+            };
+          })
+        );
+
+        setRecipeLoading((prev) => {
+          const next = { ...prev };
+          requests.forEach((req) => {
+            next[req.__id] = false;
+          });
+          return next;
+        });
+      } catch (error) {
+        console.error('AI generate image error:', error);
+      } finally {
+        if (isMountedRef.current) {
+          setRecipeLoading((prev) => {
+            const next = { ...prev };
+            requests.forEach((req) => {
+              next[req.__id] = false;
+            });
+            return next;
+          });
+        }
+      }
+    };
+
+    generateImages();
+  }, [recipesForRender]);
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color="#000" />
-        </TouchableOpacity>
-        <View style={styles.headerTitleContainer}>
-          <Text style={styles.headerTitle}>Recipes of </Text>
-          <Text style={styles.beverageNameTitle}>{beverageName.replace('Recipes of ', '')}</Text>
+      <ImageBackground
+        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        style={styles.header}
+        imageStyle={styles.headerImage}
+      >
+        <View style={styles.headerOverlay} />
+        <View style={styles.headerContent}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Recipes of {beverageName.replace('Recipes of ', '')}</Text>
         </View>
-        <View style={styles.headerActionSpacer} />
+      </ImageBackground>
+
+      <View style={styles.filtersWrapper}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filtersContainer}
+        >
+          <Pressable style={[styles.filterChip, styles.filterChipActive]}>
+            <Text style={[styles.filterText, styles.filterTextActive]}>All</Text>
+          </Pressable>
+          <Pressable style={styles.filterChip}>
+            <Text style={styles.filterText}>AI Generated</Text>
+          </Pressable>
+        </ScrollView>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>Results</Text>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
 
-        <View style={styles.grid}>
-          {recipes.slice(0, 3).map((item, index) => (
-            <View key={item?.recipe?.recipeId ?? index} style={styles.card}>
-              <Pressable
-                onPress={() =>
-                  router.push({
-                    pathname: '/ai-result',
-                    params: {
-                      data: JSON.stringify({
-                        recipe: item.recipe,
-                        imageGeneration: item.imageGeneration,
-                        uniqueness: item.uniqueness,
-                      }),
-                      beverageId,
-                      beverage,
-                    },
-                  })
-                }
-              >
-                <Image source={{ uri: normalizeImageUrl(item?.recipe?.image) }} style={styles.cardImage} />
-              </Pressable>
-              <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>{item?.recipe?.recipeName || 'AI Recipe'}</Text>
-                <View style={styles.cardInfo}>
-                  <View style={styles.infoRow}>
-                    <Ionicons name="cafe-outline" size={14} color="#8B7355" />
-                    <Text style={styles.infoText}>{item?.recipe?.flavorNote || '-'}</Text>
-                    <Ionicons
-                      name="time-outline"
-                      size={14}
-                      color="#8B7355"
-                      style={{ marginLeft: 8 }}
-                    />
-                    <Text style={styles.infoText}>{item?.recipe?.prepTimeRange || '-'}</Text>
-                  </View>
-                  <View style={styles.infoRow}>
-                    <Ionicons name="flame-outline" size={14} color="#D97706" />
-                    <Text style={styles.difficultyText}>{item?.recipe?.difficultyLevel || '-'}</Text>
+        {recipesForRender.map((item, index) => (
+          <Pressable
+            key={item.__id ?? item?.recipe?.recipeId ?? index}
+            style={styles.itemCard}
+            onPress={() =>
+              router.push({
+                pathname: '/ai-result',
+                params: {
+                  data: JSON.stringify({
+                    recipe: item.recipe,
+                    imageGeneration: item.imageGeneration,
+                    imagePrompt: item.imagePrompt,
+                    uniqueness: item.uniqueness,
+                  }),
+                  beverageId,
+                  beverage,
+                },
+              })
+            }
+          >
+            <View style={styles.itemLeft}>
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{item?.recipe?.recipeName || 'AI Recipe'}</Text>
+                <Text style={styles.itemSubtitle} numberOfLines={1}>
+                  {item?.recipe?.flavorNote || 'Recommended by AI'}
+                </Text>
+                <Text style={styles.itemPrice}>
+                  {(item?.recipe?.proposedSellingPrice ?? 0).toLocaleString('vi-VN')} VND
+                </Text>
+                <Text style={styles.itemQty}>Prep time: {item?.recipe?.prepTimeRange || '-'}</Text>
+
+                <View style={styles.itemMetaRow}>
+                  <View style={styles.itemMetaBadge}>
+                    <Ionicons name="flame-outline" size={12} color="#D0A45C" />
+                    <Text style={styles.itemMetaText}>{item?.recipe?.difficultyLevel || '-'}</Text>
                   </View>
                   {item?.uniqueness ? (
-                    <View style={styles.uniquenessRow}>
-                      <Ionicons name="sparkles-outline" size={14} color="#16A34A" />
-                      <Text style={styles.uniquenessText}>
-                        {item.uniqueness?.isUnique ? 'Unique' : 'Not unique'} · Score{' '}
-                        {formatPercent(item.uniqueness?.uniquenessScore)}
+                    <View style={styles.itemMetaBadge}>
+                      <Ionicons name="sparkles-outline" size={12} color="#2E8B57" />
+                      <Text
+                        style={[
+                          styles.itemMetaText,
+                          resolveUniquenessStatus(item.uniqueness) === false
+                            ? styles.uniquenessTextWarning
+                            : styles.uniquenessText,
+                        ]}
+                      >
+                        {resolveUniquenessStatus(item.uniqueness) === null
+                          ? 'Unknown'
+                          : resolveUniquenessStatus(item.uniqueness)
+                            ? 'Unique'
+                            : 'Not unique'}{' '}
+                        · {formatPercent(item.uniqueness?.uniquenessScore)}
                       </Text>
                     </View>
                   ) : null}
                 </View>
               </View>
-            </View>
-          ))}
-        </View>
 
-        <View style={styles.suggestionBox}>
-          <View style={styles.suggestionHeader}>
-            <Ionicons name="bulb-outline" size={20} color="#000" />
-            <Text style={styles.suggestionTitle}>Suggestion:</Text>
-          </View>
-          <Text style={styles.suggestionText}>Not the recipe you are looking for ?</Text>
-          <TouchableOpacity style={styles.manualButton} onPress={() => router.push('/ai-create')}>
-            <Text style={styles.manualButtonText}>Create Manually Now</Text>
-            <Ionicons name="chevron-forward" size={18} color="#FFF" />
+              <View style={styles.itemImageWrap}>
+                <Image
+                  key={item?.generatedImageUrl ?? item?.recipe?.image ?? String(item.__id)}
+                  source={{ uri: normalizeImageUrl(item?.generatedImageUrl ?? item?.recipe?.image) }}
+                  style={styles.itemImage}
+                />
+                {recipeLoading[item.__id] ? (
+                  <View style={styles.cardImageOverlay}>
+                    <ActivityIndicator color="#FFFFFF" />
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </Pressable>
+        ))}
+
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+
+      <View style={styles.bottomBar}>
+        <View style={styles.totalInfo}>
+          <Text style={styles.selectedCount}>{recipesForRender.length} recipes</Text>
+          <Text style={styles.selectedTotal}>AI Recommendation List</Text>
+        </View>
+        <View style={styles.actionsRow}>
+          <TouchableOpacity style={styles.addButton} onPress={() => router.replace('/(tabs)/menu')}>
+            <Text style={styles.addButtonText}>Go back</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.purchaseButton} onPress={() => router.push('/ai-create')}>
+            <Text style={styles.purchaseButtonText}>Create Manually</Text>
           </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          style={[styles.manualButton, styles.goBackButton]}
-          onPress={() => router.replace('/(tabs)/menu')}>
-          <Text style={styles.manualButtonText}>Go back</Text>
-          <Ionicons name="chevron-forward" size={18} color="#FFF" />
-        </TouchableOpacity>
-
-        <View style={{ height: 20 }} />
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -163,163 +342,225 @@ export default function AIRecommendationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F0',
+    backgroundColor: '#F6F2EE',
   },
   header: {
+    height: 180,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 20,
+    paddingBottom: 18,
+  },
+  headerImage: {
+    resizeMode: 'cover',
+  },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 50,
-    paddingBottom: 16,
-    backgroundColor: '#FFF',
+    gap: 10,
+  },
+  backButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#000',
-  },
-  headerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#F3E8DD',
-  },
-  headerActionText: {
-    fontSize: 12,
-    color: '#8B5E3C',
-    fontWeight: '600',
-  },
-  headerActionSpacer: {
-    width: 48,
-  },
-  beverageNameTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#8B5E3C',
-  },
-  content: {
+    fontSize: 26,
+    fontWeight: '700',
+    color: '#FFF',
+    letterSpacing: 0.2,
     flex: 1,
+  },
+  filtersWrapper: {
+    backgroundColor: '#F6F2EE',
+    paddingVertical: 12,
+  },
+  filtersContainer: {
     paddingHorizontal: 16,
+    gap: 10,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-    marginTop: 20,
-    marginBottom: 16,
+  filterChip: {
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#EEE6DC',
   },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
+  filterChipActive: {
+    backgroundColor: '#2C1B13',
+    borderColor: '#2C1B13',
   },
-  card: {
-    width: '48%',
-    backgroundColor: '#FFF8E7',
-    borderRadius: 12,
-    marginBottom: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  cardImage: {
-    width: '100%',
-    height: 100,
-    backgroundColor: '#D9D9D9',
-  },
-  cardContent: {
-    padding: 12,
-  },
-  cardTitle: {
-    fontSize: 14,
+  filterText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#000',
-    marginBottom: 8,
+    color: '#3E2A22',
   },
-  cardInfo: {
-    gap: 4,
+  filterTextActive: {
+    color: '#FFF',
   },
-  infoRow: {
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 28,
+    gap: 14,
+  },
+  itemCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFF',
+    borderRadius: 22,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#F1EAE2',
+  },
+  itemLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  itemInfo: {
+    flex: 1,
+  },
+  itemName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2C1B13',
+  },
+  itemSubtitle: {
+    fontSize: 13,
+    color: '#8B7A6A',
+    marginTop: 2,
+  },
+  itemPrice: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#2C1B13',
+    marginTop: 8,
+  },
+  itemQty: {
+    fontSize: 12,
+    color: '#8B7A6A',
+    marginTop: 4,
+  },
+  itemMetaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  itemMetaBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    backgroundColor: '#F6F2EE',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
   },
-  infoText: {
+  itemMetaText: {
     fontSize: 11,
-    color: '#8B7355',
+    color: '#8B7A6A',
+    fontWeight: '600',
   },
-  difficultyText: {
-    fontSize: 11,
-    color: '#D97706',
+  itemImageWrap: {
+    width: 124,
+    height: 124,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#EEE5DB',
   },
-  uniquenessRow: {
-    flexDirection: 'row',
+  itemImage: {
+    width: '100%',
+    height: '100%',
+  },
+  cardImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
   },
   uniquenessText: {
     fontSize: 11,
-    color: '#15803D',
+    color: '#2E8B57',
   },
-  levelText: {
+  uniquenessTextWarning: {
     fontSize: 11,
-    color: '#D97706',
+    color: '#C28A2A',
   },
-  suggestionBox: {
-    backgroundColor: '#FFF8E7',
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
-    marginBottom: 24,
+  bottomSpacer: {
+    height: 110,
+  },
+  bottomBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+    backgroundColor: '#FFF',
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  suggestionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
+  totalInfo: {
+    marginBottom: 10,
   },
-  suggestionTitle: {
+  selectedCount: {
+    fontSize: 12,
+    color: '#8B7A6A',
+  },
+  selectedTotal: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
+    fontWeight: '700',
+    color: '#2C1B13',
+    marginTop: 4,
   },
-  suggestionText: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 12,
-  },
-  manualButton: {
-    backgroundColor: '#6B4423',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
-  goBackButton: {
-    marginBottom: 24,
+  addButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#D9CFC5',
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#FFF',
   },
-  manualButtonText: {
+  addButtonText: {
+    color: '#2C1B13',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  purchaseButton: {
+    flex: 1,
+    backgroundColor: '#2C1B13',
+    borderRadius: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  purchaseButtonText: {
     color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

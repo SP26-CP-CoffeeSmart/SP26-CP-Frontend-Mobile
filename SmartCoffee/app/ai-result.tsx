@@ -65,6 +65,8 @@ interface UniquenessInfo {
 
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -168,6 +170,25 @@ export default function AiResultScreen() {
     return [];
   };
 
+  const resolveGeneratedImageUrl = (payload: any): string | null => {
+    if (!payload) return null;
+    if (typeof payload === 'string') return payload;
+    return (
+      payload.imageUrl ||
+      payload.firebaseUrl ||
+      payload.image ||
+      (Array.isArray(payload.results) && payload.results[0]?.imageUrl) ||
+      payload.data?.imageUrl ||
+      payload.data?.firebaseUrl ||
+      payload.data?.image ||
+      payload.result?.imageUrl ||
+      payload.result?.firebaseUrl ||
+      payload.result?.image ||
+      (Array.isArray(payload.images) && payload.images[0]?.url) ||
+      null
+    );
+  };
+
   const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
     if (!url || typeof url !== 'string') return undefined;
     const trimmed = url.trim();
@@ -190,19 +211,34 @@ export default function AiResultScreen() {
   let recipe: Recipe | null = null;
   let imageGeneration: any = null;
   let uniqueness: UniquenessInfo | null = null;
+  let imagePrompt: string | null = null;
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
       console.log('AI Recipe Result raw payload:', parsed);
       recipe = parsed?.recipe ?? parsed;
       imageGeneration = parsed?.imageGeneration ?? null;
+      imagePrompt = parsed?.imagePrompt ?? null;
       uniqueness = parsed?.uniqueness ?? parsed?.recipe?.uniqueness ?? null;
     } catch {
       recipe = null;
       imageGeneration = null;
       uniqueness = null;
+      imagePrompt = null;
     }
   }
+
+  const resolveUniquenessStatus = (value: UniquenessInfo | null): boolean | null => {
+    if (!value) return null;
+    if (typeof value.isUnique === 'boolean') return value.isUnique;
+    if (typeof value.maxJaccardSimilarity === 'number') {
+      return value.maxJaccardSimilarity === 0;
+    }
+    if (typeof value.uniquenessScore === 'number') {
+      return value.uniquenessScore >= 1;
+    }
+    return null;
+  };
 
   const ingredientsList =
     (recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0
@@ -248,6 +284,58 @@ export default function AiResultScreen() {
   }, [recipe?.recipeId]);
 
   useEffect(() => {
+    let isActive = true;
+    const generateImage = async () => {
+      const hasGeneratedImage =
+        Boolean(generatedImageUrl) ||
+        (typeof recipe?.image === 'string' && recipe.image.includes('firebasestorage.googleapis.com'));
+
+      if (!imagePrompt || !recipe?.recipeName || isGeneratingImage || hasGeneratedImage) {
+        return;
+      }
+
+      setIsGeneratingImage(true);
+      try {
+        const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/generate-recipe-images`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify([
+            {
+              recipeName: recipe.recipeName,
+              imagePrompt,
+            },
+          ]),
+        });
+
+        const responseText = await response.text();
+        if (!response.ok) {
+          throw new Error(responseText || `Request failed (${response.status})`);
+        }
+
+        const payload = responseText ? JSON.parse(responseText) : null;
+        const resolvedUrl = resolveGeneratedImageUrl(payload);
+        if (isActive && resolvedUrl) {
+          setGeneratedImageUrl(resolvedUrl);
+        }
+      } catch (error) {
+        console.error('Image generation error:', error);
+      } finally {
+        if (isActive) {
+          setIsGeneratingImage(false);
+        }
+      }
+    };
+
+    generateImage();
+
+    return () => {
+      isActive = false;
+    };
+  }, [imagePrompt, recipe?.recipeName, isGeneratingImage, generatedImageUrl]);
+
+  useEffect(() => {
     return () => {
       if (toastTimerRef.current) {
         clearTimeout(toastTimerRef.current);
@@ -272,49 +360,28 @@ export default function AiResultScreen() {
 
     setIsLoading(true);
     try {
-      // Remove imageGeneration from recipe if it exists, send it separately
-      const { imageGeneration: imageGenFromRecipe, ...cleanRecipe } = recipe as any;
-      const finalImageGeneration = imageGeneration || imageGenFromRecipe;
+      const encodedRecipeImage = encodeFirebaseImageUrl(recipe.image);
+      const encodedGeneratedImage = encodeFirebaseImageUrl(generatedImageUrl ?? undefined);
+      const finalImageUrl = encodedGeneratedImage || encodedRecipeImage;
 
-      // Encode both image URLs
-      const encodedRecipeImage = encodeFirebaseImageUrl(cleanRecipe.image);
-      const encodedFirebaseUrl = finalImageGeneration?.firebaseUrl ? encodeFirebaseImageUrl(finalImageGeneration.firebaseUrl) : null;
-
-      // Use firebaseUrl if available, otherwise use recipe image
-      const finalImageUrl = encodedFirebaseUrl || encodedRecipeImage;
-      const recipeWithFinalImage = {
-        ...cleanRecipe,
-        ...(finalImageUrl && { image: finalImageUrl }),
-        beverageId: parsedBeverageId,
+      const requestBody: Record<string, any> = {
+        recipe: {
+          ...recipe,
+          beverageId: Number.isFinite(parsedBeverageId)
+            ? parsedBeverageId
+            : recipe.beverageId,
+        },
       };
 
-      const {
-        beverage: _beverage,
-        coffeeShop: _coffeeShop,
-        Beverage: _Beverage,
-        CoffeeShop: _CoffeeShop,
-        ...restRecipe
-      } = recipeWithFinalImage as Record<string, unknown>;
-      const beveragePayload = selectedBeverage ?? { beverageId: parsedBeverageId };
-      const coffeeShopPayload = { coffeeShopId: 1 };
-      const requestRecipe = {
-        ...restRecipe,
-        beverage: beveragePayload,
-        coffeeShop: coffeeShopPayload,
-        Beverage: beveragePayload,
-        CoffeeShop: coffeeShopPayload,
-      };
-
-      // Update imageGeneration with encoded URL if it exists
-      const imageGenWithEncodedUrl = finalImageGeneration ? {
-        ...finalImageGeneration,
-        ...(encodedFirebaseUrl && { firebaseUrl: encodedFirebaseUrl })
-      } : null;
-
-      const requestBody = {
-        Recipe: requestRecipe,
-        ...(imageGenWithEncodedUrl && { ImageGeneration: imageGenWithEncodedUrl })
-      };
+      if (uniqueness) {
+        requestBody.uniqueness = uniqueness;
+      }
+      if (imagePrompt) {
+        requestBody.imagePrompt = imagePrompt;
+      }
+      if (finalImageUrl) {
+        requestBody.imageUrl = finalImageUrl;
+      }
 
       console.log('========== SAVE RECIPE REQUEST ==========');
       console.log('Request Body:');
@@ -370,16 +437,23 @@ export default function AiResultScreen() {
     }
   };
 
+  const displayImageUrl = normalizeImageUrl(generatedImageUrl ?? recipe?.image);
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           <Image
             source={{
-              uri: normalizeImageUrl(recipe?.image),
+              uri: displayImageUrl,
             }}
             style={styles.heroImage}
           />
+          {isGeneratingImage ? (
+            <View style={styles.imageLoadingOverlay}>
+              <ActivityIndicator color="#FFFFFF" size="large" />
+            </View>
+          ) : null}
           <View style={styles.heroOverlay} />
           <View style={styles.heroContent}>
             <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -400,14 +474,14 @@ export default function AiResultScreen() {
           ) : null}
           <Image
             source={{
-              uri: normalizeImageUrl(recipe?.image),
+              uri: displayImageUrl,
             }}
             style={styles.resultBanner}
           />
           <View style={styles.titleRow}>
             <Image
               source={{
-                uri: normalizeImageUrl(recipe?.image),
+                uri: displayImageUrl,
               }}
               style={styles.thumbnail}
             />
@@ -502,7 +576,11 @@ export default function AiResultScreen() {
                 <View style={styles.factCard}>
                   <ThemedText style={styles.factLabel}>Status</ThemedText>
                   <ThemedText style={styles.factValue}>
-                    {uniqueness.isUnique ? 'Unique' : 'Not unique'}
+                    {resolveUniquenessStatus(uniqueness) === null
+                      ? 'Unknown'
+                      : resolveUniquenessStatus(uniqueness)
+                        ? 'Unique'
+                        : 'Not unique'}
                   </ThemedText>
                 </View>
                 <View style={styles.factCard}>
@@ -633,6 +711,17 @@ export default function AiResultScreen() {
 
           <View style={styles.sectionSpacing} />
 
+          {imagePrompt ? (
+            <>
+              <View style={styles.sectionHeader}>
+                <MaterialIcons name="image" size={16} color="#8B5E3C" />
+                <ThemedText style={styles.sectionTitle}>Image Prompt</ThemedText>
+              </View>
+              <ThemedText style={styles.bodyText}>{imagePrompt}</ThemedText>
+              <View style={styles.sectionSpacing} />
+            </>
+          ) : null}
+
           <View style={styles.sectionHeader}>
             <MaterialIcons name="shopping-bag" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Ingredients</ThemedText>
@@ -645,11 +734,15 @@ export default function AiResultScreen() {
                   style={styles.ingredientRow}>
                   <View style={styles.ingredientInfo}>
                     <ThemedText style={styles.ingredientName}>
-                      {item.ingredient?.name || item.name || 'Unknown Ingredient'}
+                      {item.ingredient?.name || item.name || (item.id ? `Ingredient ${item.id}` : 'Ingredient')}
                     </ThemedText>
                     <ThemedText style={styles.ingredientDetail}>
                       {(item.quantity ?? item.amount ?? '')}
-                      {item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage' ? 'ml' : 'g'}
+                      {item.measurement
+                        ? ` ${item.measurement}`
+                        : item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage'
+                          ? 'ml'
+                          : 'g'}
                       {item.cost ? ` •${item.cost.toLocaleString()} ₫` : ''}
                     </ThemedText>
                   </View>
@@ -669,7 +762,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Caffeine Strength</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {recipe?.caffeineStrength || '-'}
+                {recipe?.caffeineStrength ?? '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -678,7 +771,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Proposed Price</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {recipe?.proposedSellingPrice || '-'}
+                {recipe?.proposedSellingPrice ?? '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -687,7 +780,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Profit Margin</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-              {recipe?.profitMarginPercent ? `${recipe.profitMarginPercent}%` : '-'}
+                {recipe?.profitMarginPercent != null ? `${recipe.profitMarginPercent}%` : '-'}
             </ThemedText>
           </View>
 
@@ -742,6 +835,13 @@ const styles = StyleSheet.create({
   heroOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(33, 19, 10, 0.55)',
+  },
+  imageLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    zIndex: 2,
   },
   heroContent: {
     flex: 1,
