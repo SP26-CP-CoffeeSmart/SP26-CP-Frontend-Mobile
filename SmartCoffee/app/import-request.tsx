@@ -47,6 +47,10 @@ type ImportDetail = {
   supplier: string;
 };
 
+type ImportNoteResponse = {
+  importNoteId?: number;
+};
+
 type OrderItem = {
   id: number;
   name: string;
@@ -417,6 +421,42 @@ export default function ImportRequestScreen() {
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
+
+      const data = (await response.json()) as ImportNoteResponse;
+      if (!data.importNoteId) {
+        throw new Error('Import note id is missing in response.');
+      }
+      return data.importNoteId;
+    };
+
+    const createImportDetails = async (importNoteId: number, items: ImportDetail[]) => {
+      const payloads = items
+        .filter((detail) => detail.importQuantity > 0)
+        .map((detail) => ({
+          importNoteId,
+          ingredientId: detail.ingredientId,
+          currentQuantity: detail.ingredient.currentQuantity ?? 0,
+          importQuantity: detail.importQuantity,
+          updatedQuantity: (detail.ingredient.currentQuantity ?? 0) + detail.importQuantity,
+          measurement: detail.ingredient.measurement ?? null,
+        }));
+
+      await Promise.all(
+        payloads.map(async (payload) => {
+          const response = await authorizedFetch(API_ENDPOINTS.importDetail.create(), {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+        })
+      );
     };
 
     if (activeTab === 'order' && selectedOrder) {
@@ -436,7 +476,8 @@ export default function ImportRequestScreen() {
           throw new Error(`Request failed: ${response.status}`);
         }
 
-        await createImportNote();
+        const importNoteId = await createImportNote();
+        await createImportDetails(importNoteId, details);
         await loadOrders();
 
         Toast.show({
@@ -458,7 +499,8 @@ export default function ImportRequestScreen() {
 
     try {
       setIsSubmitting(true);
-      await createImportNote();
+      const importNoteId = await createImportNote();
+      await createImportDetails(importNoteId, details);
       Toast.show({
         type: 'success',
         text1: 'Import request submitted',
