@@ -29,9 +29,9 @@ const COLORS = {
   card: '#FFFFFF',
   accent: '#7C5C40',
   accentDark: '#5C402B',
-  chip: '#F3E9DF',
+  chip: '#FFFFFF',
   chipActive: '#E7D3C1',
-  highlight: '#FFF7EF',
+  highlight: '#FFFFFF',
   surface: '#F7EFE7',
 };
 
@@ -514,7 +514,7 @@ export default function MenuRecommendationsScreen() {
                   <TouchableOpacity
                     key={style}
                     style={[styles.styleChip, active && styles.styleChipActive]}
-                    onPress={() => setSelectedShopStyle(style)}
+                    onPress={() => setSelectedShopStyle(active ? '' : style)}
                     activeOpacity={0.85}
                   >
                     <Text style={[styles.styleChipText, active && styles.styleChipTextActive]}>
@@ -529,7 +529,12 @@ export default function MenuRecommendationsScreen() {
               placeholder="Please specify your coffee shop style"
               placeholderTextColor={COLORS.muted}
               value={shopStyleText}
-              onChangeText={setShopStyleText}
+              onChangeText={(value) => {
+                setShopStyleText(value);
+                if (value.trim()) {
+                  setSelectedShopStyle('');
+                }
+              }}
               onFocus={() => setSelectedShopStyle('')}
             />
           </View>
@@ -581,44 +586,48 @@ export default function MenuRecommendationsScreen() {
                   key={`${group.name}-${index}`}
                   renderRightActions={() => renderGroupDeleteAction(index)}
                   overshootRight={false}
+                  containerStyle={styles.groupSwipeContainer}
+                  childrenContainerStyle={styles.groupSwipeChildren}
                 >
-                  <View style={styles.groupCard}>
-                    <View style={styles.groupHeaderRow}>
-                      <View style={styles.groupTitleRow}>
-                        <Ionicons name="list" size={18} color={COLORS.muted} />
-                        <Text style={styles.groupText}>{group.name}</Text>
+                  <View style={styles.groupCardShadow}>
+                    <View style={styles.groupCard}>
+                      <View style={styles.groupHeaderRow}>
+                        <View style={styles.groupTitleRow}>
+                          <Ionicons name="list" size={18} color={COLORS.muted} />
+                          <Text style={styles.groupText}>{group.name}</Text>
+                        </View>
+                        <View style={styles.groupCountChip}>
+                          <Text style={styles.groupCountText}>
+                            {group.selectedBeverageCategories.length} categories
+                          </Text>
+                        </View>
                       </View>
-                      <View style={styles.groupCountChip}>
-                        <Text style={styles.groupCountText}>
-                          {group.selectedBeverageCategories.length} categories
-                        </Text>
-                      </View>
+
+                      <TouchableOpacity
+                        style={styles.groupAddButton}
+                        onPress={() => openCategoryModal(index)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="add-circle-outline" size={18} color={COLORS.accent} />
+                        <Text style={styles.groupAddText}>Add beverage category</Text>
+                      </TouchableOpacity>
+
+                      {group.selectedBeverageCategories.length > 0 && (
+                        <View style={styles.groupCategoryList}>
+                          {group.selectedBeverageCategories.map((id) => {
+                            const name = categoryNameById.get(id);
+                            if (!name) {
+                              return null;
+                            }
+                            return (
+                              <View key={`${group.name}-${id}`} style={styles.groupCategoryChip}>
+                                <Text style={styles.groupCategoryText}>{name}</Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
-
-                    <TouchableOpacity
-                      style={styles.groupAddButton}
-                      onPress={() => openCategoryModal(index)}
-                      activeOpacity={0.85}
-                    >
-                      <Ionicons name="add-circle-outline" size={18} color={COLORS.accent} />
-                      <Text style={styles.groupAddText}>Add beverage category</Text>
-                    </TouchableOpacity>
-
-                    {group.selectedBeverageCategories.length > 0 && (
-                      <View style={styles.groupCategoryList}>
-                        {group.selectedBeverageCategories.map((id) => {
-                          const name = categoryNameById.get(id);
-                          if (!name) {
-                            return null;
-                          }
-                          return (
-                            <View key={`${group.name}-${id}`} style={styles.groupCategoryChip}>
-                              <Text style={styles.groupCategoryText}>{name}</Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
                   </View>
                 </Swipeable>
               ))}
@@ -837,6 +846,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     color: COLORS.text,
     marginTop: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   rowBetween: {
     flexDirection: 'row',
@@ -854,13 +868,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.chip,
     padding: 8,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
   },
   layoutCardActive: {
     borderColor: COLORS.accent,
@@ -932,6 +946,8 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 12,
     paddingRight: 12,
+    paddingBottom: 6,
+    overflow: 'visible',
   },
   styleChip: {
     paddingVertical: 8,
@@ -939,7 +955,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: COLORS.chip,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   styleChipActive: {
     backgroundColor: COLORS.chipActive,
@@ -957,6 +978,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 12,
+    paddingBottom: 8,
+    overflow: 'visible',
   },
   pricingChip: {
     minWidth: 150,
@@ -966,7 +989,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.chip,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
   },
   pricingChipActive: {
     backgroundColor: COLORS.chipActive,
@@ -998,7 +1026,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.chip,
     borderWidth: 1,
-    borderColor: 'transparent',
+    borderColor: COLORS.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
   },
   optionChipActive: {
     backgroundColor: COLORS.chipActive,
@@ -1013,19 +1046,40 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   groupBadge: {
-    backgroundColor: COLORS.chipActive,
+    backgroundColor: COLORS.card,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   groupBadgeText: {
     fontSize: 10,
-    color: COLORS.accent,
+    color: COLORS.muted,
     fontWeight: '600',
   },
   groupList: {
     marginTop: 12,
     gap: 12,
+    paddingBottom: 6,
+    overflow: 'visible',
+  },
+  groupSwipeContainer: {
+    backgroundColor: 'transparent',
+    overflow: 'visible',
+  },
+  groupSwipeChildren: {
+    overflow: 'visible',
+    paddingBottom: 6,
+  },
+  groupCardShadow: {
+    borderRadius: 16,
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 4,
   },
   groupCard: {
     backgroundColor: COLORS.chip,
@@ -1127,6 +1181,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     backgroundColor: COLORS.highlight,
     color: COLORS.text,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   groupInputAction: {
     width: 36,

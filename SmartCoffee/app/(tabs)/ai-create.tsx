@@ -10,6 +10,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   View,
 } from 'react-native';
 
@@ -60,6 +61,13 @@ const CUP_TYPES = [
 ];
 const COLOR_STYLES = ['Black', 'White', 'Iced-crystal', 'Brown', 'Creamy'];
 const CATEGORIES = ['Seasonal', 'Signature', 'Special', 'Budget', 'Premium', 'Latte Art', 'Dirty Coffee'];
+const NUMBER_OPTIONS = [1, 2, 3];
+const PRICING_STRATEGIES = [
+  { key: 0, label: 'Budget', range: '20,000 - 40,000 VND' },
+  { key: 1, label: 'Moderate', range: '30,000 - 60,000 VND' },
+  { key: 2, label: 'Premium', range: '50,000 - 80,000 VND' },
+  { key: 3, label: 'Luxury', range: '70,000 - 120,000 VND' },
+];
 
 const SLIDER_KEYS = ['Bitterness', 'Sweetness', 'Body', 'Acidity'] as const;
 
@@ -93,6 +101,7 @@ export default function AiCreateScreen() {
   const [coffeeType, setCoffeeType] = useState('Robusta');
   const [roastLevel, setRoastLevel] = useState('Light');
   const [grindLevel, setGrindLevel] = useState('Coarse');
+  const [heatLevel] = useState('High');
 
   const [liquidType, setLiquidType] = useState('Water');
   const [milkType, setMilkType] = useState('None');
@@ -109,6 +118,9 @@ export default function AiCreateScreen() {
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
   const [margin, setMargin] = useState(35);
+  const [isUnique, setIsUnique] = useState(true);
+  const [numberOption, setNumberOption] = useState(3);
+  const [pricingStrategy, setPricingStrategy] = useState(2);
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -198,7 +210,7 @@ export default function AiCreateScreen() {
         selectedCoffeeTypeId: coffeeType,
         selectedRoastLevelId: roastLevel,
         selectedGrindSizeId: grindLevel,
-        selectedHeatLevelId: roastLevel,
+        selectedHeatLevelId: heatLevel,
       },
       ingredients: {
         selectedLiquidId: liquidType,
@@ -222,6 +234,9 @@ export default function AiCreateScreen() {
       pricing: {
         marginPercentage: margin,
       },
+      numberOption,
+      isUnique,
+      pricingStrategy,
     };
 
     try {
@@ -759,6 +774,49 @@ export default function AiCreateScreen() {
 
               <View style={styles.sectionSpacing} />
 
+              <ThemedText style={styles.subSectionTitle}>Number of options</ThemedText>
+              <ThemedText style={styles.helperText}>Choose how many recipes to generate</ThemedText>
+              <View style={styles.tags}>
+                {NUMBER_OPTIONS.map((option) => {
+                  const isSelected = option === numberOption;
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => setNumberOption(option)}
+                      style={[styles.optionChip, isSelected && styles.optionChipSelected]}>
+                      <ThemedText style={[styles.optionText, isSelected && styles.optionTextSelected]}>
+                        {option}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
+              <ThemedText style={styles.subSectionTitle}>Pricing Strategy</ThemedText>
+              <ThemedText style={styles.helperText}>Select a pricing tier for the recipe</ThemedText>
+              <View style={styles.pricingRow}>
+                {PRICING_STRATEGIES.map((option) => {
+                  const isSelected = option.key === pricingStrategy;
+                  return (
+                    <Pressable
+                      key={option.key}
+                      onPress={() => setPricingStrategy(option.key)}
+                      style={[styles.pricingChip, isSelected && styles.pricingChipActive]}>
+                      <ThemedText style={[styles.pricingLabel, isSelected && styles.pricingLabelActive]}>
+                        {option.label}
+                      </ThemedText>
+                      <ThemedText style={[styles.pricingRange, isSelected && styles.pricingRangeActive]}>
+                        {option.range}
+                      </ThemedText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <View style={styles.sectionSpacing} />
+
               <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
               <View style={styles.groupHeader}>
                 <ThemedText style={styles.groupTitle}>Margin</ThemedText>
@@ -777,6 +835,19 @@ export default function AiCreateScreen() {
               <View style={styles.sliderScale}>
                 <ThemedText style={styles.scaleText}>0%</ThemedText>
                 <ThemedText style={styles.scaleText}>70%</ThemedText>
+              </View>
+              <View style={styles.sectionSpacing} />
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleTextWrap}>
+                  <ThemedText style={styles.subSectionTitle}>Check uniqueness?</ThemedText>
+                  <ThemedText style={styles.helperText}>Enable to evaluate recipe uniqueness</ThemedText>
+                </View>
+                <Switch
+                  value={isUnique}
+                  onValueChange={setIsUnique}
+                  trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
+                  thumbColor={isUnique ? '#6B3E1F' : '#A3A3A3'}
+                />
               </View>
               <Pressable
                 style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
@@ -971,6 +1042,49 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 12,
   },
+  pricingRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  pricingChip: {
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#E7D8CB',
+    backgroundColor: '#FFFFFF',
+    minWidth: 140,
+  },
+  pricingChipActive: {
+    backgroundColor: '#6B3E1F',
+    borderColor: '#6B3E1F',
+  },
+  pricingLabel: {
+    fontSize: 12,
+    color: '#6B3E1F',
+    fontFamily: Fonts.rounded,
+  },
+  pricingLabelActive: {
+    color: '#FFFFFF',
+  },
+  pricingRange: {
+    fontSize: 10,
+    color: '#8A7B70',
+    marginTop: 2,
+  },
+  pricingRangeActive: {
+    color: '#F5E8DD',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  toggleTextWrap: {
+    flex: 1,
+  },
   groupHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1001,6 +1115,27 @@ const styles = StyleSheet.create({
     color: '#6B3E1F',
   },
   tagTextSelected: {
+    color: '#FFFFFF',
+  },
+  optionChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D8C3B4',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionChipSelected: {
+    backgroundColor: '#6B3E1F',
+    borderColor: '#6B3E1F',
+  },
+  optionText: {
+    fontSize: 14,
+    color: '#6B3E1F',
+    fontFamily: Fonts.rounded,
+  },
+  optionTextSelected: {
     color: '#FFFFFF',
   },
   cardsRow: {
