@@ -384,28 +384,13 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!walletId || !lastTopupAmount) {
+    if (!lastTopupAmount) {
       showToast('Missing top-up data. Please try again.');
       return;
     }
 
     try {
       setSuccessSubmitting(true);
-      console.log('[Top-up Success] Confirming top-up with backend...', { walletId, lastTopupAmount });
-      const response = await authorizedFetch(
-        `${AUTH_BASE_URL}/Wallet/${walletId}/top-up/success?amount=${lastTopupAmount}`,
-        {
-          method: 'POST',
-          headers: {
-            Accept: '*/*',
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
-      }
-
       await refreshProfile();
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
@@ -417,7 +402,7 @@ export default function ProfileScreen() {
         closeTimerRef.current = null;
       }, 3000);
     } catch (error) {
-      showToast('Unable to confirm top-up.');
+      showToast('Payment appears successful, but failed to refresh wallet data. Please pull to refresh.');
     } finally {
       setSuccessSubmitting(false);
     }
