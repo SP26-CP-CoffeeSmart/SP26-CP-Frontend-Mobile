@@ -3,6 +3,7 @@ import {
     ActivityIndicator,
     Modal,
     RefreshControl,
+    ScrollView,
     SectionList,
     StyleSheet,
     Text,
@@ -28,6 +29,35 @@ interface HistoryItem {
     createdAtMs: number;
     noteId?: string | number | null;
 }
+
+type ImportDetailResponse = {
+    importDetailId?: number;
+    importNoteId?: number;
+    ingredientId?: number;
+    currentQuantity?: number;
+    importQuantity?: number;
+    updatedQuantity?: number;
+    measurement?: string | null;
+};
+
+type ExportDetailResponse = {
+    exportDetailId?: number;
+    exportNoteId?: number;
+    ingredientId?: number;
+    currentQuantity?: number;
+    exportQuantity?: number;
+    remainQuantity?: number;
+    measurement?: string | null;
+};
+
+type HistoryDetail =
+    | ({ kind: 'import' } & ImportDetailResponse)
+    | ({ kind: 'export' } & ExportDetailResponse);
+
+type InventoryLookup = {
+    name: string;
+    measurement?: string | null;
+};
 
 const COLORS = {
     background: '#F7F2EE',
@@ -69,6 +99,17 @@ LocaleConfig.locales.en = {
     today: 'Today',
 };
 LocaleConfig.defaultLocale = 'en';
+
+const APP_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const APP_TIME_ZONE_OFFSET_MINUTES = 7 * 60;
+
+const formatDateKey = (date: Date) =>
+    new Intl.DateTimeFormat('en-CA', {
+        timeZone: APP_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(date);
 
 const getTypeConfig = (type: HistoryType) => {
     if (type === 'import') {
@@ -112,47 +153,80 @@ export default function InventoryHistoryScreen() {
     const [draftToDate, setDraftToDate] = useState('');
     const [appliedFromDate, setAppliedFromDate] = useState('');
     const [appliedToDate, setAppliedToDate] = useState('');
+    const [inventoryMap, setInventoryMap] = useState<Record<string, InventoryLookup>>({});
+    const [detailItems, setDetailItems] = useState<HistoryDetail[]>([]);
+    const [detailLoading, setDetailLoading] = useState(false);
+    const [detailError, setDetailError] = useState<string | null>(null);
 
     const parseDate = (value?: string | null) => {
         if (!value) return null;
-        const parsed = new Date(value);
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+
+        const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(trimmed);
+        if (hasTimezone) {
+            const parsed = new Date(trimmed);
+            return Number.isNaN(parsed.getTime()) ? null : parsed;
+        }
+
+        const match = trimmed.match(
+            /^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/
+        );
+        if (!match) {
+            const parsed = new Date(trimmed);
+            return Number.isNaN(parsed.getTime()) ? null : parsed;
+        }
+
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const hour = Number(match[4]);
+        const minute = Number(match[5]);
+        const second = Number(match[6] ?? '0');
+        const milli = Number(String(match[7] ?? '0').padEnd(3, '0'));
+
+        const utcMs = Date.UTC(year, month - 1, day, hour, minute, second, milli);
+        const adjusted = new Date(utcMs - APP_TIME_ZONE_OFFSET_MINUTES * 60 * 1000);
+        return Number.isNaN(adjusted.getTime()) ? null : adjusted;
     };
 
     const formatTime = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return '--:--';
-        return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        return new Intl.DateTimeFormat('en-US', {
+            timeZone: APP_TIME_ZONE,
+            hour: '2-digit',
+            minute: '2-digit',
+        }).format(parsed);
     };
 
     const formatDateLabel = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown date';
-        const today = new Date();
-        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const startOfYesterday = new Date(startOfToday);
-        startOfYesterday.setDate(startOfToday.getDate() - 1);
-
-        const startOfDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-        if (startOfDate.getTime() === startOfToday.getTime()) return 'Today';
-        if (startOfDate.getTime() === startOfYesterday.getTime()) return 'Yesterday';
-        return parsed.toLocaleDateString('en-US', {
+        const todayKey = formatDateKey(new Date());
+        const yesterdayKey = formatDateKey(new Date(Date.now() - 24 * 60 * 60 * 1000));
+        const parsedKey = formatDateKey(parsed);
+        if (parsedKey === todayKey) return 'Today';
+        if (parsedKey === yesterdayKey) return 'Yesterday';
+        return new Intl.DateTimeFormat('en-US', {
+            timeZone: APP_TIME_ZONE,
             day: '2-digit',
             month: 'long',
             year: 'numeric',
-        });
+        }).format(parsed);
     };
 
     const formatDateTime = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown time';
-        return parsed.toLocaleString('en-US', {
+        return new Intl.DateTimeFormat('en-US', {
+            timeZone: APP_TIME_ZONE,
             day: '2-digit',
             month: 'long',
             year: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
-        });
+        }).format(parsed);
     };
 
     const formatDateInputValue = (value?: Date | null) => {
@@ -161,6 +235,11 @@ export default function InventoryHistoryScreen() {
         const month = String(value.getMonth() + 1).padStart(2, '0');
         const day = String(value.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
+    };
+
+    const formatQuantity = (quantity?: number | null, measurement?: string | null) => {
+        if (quantity === null || quantity === undefined) return '--';
+        return measurement ? `${quantity} ${measurement}` : `${quantity}`;
     };
 
     const parseDateInput = (value: string) => {
@@ -264,12 +343,42 @@ export default function InventoryHistoryScreen() {
     const isToday = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return false;
-        const today = new Date();
-        return (
-            parsed.getFullYear() === today.getFullYear() &&
-            parsed.getMonth() === today.getMonth() &&
-            parsed.getDate() === today.getDate()
-        );
+        return formatDateKey(parsed) === formatDateKey(new Date());
+    };
+
+    const loadInventoryLookup = async () => {
+        if (!coffeeShopId) {
+            setInventoryMap({});
+            return;
+        }
+
+        try {
+            const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId));
+            if (!response.ok) {
+                throw new Error('Inventory request failed');
+            }
+
+            const data = await response.json();
+            const list = Array.isArray(data) ? data : [];
+            const nextMap: Record<string, InventoryLookup> = {};
+            list.forEach((item: any) => {
+                const ingredientId = item.ingredientId ?? item.IngredientId;
+                if (!ingredientId) return;
+                const name =
+                    item.ingredient?.name ??
+                    item.ingredient?.Name ??
+                    item.Ingredient?.Name ??
+                    `Ingredient #${ingredientId}`;
+                const measurement = item.measurement ?? item.Measurement ?? item.ingredient?.measurement ?? null;
+                nextMap[String(ingredientId)] = {
+                    name: String(name),
+                    measurement: measurement ? String(measurement) : null,
+                };
+            });
+            setInventoryMap(nextMap);
+        } catch (fetchError) {
+            setInventoryMap({});
+        }
     };
 
     const loadHistory = async (isRefresh = false) => {
@@ -347,6 +456,60 @@ export default function InventoryHistoryScreen() {
     useEffect(() => {
         loadHistory(false);
     }, [coffeeShopId]);
+
+    useEffect(() => {
+        loadInventoryLookup();
+    }, [coffeeShopId]);
+
+    useEffect(() => {
+        const fetchDetails = async () => {
+            if (!selectedItem?.noteId) {
+                setDetailItems([]);
+                setDetailError(null);
+                return;
+            }
+
+            try {
+                setDetailLoading(true);
+                setDetailError(null);
+
+                const endpoint =
+                    selectedItem.type === 'import'
+                        ? API_ENDPOINTS.importDetail.getByNote(selectedItem.noteId)
+                        : API_ENDPOINTS.exportDetail.getByNote(selectedItem.noteId);
+
+                const response = await authorizedFetch(endpoint);
+                if (!response.ok) {
+                    throw new Error('Detail request failed');
+                }
+
+                const data = await response.json();
+                const list = Array.isArray(data) ? data : [];
+                if (selectedItem.type === 'import') {
+                    const mapped: HistoryDetail[] = list.map((detail: ImportDetailResponse, index: number) => ({
+                        kind: 'import',
+                        ...detail,
+                        importDetailId: detail.importDetailId ?? index,
+                    }));
+                    setDetailItems(mapped);
+                } else {
+                    const mapped: HistoryDetail[] = list.map((detail: ExportDetailResponse, index: number) => ({
+                        kind: 'export',
+                        ...detail,
+                        exportDetailId: detail.exportDetailId ?? index,
+                    }));
+                    setDetailItems(mapped);
+                }
+            } catch (fetchError) {
+                setDetailItems([]);
+                setDetailError('Unable to load note items.');
+            } finally {
+                setDetailLoading(false);
+            }
+        };
+
+        fetchDetails();
+    }, [selectedItem]);
 
     const filteredSections = useMemo(() => {
         const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -593,6 +756,61 @@ export default function InventoryHistoryScreen() {
                                     <View style={styles.modalRow}>
                                         <Text style={styles.modalLabel}>Time</Text>
                                         <Text style={styles.modalValue}>{formatDateTime(selectedItem.createdAt)}</Text>
+                                    </View>
+                                    <View style={styles.modalSection}>
+                                        <View style={styles.modalSectionHeader}>
+                                            <Text style={styles.modalSectionTitle}>Items</Text>
+                                            <Text style={styles.modalSectionCount}>{detailItems.length}</Text>
+                                        </View>
+                                        {detailLoading ? (
+                                            <View style={styles.modalInlineState}>
+                                                <ActivityIndicator size="small" color={COLORS.accent} />
+                                                <Text style={styles.modalInlineText}>Loading items...</Text>
+                                            </View>
+                                        ) : detailError ? (
+                                            <Text style={styles.modalInlineText}>{detailError}</Text>
+                                        ) : detailItems.length ? (
+                                            <ScrollView
+                                                style={styles.modalItemsScroll}
+                                                contentContainerStyle={styles.modalItemsContent}
+                                                showsVerticalScrollIndicator={false}
+                                            >
+                                                {detailItems.map((detail, index) => {
+                                                    const ingredientId = detail.ingredientId ?? null;
+                                                    const lookup = ingredientId ? inventoryMap[String(ingredientId)] : null;
+                                                    const displayName =
+                                                        lookup?.name || (ingredientId ? `Ingredient #${ingredientId}` : 'Unknown item');
+                                                    const measurement = detail.measurement ?? lookup?.measurement ?? null;
+                                                    const quantityValue =
+                                                        detail.kind === 'import'
+                                                            ? formatQuantity(detail.importQuantity, measurement)
+                                                            : formatQuantity(detail.exportQuantity, measurement);
+                                                    const secondValue =
+                                                        detail.kind === 'import'
+                                                            ? formatQuantity(detail.updatedQuantity, measurement)
+                                                            : formatQuantity(detail.remainQuantity, measurement);
+                                                    return (
+                                                        <View key={`${detail.kind}-${ingredientId ?? 'item'}-${index}`} style={styles.modalItemCard}>
+                                                            <Text style={styles.modalItemTitle}>{displayName}</Text>
+                                                            <View style={styles.modalItemRow}>
+                                                                <Text style={styles.modalItemLabel}>
+                                                                    {detail.kind === 'import' ? 'Import qty' : 'Export qty'}
+                                                                </Text>
+                                                                <Text style={styles.modalItemValue}>{quantityValue}</Text>
+                                                            </View>
+                                                            <View style={styles.modalItemRow}>
+                                                                <Text style={styles.modalItemLabel}>
+                                                                    {detail.kind === 'import' ? 'Updated qty' : 'Remain qty'}
+                                                                </Text>
+                                                                <Text style={styles.modalItemValue}>{secondValue}</Text>
+                                                            </View>
+                                                        </View>
+                                                    );
+                                                })}
+                                            </ScrollView>
+                                        ) : (
+                                            <Text style={styles.modalInlineText}>No items found for this note.</Text>
+                                        )}
                                     </View>
                                 </View>
                                 <TouchableOpacity style={styles.modalCloseButton} onPress={() => setSelectedItem(null)}>
@@ -945,6 +1163,7 @@ const styles = StyleSheet.create({
         padding: 18,
         borderWidth: 1,
         borderColor: COLORS.border,
+        maxHeight: '85%',
     },
     modalHeader: {
         flexDirection: 'row',
@@ -982,6 +1201,72 @@ const styles = StyleSheet.create({
     modalBody: {
         marginTop: 16,
         gap: 10,
+    },
+    modalSection: {
+        marginTop: 6,
+        gap: 10,
+    },
+    modalSectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalSectionTitle: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: COLORS.muted,
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+    },
+    modalSectionCount: {
+        fontSize: 12,
+        color: COLORS.muted,
+        fontWeight: '600',
+    },
+    modalInlineState: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 6,
+    },
+    modalInlineText: {
+        fontSize: 12,
+        color: COLORS.muted,
+    },
+    modalItemsScroll: {
+        maxHeight: 280,
+    },
+    modalItemsContent: {
+        gap: 10,
+        paddingBottom: 4,
+    },
+    modalItemCard: {
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.surface,
+        padding: 12,
+        gap: 8,
+    },
+    modalItemTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: COLORS.ink,
+    },
+    modalItemRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalItemLabel: {
+        fontSize: 12,
+        color: COLORS.muted,
+        fontWeight: '600',
+    },
+    modalItemValue: {
+        fontSize: 12,
+        color: COLORS.ink,
+        fontWeight: '700',
     },
     modalRow: {
         flexDirection: 'row',
