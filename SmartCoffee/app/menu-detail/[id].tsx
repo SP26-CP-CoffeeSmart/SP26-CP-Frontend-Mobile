@@ -3,6 +3,7 @@ import {
   Alert,
   Dimensions,
   Image,
+  ImageBackground,
   Linking,
   Modal,
   Platform,
@@ -16,7 +17,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+  Swipeable,
+} from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
@@ -420,20 +426,24 @@ export default function MenuDetailScreen() {
       menuSizeValue: storedMenuItems.length,
     };
 
+    const menuForDetails = {
+      ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
+      ...(menuFromState ?? {}),
+      menuItems: storedMenuItems,
+      menuSizeValue: storedMenuItems.length,
+      config: resolvedConfig,
+    };
+
     const payload = {
-      menus: {
-        ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
-        ...(menuFromState ?? {}),
-        menuItems: storedMenuItems,
-        menuSizeValue: storedMenuItems.length,
-        config: resolvedConfig,
-      },
+      menu: menuForDetails,
+      menus: menuForDetails,
       config: resolvedConfig,
     };
 
     try {
       setDetailsLoading(true);
       setDetailsReady(false);
+      console.log('[Menu Details] Request payload:', JSON.stringify(payload, null, 2));
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuDetails(), {
         method: 'POST',
         headers: {
@@ -632,6 +642,18 @@ export default function MenuDetailScreen() {
     });
   };
 
+  const renderItemDeleteAction = (menuItem: any) => (
+    <View style={styles.swipeActionWrap}>
+      <TouchableOpacity
+        style={styles.swipeDeleteButton}
+        onPress={() => handleRemoveItem(menuItem)}
+      >
+        <Ionicons name="trash" size={18} color="#FFFFFF" />
+        <Text style={styles.swipeDeleteText}>Remove</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const handleRegenerate = async () => {
     if (regenerating) return;
     if (!canRegenerate) {
@@ -686,7 +708,7 @@ export default function MenuDetailScreen() {
 
     const payload = {
       config: resolvedConfig,
-      menus: currentMenuPayload,
+      menu: currentMenuPayload,
       newItemCount: safeCount,
     };
 
@@ -781,9 +803,33 @@ export default function MenuDetailScreen() {
   };
 
   const buildMenuRenderPayload = () => {
+    const sanitizeMenuForP3 = (menu: any) => {
+      if (!menu || typeof menu !== 'object') return menu;
+      const { config: _config, menuSizeValue: _menuSizeValue, ...rest } = menu;
+      return rest;
+    };
+
     if (menuDetailsPayload) {
-      return menuDetailsPayload;
+      const source = menuDetailsPayload as any;
+      const normalizedMenu =
+        source?.menu ??
+        source?.p3Input?.menu ??
+        (Array.isArray(source?.menus) ? source.menus[0] : source?.menus) ??
+        null;
+      const normalizedConfig =
+        source?.config ??
+        source?.p3Input?.config ??
+        normalizedMenu?.config ??
+        null;
+
+      if (normalizedMenu) {
+        return {
+          menu: sanitizeMenuForP3(normalizedMenu),
+          config: normalizedConfig,
+        };
+      }
     }
+
     const menuFromState =
       menuDraft ??
       currentMenu ??
@@ -796,14 +842,16 @@ export default function MenuDetailScreen() {
       menuSizeValue: storedMenuItems.length,
     };
 
+    const menuForRender = {
+      ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
+      ...(menuFromState ?? {}),
+      menuItems: storedMenuItems,
+      menuSizeValue: storedMenuItems.length,
+      config: resolvedConfig,
+    };
+
     return {
-      menus: {
-        ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
-        ...(menuFromState ?? {}),
-        menuItems: storedMenuItems,
-        menuSizeValue: storedMenuItems.length,
-        config: resolvedConfig,
-      },
+      menu: sanitizeMenuForP3(menuForRender),
       config: resolvedConfig,
     };
   };
@@ -816,23 +864,34 @@ export default function MenuDetailScreen() {
     }
 
     const payload = buildMenuRenderPayload();
-    console.log('[Menu Render] Request payload:', payload);
+    const rawP2Payload = (() => {
+      const source = menuDetailsPayload as any;
+      if (source?.menu && source?.config) {
+        return {
+          menu: source.menu,
+          config: source.config,
+        };
+      }
+      if (source?.p3Input?.menu && source?.p3Input?.config) {
+        return {
+          menu: source.p3Input.menu,
+          config: source.p3Input.config,
+        };
+      }
+      return null;
+    })();
 
-    try {
-      setRenderingMenu(true);
+    const callRenderApi = async (requestPayload: any, label: string) => {
+      console.log(`[Menu Render] Request payload (${label}):`, JSON.stringify(requestPayload, null, 2));
+
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRender(), {
         method: 'POST',
         headers: {
           Accept: '*/*',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestPayload),
       });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
 
       const responseText = await response.text();
       let responsePayload: any = null;
@@ -844,7 +903,49 @@ export default function MenuDetailScreen() {
         }
       }
 
-      const finalUrl = responsePayload?.ImageUrl ?? responsePayload?.imageUrl ?? null;
+      if (!response.ok) {
+        const backendError =
+          responsePayload?.error ?? responsePayload?.message ?? responseText;
+        throw new Error(backendError || `Request failed (${response.status})`);
+      }
+
+      if (responsePayload && typeof responsePayload === 'object' && responsePayload.success === false) {
+        throw new Error(responsePayload?.error || 'Menu render failed.');
+      }
+
+      const finalUrl =
+        responsePayload?.ImageUrl ??
+        responsePayload?.imageUrl ??
+        (Array.isArray(responsePayload?.imageUrls) ? responsePayload.imageUrls[0] : null) ??
+        null;
+
+      return { finalUrl, responsePayload };
+    };
+
+    try {
+      setRenderingMenu(true);
+      let finalUrl: string | null = null;
+
+      try {
+        const result = await callRenderApi(payload, 'normalized');
+        finalUrl = result.finalUrl;
+      } catch (firstError) {
+        if (!rawP2Payload) {
+          throw firstError;
+        }
+
+        const shouldRetryWithRaw =
+          JSON.stringify(rawP2Payload) !== JSON.stringify(payload);
+
+        if (!shouldRetryWithRaw) {
+          throw firstError;
+        }
+
+        console.log('[Menu Render] Normalized payload failed, retrying with raw P2 payload');
+        const retryResult = await callRenderApi(rawP2Payload, 'raw-p2');
+        finalUrl = retryResult.finalUrl;
+      }
+
       if (finalUrl) {
         setRenderedMenuUrl(finalUrl);
       }
@@ -962,15 +1063,23 @@ export default function MenuDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color="#3C2A21" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
-          {title || 'Menu Detail'}
-        </Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <ImageBackground
+        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        style={styles.header}
+        imageStyle={styles.headerImage}
+        blurRadius={5}
+      >
+        <View style={styles.headerOverlay} />
+        <View style={styles.headerContent}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
+            {title || 'Menu Detail'}
+          </Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </ImageBackground>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {renderedMenuUrl ? (
@@ -986,8 +1095,52 @@ export default function MenuDetailScreen() {
           </View>
         ) : null}
 
+        {groupedItems.length === 0 ? (
+          <Text style={styles.emptyText}>No menu items found in this menu.</Text>
+        ) : (
+          groupedItems.map((group, groupIndex) => (
+            <View key={`group-${group.beverageCategoryId}-${groupIndex}`} style={styles.groupSection}>
+              <Text style={styles.groupTitle}>{group.groupName}</Text>
+              <View style={styles.itemList}>
+                {group.items.map((item, itemIndex) => (
+                  <Swipeable
+                    key={`${group.beverageCategoryId}-item-${itemIndex}`}
+                    renderRightActions={() => renderItemDeleteAction(item.sourceMenuItem)}
+                    overshootRight={false}
+                    containerStyle={styles.itemSwipeContainer}
+                    childrenContainerStyle={styles.itemSwipeChildren}
+                  >
+                    <TouchableOpacity
+                      style={styles.itemCard}
+                      onPress={() => handleItemPress(item)}
+                      activeOpacity={0.75}
+                    >
+                      <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
+                      <View style={styles.itemContent}>
+                        <Text style={styles.itemName}>{item.recipeName}</Text>
+                        {item.description ? (
+                          <Text style={styles.itemDescription} numberOfLines={2}>
+                            {item.description}
+                          </Text>
+                        ) : null}
+                        {item.priceInfo ? (
+                          <Text style={styles.itemPrice}>{item.priceInfo}</Text>
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  </Swipeable>
+                ))}
+              </View>
+            </View>
+          ))
+        )}
+
         {!detailsLoading && !detailsReady && !renderedMenuUrl ? (
           <View style={styles.actionCard}>
+            <View style={styles.actionCardHeader}>
+              <Ionicons name="options-outline" size={18} color="#6B3F1D" />
+              <Text style={styles.actionCardTitle}>Regenerate Menu Items</Text>
+            </View>
             <View style={styles.regenerateRow}>
               <Text style={styles.regenerateLabel}>Quantity</Text>
               <TextInput
@@ -1000,7 +1153,7 @@ export default function MenuDetailScreen() {
               />
             </View>
             <Text style={styles.regenerateHint}>
-              Keep the selected items, recreate other items to meet the menu requirements.
+              Keep selected items and recreate remaining items to match menu size.
             </Text>
             <TouchableOpacity
               style={[
@@ -1011,88 +1164,41 @@ export default function MenuDetailScreen() {
               disabled={regenerating || !canRegenerate}
             >
               <Text style={styles.regenerateButtonText}>
-                {regenerating ? 'Generating...' : 'Generate Again'}
+                {regenerating ? 'Regenerating...' : 'Generate Again'}
               </Text>
-              <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
+              <Ionicons name="refresh" size={16} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         ) : null}
-
-        {groupedItems.length === 0 ? (
-          <Text style={styles.emptyText}>No menu items found in this menu.</Text>
-        ) : (
-          groupedItems.map((group, groupIndex) => (
-            <View key={`group-${group.beverageCategoryId}-${groupIndex}`} style={styles.groupSection}>
-              <Text style={styles.groupTitle}>{group.groupName}</Text>
-              <View style={styles.itemList}>
-                {group.items.map((item, itemIndex) => (
-                  <TouchableOpacity
-                    key={`${group.beverageCategoryId}-item-${itemIndex}`}
-                    style={styles.itemCard}
-                    onPress={() => handleItemPress(item)}
-                    activeOpacity={0.7}
-                  >
-                    <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
-
-                    <View style={styles.itemContent}>
-                      <View style={styles.itemHeaderRow}>
-                        <Text style={styles.itemName}>{item.recipeName}</Text>
-                        <TouchableOpacity
-                          style={styles.removeButton}
-                          onPress={() => handleRemoveItem(item.sourceMenuItem)}
-                        >
-                          <Text style={styles.removeButtonText}>Remove</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {item.description && (
-                        <Text style={styles.itemDescription} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      )}
-
-                      {item.priceInfo && (
-                        <Text style={styles.itemPrice}>{item.priceInfo}</Text>
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          ))
-        )}
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        {!renderedMenuUrl ? (
+        <View style={styles.bottomActionsRow}>
+          {!renderedMenuUrl ? (
+            <TouchableOpacity
+              style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
+              onPress={detailsReady ? handleRenderMenu : handleGenerateDetails}
+              disabled={detailsLoading || (detailsReady && renderingMenu)}
+            >
+              <Text style={styles.detailButtonText}>
+                {detailsReady
+                  ? renderingMenu
+                    ? 'Rendering...'
+                    : 'Save & render menu'
+                  : detailsLoading
+                    ? 'Loading Details...'
+                    : 'Recipe Details'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
-            style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
-            onPress={detailsReady ? handleRenderMenu : handleGenerateDetails}
-            disabled={detailsLoading || (detailsReady && renderingMenu)}
+            style={[styles.goBackButton, renderedMenuUrl && styles.goBackButtonFull]}
+            onPress={() => router.replace('/(tabs)/menu')}
           >
-            <Text style={styles.detailButtonText}>
-              {detailsReady
-                ? renderingMenu
-                  ? 'Rendering...'
-                  : 'Save and Render Menu'
-                : detailsLoading
-                  ? 'Generating Details...'
-                  : 'Generate Recipe Details'}
-            </Text>
-            <Ionicons
-              name={detailsReady ? 'image' : 'sparkles'}
-              size={16}
-              color="#FFFFFF"
-            />
+            <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+            <Text style={styles.goBackButtonText}>Go Back</Text>
           </TouchableOpacity>
-        ) : null}
-        <TouchableOpacity
-          style={styles.goBackButton}
-          onPress={() => router.replace('/(tabs)/menu')}
-        >
-          <Ionicons name="arrow-back" size={16} color="#3C2A21" />
-          <Text style={styles.goBackButtonText}>Go Back</Text>
-        </TouchableOpacity>
+        </View>
       </View>
 
       <Modal
@@ -1185,40 +1291,50 @@ export default function MenuDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F6F1EB',
+    backgroundColor: '#F6F2EE',
   },
   header: {
+    height: 180,
+    justifyContent: 'center',
+    paddingBottom: 0,
+    paddingHorizontal: 16,
+  },
+  headerImage: {
+    resizeMode: 'cover',
+  },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 48,
-    paddingBottom: 12,
-    backgroundColor: '#F6F1EB',
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1E7DC',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#3C2A21',
+    color: '#FFFFFF',
     flex: 1,
     textAlign: 'center',
     marginHorizontal: 8,
-    lineHeight: 22,
+    lineHeight: 24,
   },
   headerSpacer: {
-    width: 36,
+    width: 38,
   },
   content: {
     paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingBottom: 140,
+    paddingTop: 14,
   },
   emptyText: {
     fontSize: 12,
@@ -1230,15 +1346,24 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   groupTitle: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 30,
+    fontWeight: '800',
     color: '#3C2A21',
-    marginBottom: 12,
+    marginBottom: 14,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1.4,
+    textAlign: 'center',
   },
   itemList: {
     gap: 12,
+    overflow: 'visible',
+  },
+  itemSwipeContainer: {
+    marginBottom: 4,
+    overflow: 'visible',
+  },
+  itemSwipeChildren: {
+    overflow: 'visible',
   },
   itemHeaderRow: {
     flexDirection: 'row',
@@ -1248,92 +1373,105 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    overflow: 'hidden',
+    borderRadius: 20,
+    padding: 14,
     borderWidth: 1,
-    borderColor: '#E8DED3',
+    borderColor: '#F1EAE2',
     shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
+    marginVertical: 1,
   },
   itemImage: {
-    width: 100,
-    height: 100,
-    backgroundColor: '#E8DED3',
+    width: 96,
+    height: 96,
+    borderRadius: 18,
+    backgroundColor: '#EEE5DB',
   },
   itemContent: {
     flex: 1,
-    padding: 10,
-    justifyContent: 'space-between',
+    marginLeft: 12,
+    gap: 6,
   },
   itemName: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#3C2A21',
-    flex: 1,
-    marginRight: 8,
+    color: '#2C1B13',
   },
   itemDescription: {
-    fontSize: 11,
-    color: '#5E4A3A',
+    fontSize: 12,
+    color: '#8B7A6A',
     lineHeight: 16,
-    marginBottom: 6,
   },
   itemPrice: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#8B5E3C',
-  },
-  removeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: '#F1E7DC',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#2C1B13',
   },
   detailButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#4D7A6F',
-  },
-  removeButtonText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#3C2A21',
-    textTransform: 'uppercase',
+    paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: '#2C1B13',
   },
   detailButtonText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   actionCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 14,
+    borderRadius: 20,
+    padding: 16,
     borderWidth: 1,
     borderColor: '#E6D9CC',
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    elevation: 3,
     gap: 10,
-    marginBottom: 18,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  actionCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  actionCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#3C2A21',
   },
   bottomBar: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingTop: 14,
+    paddingBottom: 14,
     backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#E6D9CC',
+    borderRadius: 20,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  bottomActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
   regenerateRow: {
@@ -1350,15 +1488,16 @@ const styles = StyleSheet.create({
     flex: 1,
     borderWidth: 1,
     borderColor: '#D7C7B8',
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     color: '#3C2A21',
     backgroundColor: '#FDFBFA',
   },
   regenerateHint: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#A57C52',
+    lineHeight: 18,
   },
   regenerateButton: {
     flexDirection: 'row',
@@ -1378,16 +1517,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   goBackButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
-    borderRadius: 10,
+    paddingVertical: 12,
+    borderRadius: 14,
     backgroundColor: '#F1E7DC',
+    borderWidth: 1,
+    borderColor: '#E5D8CC',
+  },
+  goBackButtonFull: {
+    flex: 1,
   },
   goBackButtonText: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '700',
     color: '#3C2A21',
   },
@@ -1519,6 +1664,25 @@ const styles = StyleSheet.create({
   renderSuccessButtonPrimaryText: {
     fontSize: 13,
     fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  swipeActionWrap: {
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    marginLeft: 12,
+  },
+  swipeDeleteButton: {
+    width: 96,
+    height: 96,
+    backgroundColor: '#B23B3B',
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  swipeDeleteText: {
+    fontSize: 11,
+    fontWeight: '700',
     color: '#FFFFFF',
   },
 });
