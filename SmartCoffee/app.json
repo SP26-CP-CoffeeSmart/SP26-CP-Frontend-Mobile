@@ -15,6 +15,7 @@
       }
     },
     "android": {
+      "package": "com.akaizz.smartcoffee",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -47,6 +48,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6bab565f-8f2d-4295-ae47-912bcc2b0216"
+      }
+    },
+    "owner": "akaizz"
   }
 }
