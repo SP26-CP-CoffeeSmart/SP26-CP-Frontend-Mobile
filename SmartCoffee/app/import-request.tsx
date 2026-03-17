@@ -54,8 +54,6 @@ type ImportDetail = {
   ingredientId: number;
   ingredient: Ingredient;
   importQuantity: number;
-  expirationDate: string;
-  supplier: string;
 };
 
 type ImportNoteResponse = {
@@ -218,17 +216,6 @@ export default function ImportRequestScreen() {
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
-  const buildManualItemNote = (detail: ImportDetail) => {
-    const parts: string[] = [];
-    if (detail.supplier.trim()) {
-      parts.push(`Supplier: ${detail.supplier.trim()}`);
-    }
-    if (detail.expirationDate.trim()) {
-      parts.push(`Expiry: ${detail.expirationDate.trim()}`);
-    }
-    return parts.join(' | ');
-  };
-
   const details = activeTab === 'manual' ? manualDetails : orderDetails;
 
   const categoryOptions = useMemo(() => {
@@ -306,8 +293,6 @@ export default function ImportRequestScreen() {
           ingredientId: ingredient.ingredientId,
           ingredient,
           importQuantity: 1,
-          expirationDate: '',
-          supplier: '',
         },
       ];
     });
@@ -329,18 +314,6 @@ export default function ImportRequestScreen() {
     setManualDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
   };
 
-  const handleUpdateDetailField = (
-    ingredientId: number,
-    field: 'expirationDate' | 'supplier',
-    value: string
-  ) => {
-    setManualDetails((prev) =>
-      prev.map((detail) =>
-        detail.ingredientId === ingredientId ? { ...detail, [field]: value } : detail
-      )
-    );
-  };
-
   const handleLoadOrder = () => {
     if (!orderId.trim()) {
       Alert.alert('Missing order ID', 'Please enter an order ID to continue.');
@@ -352,15 +325,11 @@ export default function ImportRequestScreen() {
         ingredientId: MOCK_INGREDIENTS[0].ingredientId,
         ingredient: MOCK_INGREDIENTS[0],
         importQuantity: 12,
-        expirationDate: '',
-        supplier: 'Auto from order',
       },
       {
         ingredientId: MOCK_INGREDIENTS[1].ingredientId,
         ingredient: MOCK_INGREDIENTS[1],
         importQuantity: 6,
-        expirationDate: '',
-        supplier: 'Auto from order',
       },
     ];
 
@@ -389,8 +358,6 @@ export default function ImportRequestScreen() {
         ingredientId: ingredient.ingredientId,
         ingredient,
         importQuantity: item.receivedQty,
-        expirationDate: '',
-        supplier: order.supplier,
       };
     });
 
@@ -585,7 +552,7 @@ export default function ImportRequestScreen() {
             ingredientId: detail.ingredientId,
             quantity: detail.importQuantity,
             measurement: detail.ingredient.measurement ?? null,
-            note: buildManualItemNote(detail) || null,
+            note: null,
           }));
 
         const response = await authorizedFetch(API_ENDPOINTS.shopInventory.manualImport(), {
@@ -911,27 +878,6 @@ export default function ImportRequestScreen() {
 
                   <Text style={styles.detailMeta}>New total: {newTotal} {detail.ingredient.measurement}</Text>
 
-                  <Text style={styles.fieldLabel}>Expiry date</Text>
-                  <TextInput
-                    value={detail.expirationDate}
-                    onChangeText={(value) =>
-                      handleUpdateDetailField(detail.ingredientId, 'expirationDate', value)
-                    }
-                    placeholder="MM/DD/YYYY"
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.input}
-                  />
-
-                  <Text style={styles.fieldLabel}>Supplier</Text>
-                  <TextInput
-                    value={detail.supplier}
-                    onChangeText={(value) =>
-                      handleUpdateDetailField(detail.ingredientId, 'supplier', value)
-                    }
-                    placeholder="Highland Roasters Co."
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.input}
-                  />
                 </View>
               );
             })
