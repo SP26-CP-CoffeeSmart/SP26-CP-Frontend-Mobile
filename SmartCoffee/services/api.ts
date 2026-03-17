@@ -1,6 +1,5 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
-import { get } from 'react-native/Libraries/TurboModule/TurboModuleRegistry';
 
 // Base API configuration
 const normalizeApiBaseUrl = (baseUrl: string) =>
@@ -128,6 +127,9 @@ export const API_ENDPOINTS = {
   exportDetail: {
     create: () => `${AUTH_BASE_URL}/ExportDetail`,
     getByNote: (exportNoteId: number | string) => `${AUTH_BASE_URL}/ExportDetail/by-note/${exportNoteId}`,
+  },
+  wallet: {
+    topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
   },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
