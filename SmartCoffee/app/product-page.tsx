@@ -45,6 +45,7 @@ interface SupplierProductApiItem {
   ingredientId: number;
   price: number;
   stock: number;
+  holdStock?: number | null;
   status: string;
   createDate: string;
   rating?: number;
@@ -173,6 +174,8 @@ export default function ProductPage() {
     const category = item?.ingredient?.category ?? (item.measurement || 'Other');
     const imageUrl = item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
 
+    const availableStock = Math.max(0, Number(item.stock ?? 0) - Number(item.holdStock ?? 0));
+
     const suggestion: SuggestionItem = {
       id: `extra-${item.productId}`,
       productId: item.productId,
@@ -189,6 +192,7 @@ export default function ProductPage() {
       rating: 0,
       measurement: item.measurement || 'unit',
       packageSize: item.packageSize ?? null,
+      availableStock,
     };
 
     addItems([suggestion]);
@@ -315,6 +319,8 @@ export default function ProductPage() {
               const priceText = item.packageSize && item.measurement
                 ? `${formatVnd(item.price)} vnd/(${item.packageSize}${item.measurement})`
                 : `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
+              const stockText =
+                typeof item.stock === 'number' ? String(item.stock) : 'N/A';
 
               return (
                 <View key={item.productId} style={styles.card}>
@@ -337,11 +343,9 @@ export default function ProductPage() {
                     ) : null}
                     <Text style={styles.cardPrice}>{priceText}</Text>
                     <View style={styles.metaRow}>
-                      <View style={[styles.metaItem, styles.metaItemSupplier]}>
-                        <Ionicons name="storefront-outline" size={12} color={COLORS.textSecondary} />
-                        <Text style={styles.metaText} numberOfLines={1}>
-                          {item.supplierName ?? `Supplier #${item.supplierId}`}
-                        </Text>
+                      <View style={styles.metaItem}>
+                        <Ionicons name="cube-outline" size={12} color={COLORS.textSecondary} />
+                        <Text style={styles.metaText}>{stockText}</Text>
                       </View>
                       <View style={[styles.metaItem, styles.metaItemStatus]}>
                         <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />
@@ -355,6 +359,12 @@ export default function ProductPage() {
                             : 'N/A'}
                         </Text>
                       </View>
+                    </View>
+                    <View style={styles.supplierLine}>
+                      <Ionicons name="storefront-outline" size={12} color={COLORS.textSecondary} />
+                      <Text style={styles.metaText} numberOfLines={1}>
+                        {item.supplierName ?? `Supplier #${item.supplierId}`}
+                      </Text>
                     </View>
                   </TouchableOpacity>
                   {fromSuggestions && (
@@ -546,15 +556,17 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     flexShrink: 1,
   },
-  metaItemSupplier: {
-    flex: 1,
-    minWidth: 0,
-  },
   metaItemStatus: {
     marginLeft: 8,
   },
   metaItemRating: {
     marginLeft: 8,
+  },
+  supplierLine: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   addSuggestedButton: {
     marginTop: 8,

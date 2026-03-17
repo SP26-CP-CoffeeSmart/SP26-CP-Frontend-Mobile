@@ -22,6 +22,8 @@ interface SupplierProductRecommendation {
   supplierRating?: number | null;
   productRating?: number | null;
   price: number;
+  stock?: number | null;
+  holdStock?: number | null;
   packageSize?: number | null;
   measurement?: string | null;
   image?: string | null;
@@ -142,6 +144,10 @@ export default function AiLoadingScreen() {
             const qtyNeeded = Math.max(item.minStock - item.currentStock, 0);
             const shortDescription = (item.productDescription || '').split('\n')[0];
             const image = String(item.image || '').trim();
+            const availableStock =
+              typeof item.stock === 'number'
+                ? Math.max(0, Number(item.stock ?? 0) - Number(item.holdStock ?? 0))
+                : null;
 
             return {
               id: String(item.recommendedProductId || item.ingredientId || index),
@@ -159,6 +165,7 @@ export default function AiLoadingScreen() {
               rating: Number(item.supplierRating || 0),
               measurement: item.measurement ?? null,
               packageSize: item.packageSize ?? null,
+              availableStock,
               priceVnd: item.price,
             };
           }

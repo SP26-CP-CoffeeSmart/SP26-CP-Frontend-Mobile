@@ -15,6 +15,8 @@ export type SuggestionItem = {
     rating: number;
     measurement?: string | null;
     packageSize?: number | null;
+    // Maximum quantity user can order for this product (stock - holdStock)
+    availableStock?: number | null;
     priceVnd: number;
 };
 
