@@ -36,6 +36,7 @@ interface SupplierProductApiItem {
   ingredientId: number;
   price: number;
   stock: number;
+  holdStock?: number | null;
   status: string;
   createDate: string;
   measurement: string;
@@ -72,6 +73,13 @@ export default function ProductDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const availableQuantity = useMemo(() => {
+    if (!product) return 0;
+    const stock = Number(product.stock ?? 0);
+    const holdStock = Number(product.holdStock ?? 0);
+    return Math.max(0, stock - holdStock);
+  }, [product]);
+
   const onAddToCart = () => {
     Animated.sequence([
       Animated.spring(addScale, {
@@ -89,6 +97,17 @@ export default function ProductDetail() {
     ]).start();
 
     if (product) {
+      if (availableQuantity <= 0) {
+        Toast.show({
+          type: 'error',
+          text1: 'Out of stock',
+          text2: 'This product is currently unavailable.',
+        });
+        return;
+      }
+
+      const safeQuantity = Math.min(quantity, availableQuantity);
+
       addItem({
         productId: product.productId,
         supplierId: product.supplierId,
@@ -98,14 +117,18 @@ export default function ProductDetail() {
         image: product.image ?? product.ingredient?.image ?? null,
         measurement: product.measurement ?? 'unit',
         packageSize: product.packageSize ?? null,
+        availableStock: availableQuantity,
         unitPrice: product.price ?? 0,
-        quantity,
+        quantity: safeQuantity,
       });
 
       Toast.show({
         type: 'success',
         text1: 'Added to cart',
-        text2: 'Your order has been added to the cart.',
+        text2:
+          safeQuantity < quantity
+            ? `Quantity adjusted to ${safeQuantity} due to stock limit.`
+            : 'Your order has been added to the cart.',
       });
     }
   };
@@ -211,16 +234,29 @@ export default function ProductDetail() {
                 <Text style={styles.qtyValue}>{quantity}</Text>
                 <TouchableOpacity
                   style={styles.qtyButton}
-                  onPress={() => setQuantity((prev) => prev + 1)}
+                  onPress={() =>
+                    setQuantity((prev) => {
+                      if (availableQuantity <= 0) {
+                        return 1;
+                      }
+                      return Math.min(availableQuantity, prev + 1);
+                    })
+                  }
                 >
                   <Ionicons name="add" size={16} color={COLORS.text} />
                 </TouchableOpacity>
               </View>
             </View>
 
+            <Text style={styles.stockHint}>Available to buy: {availableQuantity}</Text>
+
             <View style={styles.actionRow}>
               <Animated.View style={{ transform: [{ scale: addScale }] }}>
-                <TouchableOpacity style={styles.addButton} onPress={onAddToCart}>
+                <TouchableOpacity
+                  style={[styles.addButton, availableQuantity <= 0 && styles.addButtonDisabled]}
+                  onPress={onAddToCart}
+                  disabled={availableQuantity <= 0}
+                >
                   <Text style={styles.addButtonText}>Add To Cart</Text>
                 </TouchableOpacity>
               </Animated.View>
@@ -337,6 +373,11 @@ const styles = StyleSheet.create({
     minWidth: 20,
     textAlign: 'center',
   },
+  stockHint: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 12,
+  },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
@@ -356,6 +397,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 10,
     backgroundColor: COLORS.text,
+  },
+  addButtonDisabled: {
+    opacity: 0.5,
   },
   addButtonText: {
     color: COLORS.white,

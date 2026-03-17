@@ -244,7 +244,19 @@ export default function CartPage() {
                                       <Text style={styles.qtyValue}>{item.quantity}</Text>
                                       <TouchableOpacity
                                         style={styles.qtyButton}
-                                        onPress={() => updateQuantity(item.productId, item.quantity + 1)}
+                                        onPress={() => {
+                                          const limit =
+                                            typeof item.availableStock === 'number'
+                                              ? Math.max(0, Math.floor(item.availableStock))
+                                              : null;
+
+                                          if (limit !== null && item.quantity >= limit) {
+                                            showToast(`Max available: ${limit}`);
+                                            return;
+                                          }
+
+                                          updateQuantity(item.productId, item.quantity + 1);
+                                        }}
                                       >
                                         <Ionicons name="add" size={14} color={COLORS.text} />
                                       </TouchableOpacity>
