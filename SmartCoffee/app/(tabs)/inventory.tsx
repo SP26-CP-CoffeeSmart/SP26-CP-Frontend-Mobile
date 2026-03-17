@@ -17,7 +17,6 @@ import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
 interface Ingredient {
-  ingredientId: number;
   name: string;
   image: string;
   category: string;
@@ -41,10 +40,10 @@ export default function InventoryScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'out'>('all');
   const [sortOption, setSortOption] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
   const [draftCategory, setDraftCategory] = useState('All');
-  const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
+  const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'out'>('all');
   const [draftSort, setDraftSort] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
   const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
   const [filteredIngredients, setFilteredIngredients] = useState<ShopInventoryItem[]>([]);
@@ -114,7 +113,6 @@ export default function InventoryScreen() {
       filtered = filtered.filter((item) => {
         const status = getStockStatus(Number(item.quantity ?? 0)).label;
         if (status.includes('OUT')) return selectedStatus === 'out';
-        if (status.includes('LOW')) return selectedStatus === 'low';
         return selectedStatus === 'in';
       });
     }
@@ -175,37 +173,20 @@ export default function InventoryScreen() {
   };
 
   const getStockStatus = (quantity: number) => {
-    const percentage = (quantity / maxQuantity) * 100;
-
-    if (percentage >= 80) {
+    if (quantity > 0) {
       return {
-        label: 'SUFFICIENT',
+        label: 'IN STOCK',
         color: '#15803D',
         bgColor: '#DCFCE7',
         barColor: '#22C55E',
       };
-    } else if (percentage >= 60) {
-      return {
-        label: 'STABLE',
-        color: '#0F766E',
-        bgColor: '#CCFBF1',
-        barColor: '#14B8A6',
-      };
-    } else if (percentage >= 30) {
-      return {
-        label: 'LOW STOCK',
-        color: '#B45309',
-        bgColor: '#FEF3C7',
-        barColor: '#F59E0B',
-      };
-    } else {
-      return {
-        label: 'OUT OF STOCK',
-        color: '#B91C1C',
-        bgColor: '#FEE2E2',
-        barColor: '#EF4444',
-      };
     }
+    return {
+      label: 'OUT OF STOCK',
+      color: '#B91C1C',
+      bgColor: '#FEE2E2',
+      barColor: '#EF4444',
+    };
   };
 
   const getStockPercentage = (quantity: number) => {
@@ -372,20 +353,6 @@ export default function InventoryScreen() {
                   >
                     <Ionicons name="time-outline" size={19} color={COLORS.ink} />
                   </TouchableOpacity>
-                  <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                    <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
-                    <View
-                      style={{
-                        position: 'absolute',
-                        top: 8,
-                        right: 10,
-                        width: 8,
-                        height: 8,
-                        borderRadius: 999,
-                        backgroundColor: '#E9563A',
-                      }}
-                    />
-                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -461,7 +428,7 @@ export default function InventoryScreen() {
                       backgroundColor: COLORS.chipActive,
                     }}>
                     <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
-                      {selectedStatus === 'in' ? 'In Stock' : selectedStatus === 'low' ? 'Low Stock' : 'Out of Stock'}
+                      {selectedStatus === 'in' ? 'In Stock' : 'Out of Stock'}
                     </Text>
                   </View>
                 ) : null}
