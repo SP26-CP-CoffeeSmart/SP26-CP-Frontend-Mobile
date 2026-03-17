@@ -230,13 +230,14 @@ export default function AiResultScreen() {
 
   const resolveUniquenessStatus = (value: UniquenessInfo | null): boolean | null => {
     if (!value) return null;
+     if (typeof value.uniquenessScore === 'number') {
+      return value.uniquenessScore >= 0.6;
+    }
     if (typeof value.isUnique === 'boolean') return value.isUnique;
     if (typeof value.maxJaccardSimilarity === 'number') {
       return value.maxJaccardSimilarity === 0;
     }
-    if (typeof value.uniquenessScore === 'number') {
-      return value.uniquenessScore >= 1;
-    }
+   
     return null;
   };
 

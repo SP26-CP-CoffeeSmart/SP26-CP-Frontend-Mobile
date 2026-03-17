@@ -19,7 +19,7 @@ import { WebView } from 'react-native-webview';
 
 import { useCart, CartItem } from '@/context/cart-context';
 import { useAuth } from '@/context/auth-context';
-import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
@@ -74,7 +74,7 @@ export default function CheckoutPage() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const { items, removeItem } = useCart();
-    const { walletBalance, walletId, refreshProfile, fullAddress, profile, shopName } = useAuth();
+    const { walletBalance, refreshProfile, fullAddress, profile, shopName } = useAuth();
 
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const { items: suggestionItems } = useSuggestions();
@@ -582,22 +582,12 @@ export default function CheckoutPage() {
 
         try {
             setTopupSubmitting(true);
-            if (!walletId) {
-                Alert.alert('Top up', 'Wallet not found. Please refresh and try again.');
-                return;
-            }
-
-            const returnUrl = 'http://localhost:8081/wallet-topup/success';
-            const cancelUrl = 'http://localhost:8081/wallet-topup/cancel';
-
-            const response = await authorizedFetch(`${AUTH_BASE_URL}/Wallet/${walletId}/top-up`, {
+            const response = await authorizedFetch(API_ENDPOINTS.wallet.topUp(), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    walletId,
                     amount,
-                    returnUrl,
-                    cancelUrl,
+                    isMobile: true,
                 }),
             });
 
@@ -661,8 +651,7 @@ export default function CheckoutPage() {
         const url = String(event?.url ?? '').toLowerCase();
         if (!url) return true;
 
-        const isSuccessRoute = url.includes('wallet-topup/success');
-        const isCancelRoute = url.includes('wallet-topup/cancel') || url.includes('cancel=true') || url.includes('status=cancelled');
+        const isCancelRoute = url.includes('cancel=true') || url.includes('status=cancelled');
         const isPaidStatus = url.includes('status=paid');
 
         if (isCancelRoute) {
@@ -674,7 +663,7 @@ export default function CheckoutPage() {
             return false;
         }
 
-        if ((isSuccessRoute || isPaidStatus) && !successTriggeredRef.current) {
+        if (isPaidStatus && !successTriggeredRef.current) {
             successTriggeredRef.current = true;
             handleTopupSuccess();
             return false;

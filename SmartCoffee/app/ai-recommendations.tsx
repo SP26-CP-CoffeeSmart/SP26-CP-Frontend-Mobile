@@ -61,12 +61,13 @@ export default function AIRecommendationsScreen() {
 
   const resolveUniquenessStatus = (uniqueness: any): boolean | null => {
     if (!uniqueness) return null;
+    // Business rule: uniquenessScore >= 0.6 is always considered unique.
+    if (typeof uniqueness.uniquenessScore === 'number') {
+      return uniqueness.uniquenessScore >= 0.6;
+    }
     if (typeof uniqueness.isUnique === 'boolean') return uniqueness.isUnique;
     if (typeof uniqueness.maxJaccardSimilarity === 'number') {
       return uniqueness.maxJaccardSimilarity === 0;
-    }
-    if (typeof uniqueness.uniquenessScore === 'number') {
-      return uniqueness.uniquenessScore >= 1;
     }
     return null;
   };

@@ -15,12 +15,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
 import { authorizedFetch, logoutAccount } from '@/services/authService';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 import { WebView } from 'react-native-webview';
-import * as Linking from 'expo-linking';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -35,7 +34,6 @@ export default function ProfileScreen() {
     profile,
     coffeeShopId: profileCoffeeShopId,
     walletBalance,
-    walletId,
     loading: profileLoading,
     error: profileError,
     refreshProfile,
@@ -334,24 +332,14 @@ export default function ProfileScreen() {
 
       try {
         setTopupSubmitting(true);
-        if (!walletId) {
-          showToast('Wallet not found. Please refresh and try again.');
-          return;
-        }
-
-        const returnUrl = "http://localhost:8081/wallet-topup/success";
-        const cancelUrl = "http://localhost:8081/wallet-topup/cancel";
-
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/Wallet/${walletId}/top-up`, {
+        const response = await authorizedFetch(API_ENDPOINTS.wallet.topUp(), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            walletId,
             amount,
-            returnUrl,
-            cancelUrl,
+            isMobile: true,
           }),
         });
 
@@ -417,9 +405,8 @@ export default function ProfileScreen() {
       return true;
     }
 
-    const isSuccessRoute = url.includes('wallet-topup/success');
     const isCancelRoute =
-      url.includes('wallet-topup/cancel') || url.includes('cancel=true') || url.includes('status=cancelled');
+      url.includes('cancel=true') || url.includes('status=cancelled');
     const isPaidStatus = url.includes('status=paid');
 
     // Ưu tiên xử lý cancel, tránh gọi success nhầm
@@ -432,7 +419,7 @@ export default function ProfileScreen() {
       return false;
     }
 
-    if (isSuccessRoute || isPaidStatus) {
+    if (isPaidStatus) {
       if (!successTriggeredRef.current) {
         successTriggeredRef.current = true;
         handleTopupSuccess();
