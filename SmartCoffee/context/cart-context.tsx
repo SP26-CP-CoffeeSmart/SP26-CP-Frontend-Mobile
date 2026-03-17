@@ -11,6 +11,8 @@ export type CartItem = {
   measurement: string;
   // packageSize: khối lượng 1 túi (theo measurement), ví dụ 100 (g), 1 (kg)
   packageSize?: number | null;
+  // Maximum quantity user can buy for this product (stock - holdStock)
+  availableStock?: number | null;
   unitPrice: number;
   quantity: number;
 };
@@ -62,13 +64,44 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
 
   const addItem = useCallback((item: CartItem) => {
     setItems((prev) => {
+      const limit =
+        typeof item.availableStock === 'number' && Number.isFinite(item.availableStock)
+          ? Math.max(0, Math.floor(item.availableStock))
+          : null;
+
+      if (limit === 0) {
+        return prev;
+      }
+
       const existing = prev.find((entry) => entry.productId === item.productId);
       if (!existing) {
-        return [...prev, item];
+        const safeQuantity =
+          limit === null ? Math.max(1, item.quantity) : Math.max(1, Math.min(item.quantity, limit));
+        return [...prev, { ...item, quantity: safeQuantity }];
       }
+
+      const existingLimit =
+        typeof existing.availableStock === 'number' && Number.isFinite(existing.availableStock)
+          ? Math.max(0, Math.floor(existing.availableStock))
+          : null;
+
+      const effectiveLimit =
+        limit === null
+          ? existingLimit
+          : existingLimit === null
+            ? limit
+            : Math.min(existingLimit, limit);
+
       return prev.map((entry) =>
         entry.productId === item.productId
-          ? { ...entry, quantity: entry.quantity + item.quantity }
+          ? {
+              ...entry,
+              availableStock: effectiveLimit ?? entry.availableStock ?? item.availableStock ?? null,
+              quantity:
+                effectiveLimit === null
+                  ? entry.quantity + item.quantity
+                  : Math.min(entry.quantity + item.quantity, effectiveLimit),
+            }
           : entry
       );
     });
@@ -77,11 +110,23 @@ export const CartProvider = ({ children }: { children: React.ReactNode }) => {
   const updateQuantity = useCallback((productId: number, quantity: number) => {
     setItems((prev) =>
       prev
-        .map((entry) =>
-          entry.productId === productId
-            ? { ...entry, quantity: Math.max(1, quantity) }
-            : entry
-        )
+        .map((entry) => {
+          if (entry.productId !== productId) {
+            return entry;
+          }
+
+          const limit =
+            typeof entry.availableStock === 'number' && Number.isFinite(entry.availableStock)
+              ? Math.max(0, Math.floor(entry.availableStock))
+              : null;
+
+          const clampedQuantity =
+            limit === null
+              ? Math.max(1, quantity)
+              : Math.max(1, Math.min(quantity, limit));
+
+          return { ...entry, quantity: clampedQuantity };
+        })
         .filter((entry) => entry.quantity > 0)
     );
   }, []);

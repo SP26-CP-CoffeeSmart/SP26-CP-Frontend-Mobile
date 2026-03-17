@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,11 +9,24 @@ import {
   Pressable,
   ImageBackground,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSuggestions } from '@/context/suggestion-context';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+
+type SupplierProductStockItem = {
+  productId: number;
+  stock?: number | null;
+  holdStock?: number | null;
+};
+
+type SupplierProductListResponse = {
+  items?: SupplierProductStockItem[];
+};
 
 export default function AIOrderSuggestionsScreen() {
   const router = useRouter();
@@ -22,6 +35,82 @@ export default function AIOrderSuggestionsScreen() {
   const [selectedFilter, setSelectedFilter] = useState('All');
   const [error] = useState<string | null>(() => (params.error ? String(params.error) : null));
   const [isReviewing, setIsReviewing] = useState(false);
+  const [availableStockByProduct, setAvailableStockByProduct] = useState<Record<number, number>>({});
+
+  const getItemLimit = (item: (typeof suggestions)[number]) => {
+    if (typeof item.availableStock === 'number' && Number.isFinite(item.availableStock)) {
+      return Math.max(0, Math.floor(item.availableStock));
+    }
+
+    const mapLimit = availableStockByProduct[item.productId];
+    if (typeof mapLimit === 'number' && Number.isFinite(mapLimit)) {
+      return Math.max(0, Math.floor(mapLimit));
+    }
+
+    return null;
+  };
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadLatestStock = async () => {
+      try {
+        const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.list(), {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as SupplierProductListResponse | SupplierProductStockItem[];
+        const items = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+
+        if (isCancelled) return;
+
+        const nextMap: Record<number, number> = {};
+        items.forEach((item) => {
+          if (typeof item.productId !== 'number') return;
+          const available = Math.max(0, Number(item.stock ?? 0) - Number(item.holdStock ?? 0));
+          nextMap[item.productId] = available;
+        });
+        setAvailableStockByProduct(nextMap);
+
+        setItems((prev) =>
+          prev.map((item) => {
+            const limit = nextMap[item.productId];
+            if (typeof limit !== 'number') {
+              return item;
+            }
+
+            const currentQty = Number.isFinite(item.qtyNeeded) && item.qtyNeeded > 0
+              ? item.qtyNeeded
+              : 1;
+
+            return {
+              ...item,
+              availableStock: limit,
+              qtyNeeded: limit > 0 ? Math.min(currentQty, limit) : currentQty,
+            };
+          })
+        );
+      } catch {
+        // keep existing suggestion data as fallback
+      }
+    };
+
+    loadLatestStock();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [setItems]);
 
   const filteredSuggestions = useMemo(() => {
     const source = suggestions;
@@ -55,6 +144,25 @@ export default function AIOrderSuggestionsScreen() {
     if (!suggestions.length) {
       return;
     }
+
+    const invalidItems = suggestions.filter((item) => {
+      const limit = getItemLimit(item);
+      return limit !== null && (limit <= 0 || item.qtyNeeded > limit);
+    });
+
+    if (invalidItems.length > 0) {
+      const details = invalidItems
+        .slice(0, 5)
+        .map((item) => {
+          const limit = getItemLimit(item) ?? 0;
+          return `${item.name}: max ${Math.max(0, limit)}`;
+        })
+        .join('\n');
+
+      Alert.alert('Stock limit reached', `Please adjust quantity:\n${details}`);
+      return;
+    }
+
     router.push({
       pathname: '/checkout',
       params: {
@@ -85,7 +193,18 @@ export default function AIOrderSuggestionsScreen() {
           ? item.qtyNeeded
           : 1;
         const updatedQty = currentQty + delta;
-        const safeQty = updatedQty < 1 ? 1 : updatedQty;
+        const limit = getItemLimit(item);
+
+        if (delta > 0 && limit !== null && currentQty >= limit) {
+          Alert.alert('Stock limit', `Maximum available quantity is ${limit}.`);
+          next.push(item);
+          return;
+        }
+
+        const safeQty =
+          limit === null
+            ? Math.max(1, updatedQty)
+            : Math.max(1, Math.min(updatedQty, Math.max(1, limit)));
 
         next.push({ ...item, qtyNeeded: safeQty });
       });
@@ -191,6 +310,9 @@ export default function AIOrderSuggestionsScreen() {
                     {item.packageSize ? ` ${item.packageSize}${item.measurement}` : ''}
                   </Text>
                   <Text style={styles.itemQty}>Qty needed: {item.qtyNeeded}</Text>
+                  {typeof getItemLimit(item) === 'number' && (
+                    <Text style={styles.itemQty}>Available: {getItemLimit(item)}</Text>
+                  )}
                   <View style={styles.itemMetaRow}>
                     <View style={styles.itemMetaBadge}>
                       <Ionicons name="time-outline" size={12} color="#9B8B7B" />
