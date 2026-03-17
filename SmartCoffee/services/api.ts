@@ -135,6 +135,5 @@ export const API_ENDPOINTS = {
     export: () => `${AUTH_BASE_URL}/ShopInventory/export`,
     importFromOrder: (orderId: number) => `${AUTH_BASE_URL}/ShopInventory/import-from-order/${orderId}`,
     manualImport: () => `${AUTH_BASE_URL}/ShopInventory/manual-import`,
-    manualExport: () => `${AUTH_BASE_URL}/ShopInventory/manual-export`,
   },
 };
