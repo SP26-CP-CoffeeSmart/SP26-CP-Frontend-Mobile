@@ -154,6 +154,25 @@ export default function MenuScreen() {
         return;
       }
 
+      const fetchVersionCount = async (menuHeaderId?: number) => {
+        if (!menuHeaderId) return 0;
+        try {
+          const response = await authorizedFetch(
+            `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
+            { headers: { Accept: '*/*' } }
+          );
+          if (!response.ok) return 0;
+          const data = await response.json();
+          return Array.isArray(data) ? data.length : 0;
+        } catch {
+          return 0;
+        }
+      };
+
+      const versionCounts = await Promise.all(
+        sortedList.map((item) => fetchVersionCount(item.menuHeaderId))
+      );
+
       const mapped = sortedList.map((item, index) => {
         const imageUrl = resolveImageUrl(
           AUTH_BASE_URL,
@@ -162,7 +181,7 @@ export default function MenuScreen() {
         return {
           id: String(item?.menuHeaderId ?? index),
           name: String(item?.name ?? 'Unknown'),
-          versions: Number(0),
+          versions: Number(versionCounts[index] ?? 0),
           image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
           isApplied: Boolean(item?.isApplied ?? false),
           createDate: item?.createDate,
