@@ -84,6 +84,7 @@ export const API_ENDPOINTS = {
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
     byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
+    activate: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
     saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
   },
   menuHeader: {

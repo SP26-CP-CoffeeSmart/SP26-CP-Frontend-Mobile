@@ -484,45 +484,10 @@ export default function MenuScreen() {
       }
 
       const asset = result.assets[0];
-      const { fileName, mimeType } = getUploadFileInfo(asset.uri);
-      const formData = new FormData();
-      formData.append('image', {
-        uri: asset.uri,
-        name: fileName,
-        type: mimeType,
-      } as any);
-
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/upload-image`, {
-        method: 'POST',
-        headers: {
-          Accept: '*/*',
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        console.log('[Upload Image] status:', response.status);
-        console.log('[Upload Image] body:', errorBody);
-        throw new Error(`Request failed: ${response.status}`);
-      }
-
-      const uploaded = await response.json();
-      console.log('[Upload Image] response:', uploaded);
-      const uploadedUrl = String(
-        uploaded?.url ??
-        uploaded?.imageUrl ??
-        uploaded?.data?.url ??
-        uploaded?.data?.imageUrl ??
-        ''
-      ).trim();
-      if (!uploadedUrl) {
-        throw new Error('Missing upload url');
-      }
-
-      setCreateImageUrl(uploadedUrl);
+      // Keep local URI for preview; actual upload happens after beverage is created and returns id.
+      setCreateImageUrl(asset.uri);
     } catch (error) {
-      setCreateError('Failed to upload image.');
+      setCreateError('Failed to pick image.');
     } finally {
       setCreateImageUploading(false);
     }
@@ -535,7 +500,7 @@ export default function MenuScreen() {
 
     const trimmedName = createName.trim();
     const trimmedCategory = createCategoryName.trim();
-    const trimmedImage = createImageUrl.trim();
+    const selectedImageUri = createImageUrl.trim();
 
     if (!trimmedName) {
       setCreateError('Please enter a beverage name.');
@@ -547,8 +512,8 @@ export default function MenuScreen() {
       return;
     }
 
-    if (!trimmedImage) {
-      setCreateError('Please upload an image before creating.');
+    if (!selectedImageUri) {
+      setCreateError('Please select an image before creating.');
       return;
     }
 
@@ -575,7 +540,6 @@ export default function MenuScreen() {
           name: trimmedName,
           status: 'ACTIVE',
           coffeeShopId,
-          image: trimmedImage,
           beverageCategory: {
             beverageCategoryId: createCategoryId ?? 0,
             name: createCategoryId ? selectedCategoryName : trimmedCategory,
@@ -588,9 +552,57 @@ export default function MenuScreen() {
       }
 
       const created = await response.json();
+      const createdBeverageId = Number(
+        created?.beverageId ??
+        created?.id ??
+        created?.data?.beverageId ??
+        created?.data?.id ??
+        0
+      );
+
+      if (!Number.isFinite(createdBeverageId) || createdBeverageId <= 0) {
+        throw new Error('Create succeeded but response does not contain beverage id.');
+      }
+
+      const { fileName, mimeType } = getUploadFileInfo(selectedImageUri);
+      const formData = new FormData();
+      formData.append('image', {
+        uri: selectedImageUri,
+        name: fileName,
+        type: mimeType,
+      } as any);
+
+      const uploadResponse = await authorizedFetch(
+        `${AUTH_BASE_URL}/ShopBeverage/upload-image?id=${createdBeverageId}`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+          body: formData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const uploadErrorBody = await uploadResponse.text();
+        console.log('[Upload Beverage Image] status:', uploadResponse.status);
+        console.log('[Upload Beverage Image] body:', uploadErrorBody);
+        throw new Error(`Image upload failed: ${uploadResponse.status}`);
+      }
+
+      const uploaded = await uploadResponse.json();
+      console.log('[Upload Beverage Image] response:', uploaded);
       const imageUrl = resolveImageUrl(
         AUTH_BASE_URL,
-        String(created?.imageUrl ?? created?.image ?? '')
+        String(
+          uploaded?.url ??
+          uploaded?.imageUrl ??
+          uploaded?.data?.url ??
+          uploaded?.data?.imageUrl ??
+          created?.imageUrl ??
+          created?.image ??
+          ''
+        )
       );
 
       const mapped: BeverageItem = {
@@ -1122,14 +1134,14 @@ export default function MenuScreen() {
                   <>
                     <Ionicons name="image-outline" size={16} color={stylesVars.espresso} />
                     <Text style={styles.uploadButtonText}>
-                      {createImageUrl ? 'Change image' : 'Upload image'}
+                      {createImageUrl ? 'Change image' : 'Select image'}
                     </Text>
                   </>
                 )}
               </TouchableOpacity>
               {createImageUrl ? (
                 <>
-                  <Text style={styles.uploadHint}>Image uploaded</Text>
+                  <Text style={styles.uploadHint}>Image selected (will upload after create)</Text>
                   <Image source={{ uri: createImageUrl }} style={styles.uploadPreview} />
                   <TouchableOpacity
                     style={styles.removeImageButton}

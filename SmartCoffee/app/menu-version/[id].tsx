@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Animated,
@@ -14,7 +14,7 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
 interface MenuVersion {
@@ -25,7 +25,7 @@ interface MenuVersion {
     avgDailyRevenue: string;
     profitMargin: number;
     topSeller: string;
-    isActive: boolean;
+    isApplied: boolean;
     vsVersion?: {
         comparedVersion: string;
         revenueChange: number;
@@ -42,7 +42,8 @@ interface MenuVersionApi {
     versionNumber: string;
     status: string;
     created: string;
-    isActive: boolean;
+    isActive?: boolean;
+    isApplied?: boolean;
     image?: string | null;
     menuGroups?: Array<{
         menuGroupId: number;
@@ -91,6 +92,60 @@ const MenuVersionPage = () => {
     const [activatingId, setActivatingId] = useState<string | null>(null);
     const pulse = useRef(new Animated.Value(0.25)).current;
 
+    const mapApiToMenuVersion = useCallback((item: MenuVersionApi): MenuVersion => {
+        const groups = item.menuGroups ?? [];
+        const firstItem = groups.flatMap((g) => g.menuItems ?? [])[0];
+
+        const rawImage =
+            item.image ??
+            firstItem?.shopRecipe?.image ??
+            firstItem?.shopBeverage?.imageUrl ??
+            null;
+        const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage) ?? fallbackMenuImage;
+
+        const topSellerName = firstItem?.shopBeverage?.name ?? 'Top seller';
+        const appliedByStatus = String(item.status ?? '').toLowerCase() === 'active';
+        const isApplied = Boolean(item.isApplied ?? item.isActive ?? appliedByStatus);
+
+        return {
+            id: String(item.menuId),
+            name: `${name || 'Menu'} ver ${item.versionNumber}`,
+            image: { uri: imageUrl },
+            imageUri: imageUrl,
+            avgDailyRevenue: '—',
+            profitMargin: 0,
+            topSeller: topSellerName,
+            isApplied,
+        };
+    }, [name]);
+
+    const fetchMenuVersions = useCallback(async () => {
+        if (!id) {
+            setError('Menu ID is missing');
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await authorizedFetch(
+                `${AUTH_BASE_URL}/Menu/by-header/${id}`
+            );
+            if (!response.ok) {
+                throw new Error(`Request failed: ${response.status}`);
+            }
+
+            const result = await response.json();
+            const rawList: MenuVersionApi[] = Array.isArray(result) ? result : [];
+            const mapped = rawList.map(mapApiToMenuVersion);
+            setVersions(mapped);
+        } catch (err) {
+            setError('Failed to load menu versions');
+        } finally {
+            setLoading(false);
+        }
+    }, [id, mapApiToMenuVersion]);
+
     useEffect(() => {
         const loop = Animated.loop(
             Animated.sequence([
@@ -112,73 +167,8 @@ const MenuVersionPage = () => {
     }, [pulse]);
 
     useEffect(() => {
-        let isMounted = true;
-
-        const mapApiToMenuVersion = (item: MenuVersionApi): MenuVersion => {
-            const groups = item.menuGroups ?? [];
-            const firstItem = groups.flatMap((g) => g.menuItems ?? [])[0];
-
-            const rawImage =
-                item.image ??
-                firstItem?.shopRecipe?.image ??
-                firstItem?.shopBeverage?.imageUrl ??
-                null;
-            const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage) ?? fallbackMenuImage;
-
-            const topSellerName = firstItem?.shopBeverage?.name ?? 'Top seller';
-
-            return {
-                id: String(item.menuId),
-                name: `${name || 'Menu'} ver ${item.versionNumber}`,
-                image: { uri: imageUrl },
-                imageUri: imageUrl,
-                avgDailyRevenue: '—',
-                profitMargin: 0,
-                topSeller: topSellerName,
-                isActive: item.isActive,
-            };
-        };
-
-        const fetchMenuVersions = async () => {
-            if (!id) {
-                setError('Menu ID is missing');
-                return;
-            }
-
-            setLoading(true);
-            setError(null);
-            try {
-                const response = await authorizedFetch(
-                    `${AUTH_BASE_URL}/Menu/by-header/${id}`
-                );
-                if (!response.ok) {
-                    throw new Error(`Request failed: ${response.status}`);
-                }
-
-                const result = await response.json();
-                const rawList: MenuVersionApi[] = Array.isArray(result) ? result : [];
-                const mapped = rawList.map(mapApiToMenuVersion);
-
-                if (isMounted) {
-                    setVersions(mapped);
-                }
-            } catch (err) {
-                if (isMounted) {
-                    setError('Failed to load menu versions');
-                }
-            } finally {
-                if (isMounted) {
-                    setLoading(false);
-                }
-            }
-        };
-
         fetchMenuVersions();
-
-        return () => {
-            isMounted = false;
-        };
-    }, [id, name]);
+    }, [fetchMenuVersions]);
 
     const handleScroll = (event: any) => {
         const contentOffsetX = event.nativeEvent.contentOffset.x;
@@ -191,24 +181,33 @@ const MenuVersionPage = () => {
             setActivatingId(menuId);
             console.log(`Activating menu ${menuId}`);
             setError(null);
-            const response = await authorizedFetch(
-                `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
-                {
-                    method: 'PATCH',
-                }
-            );
+            const endpoint = API_ENDPOINTS.menu.activate(menuId);
+            let response = await authorizedFetch(endpoint, {
+                method: 'PATCH',
+                headers: {
+                    Accept: '*/*',
+                },
+            });
+
+            // Some backends expose this action endpoint as POST instead of PATCH.
+            if (response.status === 405 || response.status === 404) {
+                response = await authorizedFetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        Accept: '*/*',
+                    },
+                });
+            }
 
             if (!response.ok) {
+                const errorBody = await response.text();
+                console.log('[Menu Activate] status:', response.status);
+                console.log('[Menu Activate] body:', errorBody);
                 throw new Error(`Request failed: ${response.status}`);
             }
 
-            // Optimistically update local state: mark this version active, others inactive
-            setVersions((prev) =>
-                prev.map((v) => ({
-                    ...v,
-                    isActive: v.id === menuId,
-                }))
-            );
+            // Refresh from endpoint containing isApplied to keep button state in sync.
+            await fetchMenuVersions();
         } catch (err) {
             setError('Failed to activate menu');
         } finally {
@@ -309,23 +308,26 @@ const MenuVersionPage = () => {
                                             <View style={styles.imageWrapper}>
                                                 <Image source={item.image} style={styles.image} />
 
-                                                {item.isActive ? (
-                                                    <View style={styles.statusBadge}>
-                                                        <Text style={styles.activeBadgeText}>Active</Text>
-                                                    </View>
-                                                ) : (
-                                                    <TouchableOpacity
-                                                        style={styles.statusBadge}
-                                                        onPress={() => handleActivate(item.id)}
-                                                        disabled={activatingId === item.id}
-                                                    >
-                                                        {activatingId === item.id ? (
-                                                            <ActivityIndicator size="small" color={stylesVars.cardBg} />
-                                                        ) : (
-                                                            <Text style={styles.activateButtonText}>Activate</Text>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                )}
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.statusBadge,
+                                                        (item.isApplied || activatingId === item.id) && styles.statusBadgeDisabled,
+                                                    ]}
+                                                    onPress={(event) => {
+                                                        event.stopPropagation();
+                                                        if (item.isApplied || activatingId === item.id) return;
+                                                        handleActivate(item.id);
+                                                    }}
+                                                    disabled={item.isApplied || activatingId === item.id}
+                                                >
+                                                    {activatingId === item.id ? (
+                                                        <ActivityIndicator size="small" color={stylesVars.cardBg} />
+                                                    ) : item.isApplied ? (
+                                                        <Text style={styles.activeBadgeText}>Actived</Text>
+                                                    ) : (
+                                                        <Text style={styles.activateButtonText}>Activate</Text>
+                                                    )}
+                                                </TouchableOpacity>
                                             </View>
 
                                             {/* Info Section */}
@@ -557,6 +559,9 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(45, 106, 79, 0.95)',
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.7)',
+    },
+    statusBadgeDisabled: {
+        opacity: 0.85,
     },
     activeBadgeText: {
         fontSize: 11,
