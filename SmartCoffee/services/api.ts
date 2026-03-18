@@ -76,6 +76,7 @@ export const API_ENDPOINTS = {
     createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
     createMenuDetails: () => `${AUTH_BASE_URL}/AI/create-menu-p2-details`,
     createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
+    analyzeMenuFeedback: (menuId: number) => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/${menuId}`,
     predictInventory: () => `${AUTH_BASE_URL}/AI/predict-inventory`,
   },
   menu: {
@@ -83,6 +84,7 @@ export const API_ENDPOINTS = {
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
     byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
+    saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
   },
   menuHeader: {
     getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,

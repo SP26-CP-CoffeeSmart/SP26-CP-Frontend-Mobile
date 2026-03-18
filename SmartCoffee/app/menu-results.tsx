@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -10,6 +11,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast from 'react-native-toast-message';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const fallbackMenuImage =
   'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
@@ -77,10 +81,55 @@ const getVisualTheme = (menu: any) => {
 };
 
 const getMenuImage = (menu: any) => {
-  const url = String(menu?.image ?? menu?.thumbnail ?? menu?.imageUrl ?? '').trim();
+  const url = String(
+    menu?.image ??
+      menu?.thumbnail ??
+      menu?.imageUrl ??
+      menu?.ImageUrl ??
+      menu?.menu?.imageUrl ??
+      menu?.menu?.ImageUrl ??
+      ''
+  ).trim();
   if (!url || url === 'null' || url === 'undefined') return fallbackMenuImage;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   return fallbackMenuImage;
+};
+
+const normalizeModifiedMenuItemIds = (menu: any): number[] => {
+  const raw =
+    menu?.modifiedMenuItemIds ??
+    menu?.ModifiedMenuItemIds ??
+    menu?.modifiedMenuItemIDs ??
+    null;
+
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw > 0 ? [raw] : [];
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0);
+      }
+    } catch {
+      // Ignore JSON parse errors and fallback to comma split.
+    }
+    return trimmed
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }
+  return [];
 };
 
 const getGroupNames = (menu: any): string[] => {
@@ -95,6 +144,7 @@ export default function MenuResultsScreen() {
   const router = useRouter();
   const { data, cacheKey } = useLocalSearchParams<{ data?: string; cacheKey?: string }>();
   const [cachedPayload, setCachedPayload] = useState<string>('');
+  const [savingMenuKey, setSavingMenuKey] = useState<string | null>(null);
 
   useEffect(() => {
     let isActive = true;
@@ -140,6 +190,88 @@ export default function MenuResultsScreen() {
     };
   }, [parsedPayload, baseConfig, menus]);
 
+  const handleSaveAiMenu = async (menu: any, menuKey: string) => {
+    const menuId = Number(menu?.menuId ?? menu?.id ?? 0);
+    const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menu);
+
+    if (!Number.isFinite(menuId) || menuId <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing menu ID',
+        text2: 'This menu does not have a valid ID to save.',
+      });
+      return;
+    }
+
+    if (modifiedMenuItemIds.length === 0) {
+      Toast.show({
+        type: 'info',
+        text1: 'No changes',
+        text2: 'There are no modified items to save.',
+      });
+      return;
+    }
+
+    const payload = {
+      ...menu,
+      menuId,
+      modifiedMenuItemIds,
+      imageUrl:
+        menu?.imageUrl ??
+        menu?.image ??
+        menu?.thumbnail ??
+        menu?.ImageUrl ??
+        null,
+    };
+
+    try {
+      setSavingMenuKey(menuKey);
+      const response = await authorizedFetch(API_ENDPOINTS.menu.saveAi(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+      let responsePayload: any = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      if (!response.ok) {
+        const backendError = responsePayload?.error ?? responsePayload?.message ?? responseText;
+        throw new Error(backendError || `Request failed (${response.status})`);
+      }
+
+      console.log('[Menu Save AI] Response payload:', responsePayload ?? responseText);
+      const newMenuId = responsePayload?.MenuId ?? responsePayload?.menuId ?? null;
+      Toast.show({
+        type: 'success',
+        text1: 'Saved new version',
+        text2: newMenuId
+          ? `New menu ID: ${newMenuId}`
+          : 'Menu version saved successfully.',
+      });
+      router.replace('/(tabs)/menu');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save menu version.';
+      Toast.show({
+        type: 'error',
+        text1: 'Save failed',
+        text2: message,
+      });
+    } finally {
+      setSavingMenuKey(null);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -172,6 +304,11 @@ export default function MenuResultsScreen() {
             const visualTheme = getVisualTheme(menu);
             const menuId = String(menu?.menuId ?? menu?.id ?? index);
             const menuKey = `${menuId}-${index}`;
+            const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menu);
+            const canSaveVersion =
+              Number.isFinite(Number(menu?.menuId ?? menu?.id ?? 0)) &&
+              Number(menu?.menuId ?? menu?.id ?? 0) > 0 &&
+              modifiedMenuItemIds.length > 0;
 
             const menuWithConfig = {
               ...menu,
@@ -265,6 +402,22 @@ export default function MenuResultsScreen() {
                     )}
                   </View>
                 )}
+
+                {canSaveVersion ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.saveVersionButton,
+                      savingMenuKey === menuKey && styles.saveVersionButtonDisabled,
+                    ]}
+                    onPress={() => handleSaveAiMenu(menu, menuKey)}
+                    disabled={savingMenuKey === menuKey}
+                  >
+                    <Text style={styles.saveVersionButtonText}>
+                      {savingMenuKey === menuKey ? 'Saving version...' : 'Save new version'}
+                    </Text>
+                    <Ionicons name="save-outline" size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                ) : null}
 
                 <TouchableOpacity
                   style={styles.detailsRow}
@@ -399,6 +552,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#8E7B6F',
     marginBottom: 10,
+  },
+  saveVersionButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#3C2A21',
+  },
+  saveVersionButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveVersionButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   cardBody: {
     gap: 10,
