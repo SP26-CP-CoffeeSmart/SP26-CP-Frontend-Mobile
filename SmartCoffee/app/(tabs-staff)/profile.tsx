@@ -175,7 +175,11 @@ export default function StaffProfileScreen() {
                 </View>
 
                 <View style={styles.listCard}>
-                    <TouchableOpacity style={styles.listRow} activeOpacity={0.7}>
+                    <TouchableOpacity
+                        style={styles.listRow}
+                        activeOpacity={0.7}
+                        onPress={() => router.push('/notifications')}
+                    >
                         <View style={styles.listLeft}>
                             <Ionicons name="notifications" size={18} color="#8B5E3C" />
                             <Text style={styles.listText}>Notifications</Text>

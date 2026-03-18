@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
@@ -86,6 +86,7 @@ interface MenuData {
 }
 
 export default function MenuInsightsScreen() {
+  const router = useRouter();
   const { menuId } = useLocalSearchParams<{ menuId?: string }>();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
@@ -337,7 +338,10 @@ export default function MenuInsightsScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Menu Insights</Text>
-          <TouchableOpacity style={styles.notificationButton}>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => router.push('/notifications')}
+          >
             <Ionicons name="notifications-outline" size={24} color="#4a3621" />
           </TouchableOpacity>
         </View>
