@@ -742,7 +742,15 @@ export default function MenuScreen() {
                           <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
                           <Text style={styles.featureActionText}>Detail</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.featureActionButton}>
+                        <TouchableOpacity
+                          style={styles.featureActionButton}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/feedback',
+                              params: { menuName: item.name, menuId: item.id },
+                            })
+                          }
+                        >
                           <Ionicons
                             name="bookmark-outline"
                             size={16}
@@ -1476,11 +1484,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-  },
-  beverageLoadingText: {
-    fontSize: 12,
-    color: '#8B7355',
-    fontWeight: '600',
   },
   beverageCard: {
     width: (width - 24 * 2 - 16) / 2,

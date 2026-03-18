@@ -32,7 +32,7 @@ const COLORS = {
     outOfStock: '#FFE6E6',
 };
 
-const DOMAIN_WEB = 'http://192.168.38.1:5173/feedback';
+const DOMAIN_WEB = 'https://smart-coffee-six.vercel.app/feedback';
 
 interface MenuItem {
     menuItemId: number;

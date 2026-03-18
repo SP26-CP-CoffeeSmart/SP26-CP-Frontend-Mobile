@@ -81,6 +81,7 @@ export const API_ENDPOINTS = {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/by-shop/${shopId}`,
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
+    byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
   },
   menuHeader: {
     getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,
@@ -119,6 +120,14 @@ export const API_ENDPOINTS = {
   },
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
+  },
+  feedback: {
+    byMenuItem: (menuId: number, menuItemId: number) =>
+      `${AUTH_BASE_URL}/Feedback/MenuItem/${menuId}/${menuItemId}`,
+    listByMenu: (menuId: number, page = 1, pageSize = 100) =>
+      `${AUTH_BASE_URL}/Feedback/MenuItem?menuId=${menuId}&page=${page}&pageSize=${pageSize}`,
+    list: (page = 1, pageSize = 100) =>
+      `${AUTH_BASE_URL}/Feedback/MenuItem?page=${page}&pageSize=${pageSize}`,
   },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,

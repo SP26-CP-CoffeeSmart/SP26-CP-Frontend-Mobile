@@ -21,6 +21,7 @@ interface MenuVersion {
     id: string;
     name: string;
     image: any;
+    imageUri?: string;
     avgDailyRevenue: string;
     profitMargin: number;
     topSeller: string;
@@ -130,6 +131,7 @@ const MenuVersionPage = () => {
                 id: String(item.menuId),
                 name: `${name || 'Menu'} ver ${item.versionNumber}`,
                 image: { uri: imageUrl },
+                imageUri: imageUrl,
                 avgDailyRevenue: '—',
                 profitMargin: 0,
                 topSeller: topSellerName,
@@ -214,6 +216,17 @@ const MenuVersionPage = () => {
         }
     };
 
+    const navigateToInsights = (item: MenuVersion) => {
+        router.push({
+            pathname: '/menu-insights',
+            params: {
+                menuId: item.id,
+                menuName: item.name,
+                menuImage: item.imageUri ?? '',
+            },
+        });
+    };
+
     const renderSkeleton = () => (
         <View style={styles.cardContainer}>
             <Animated.View
@@ -287,32 +300,22 @@ const MenuVersionPage = () => {
                                 contentContainerStyle={styles.carouselContent}
                                 renderItem={({ item }) => (
                                     <View style={styles.cardContainer}>
-                                        <View style={styles.versionCard}>
+                                        <TouchableOpacity
+                                            style={styles.versionCard}
+                                            activeOpacity={0.96}
+                                            onPress={() => navigateToInsights(item)}
+                                        >
                                             {/* Image Section */}
                                             <View style={styles.imageWrapper}>
                                                 <Image source={item.image} style={styles.image} />
-                                                <TouchableOpacity
-                                                    style={styles.editButton}
-                                                    onPress={() =>
-                                                        router.push({
-                                                            pathname: '/menu-version-detail/[id]' as any,
-                                                            params: {
-                                                                id: item.id,
-                                                                title: item.name,
-                                                            },
-                                                        })
-                                                    }
-                                                >
-                                                    <Text style={styles.editButtonText}>Detail</Text>
-                                                </TouchableOpacity>
 
                                                 {item.isActive ? (
-                                                    <View style={styles.activeBadge}>
+                                                    <View style={styles.statusBadge}>
                                                         <Text style={styles.activeBadgeText}>Active</Text>
                                                     </View>
                                                 ) : (
                                                     <TouchableOpacity
-                                                        style={styles.activateButton}
+                                                        style={styles.statusBadge}
                                                         onPress={() => handleActivate(item.id)}
                                                         disabled={activatingId === item.id}
                                                     >
@@ -371,10 +374,7 @@ const MenuVersionPage = () => {
                                                 {/* Insights Button */}
                                                 <TouchableOpacity
                                                     style={styles.insightsButton}
-                                                    onPress={() => router.push({
-                                                        pathname: '/menu-insights',
-                                                        params: { menuId: item.id }
-                                                    })}
+                                                    onPress={() => navigateToInsights(item)}
                                                 >
                                                     <View style={styles.insightsButtonContent}>
                                                         <Ionicons name="analytics" size={16} color={stylesVars.primary} />
@@ -385,7 +385,7 @@ const MenuVersionPage = () => {
                                             </View>
 
 
-                                        </View>
+                                        </TouchableOpacity>
                                     </View>
                                 )}
                             />
@@ -544,32 +544,19 @@ const styles = StyleSheet.create({
         height: '100%',
         resizeMode: 'cover',
     },
-    editButton: {
+    statusBadge: {
         position: 'absolute',
         top: 12,
         right: 12,
+        minWidth: 98,
+        alignItems: 'center',
+        justifyContent: 'center',
         paddingVertical: 6,
         paddingHorizontal: 14,
         borderRadius: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
-        borderWidth: 1,
-        borderColor: 'rgba(139, 111, 78, 0.2)',
-    },
-    editButtonText: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: stylesVars.primary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    activeBadge: {
-        position: 'absolute',
-        top: 48,
-        right: 12,
-        paddingVertical: 4,
-        paddingHorizontal: 12,
-        borderRadius: 20,
         backgroundColor: 'rgba(45, 106, 79, 0.95)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.7)',
     },
     activeBadgeText: {
         fontSize: 11,
@@ -577,17 +564,6 @@ const styles = StyleSheet.create({
         color: '#FFFFFF',
         textTransform: 'uppercase',
         letterSpacing: 0.6,
-    },
-    activateButton: {
-        position: 'absolute',
-        top: 48,
-        right: 12,
-        paddingVertical: 6,
-        paddingHorizontal: 14,
-        borderRadius: 20,
-        backgroundColor: stylesVars.primary,
-        borderWidth: 1,
-        borderColor: 'rgba(139, 111, 78, 0.2)',
     },
     activateButtonText: {
         fontSize: 11,
