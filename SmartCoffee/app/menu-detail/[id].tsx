@@ -10,7 +10,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -21,7 +20,6 @@ import {
   Gesture,
   GestureDetector,
   GestureHandlerRootView,
-  Swipeable,
 } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
 import * as FileSystem from 'expo-file-system';
@@ -43,6 +41,43 @@ const toArray = (value: unknown): any[] => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
   return [value];
+};
+
+const normalizeModifiedMenuItemIds = (menu: any): number[] => {
+  const raw =
+    menu?.modifiedMenuItemIds ??
+    menu?.ModifiedMenuItemIds ??
+    menu?.modifiedMenuItemIDs ??
+    null;
+
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw > 0 ? [raw] : [];
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0);
+      }
+    } catch {
+      // Ignore JSON parse errors and fallback to comma split.
+    }
+    return trimmed
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value) && value > 0);
+  }
+  return [];
 };
 
 interface MenuItemGrouped {
@@ -271,8 +306,7 @@ export default function MenuDetailScreen() {
   const [menuDetailsPayload, setMenuDetailsPayload] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsReady, setDetailsReady] = useState(false);
-  const [newItemCount, setNewItemCount] = useState('');
-  const [regenerating, setRegenerating] = useState(false);
+  const [savingMenuVersion, setSavingMenuVersion] = useState(false);
   const [renderingMenu, setRenderingMenu] = useState(false);
   const [renderedMenuUrl, setRenderedMenuUrl] = useState<string | null>(null);
   const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
@@ -301,10 +335,6 @@ export default function MenuDetailScreen() {
       zoomTranslateY.value = 0;
     }
   }, [isImageZoomOpen, zoomScale, zoomTranslateX, zoomTranslateY]);
-  const trimmedItemCount = newItemCount.trim();
-  const parsedItemCount = Number.parseInt(trimmedItemCount || '0', 10);
-  const canRegenerate = Number.isFinite(parsedItemCount) && parsedItemCount > 0;
-
   useEffect(() => {
     if (!parsedItem && !parsedPayload) {
       setCurrentMenu(null);
@@ -375,6 +405,11 @@ export default function MenuDetailScreen() {
     () => groupMenuItemsByCategory(menuForDisplay),
     [menuForDisplay]
   );
+
+  const modifiedItemIdSet = useMemo(() => {
+    const ids = normalizeModifiedMenuItemIds(menuForDisplay);
+    return new Set(ids);
+  }, [menuForDisplay]);
 
   const handleItemPress = (menuItem: any) => {
     if (!menuItem) return;
@@ -497,15 +532,24 @@ export default function MenuDetailScreen() {
           responseMenu?.menu?.menuItems ??
           []
       );
+      const resolvedModifiedMenuItemIds = normalizeModifiedMenuItemIds(
+        responseMenu ?? responsePayload?.p3Input?.menu ?? responsePayload?.menu ?? responsePayload
+      );
 
       if (responseMenu) {
         setCurrentMenu((prev) => ({
           ...(prev ?? {}),
           ...responseMenu,
+          ...(resolvedModifiedMenuItemIds.length > 0
+            ? { modifiedMenuItemIds: resolvedModifiedMenuItemIds }
+            : {}),
         }));
         setMenuDraft((prev) => ({
           ...(prev ?? {}),
           ...responseMenu,
+          ...(resolvedModifiedMenuItemIds.length > 0
+            ? { modifiedMenuItemIds: resolvedModifiedMenuItemIds }
+            : {}),
         }));
       }
 
@@ -549,177 +593,44 @@ export default function MenuDetailScreen() {
     }
   };
 
-  const handleRemoveItem = (menuItem: any) => {
-    if (!menuItem) return;
-    const menuItemId = menuItem?.menuItemId || menuItem?.id;
-    if (menuItemId) {
-      setStoredMenuItems((prev) => {
-        const next = prev.filter((item) => item?.menuItemId !== menuItemId);
-        const nextSize = next.length;
-        setDetailsReady(false);
-        setMenuDetailsPayload(null);
-        setMenuPayload((current) => {
-          if (!current) return current;
-          const menus = toArray(current?.menus ?? []);
-          if (menus.length > 0) {
-            const menuAtIndex = menus[resolvedMenuIndex] ?? {};
-            menus[resolvedMenuIndex] = {
-              ...menuAtIndex,
-              menuItems: next,
-              menuSizeValue: nextSize,
-              config: {
-                ...(menuAtIndex?.config ?? {}),
-                menuSizeValue: nextSize,
-              },
-            };
-          }
-          return {
-            ...current,
-            menus,
-            config: {
-              ...(current?.config ?? {}),
-              menuSizeValue: nextSize,
-            },
-          };
-        });
-        setMenuConfig((current) => ({
-          ...(current ?? {}),
-          menuSizeValue: nextSize,
-        }));
-        setMenuDraft((current) => ({
-          ...(current ?? {}),
-          menuSizeValue: nextSize,
-        }));
-        setCurrentMenu((current) => ({
-          ...(current ?? {}),
-          menuSizeValue: nextSize,
-        }));
-        return next;
+  const handleSaveMenuVersion = async () => {
+    const menuForSave = menuForDisplay ?? {};
+    const menuId = Number(menuForSave?.menuId ?? menuForSave?.id ?? 0);
+    const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menuForSave);
+
+    if (!Number.isFinite(menuId) || menuId <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing menu ID',
+        text2: 'This menu does not have a valid ID to save.',
       });
       return;
     }
-    setStoredMenuItems((prev) => {
-      const next = prev.filter((item) => item !== menuItem);
-      const nextSize = next.length;
-      setMenuPayload((current) => {
-        if (!current) return current;
-        const menus = toArray(current?.menus ?? []);
-        if (menus.length > 0) {
-          const menuAtIndex = menus[resolvedMenuIndex] ?? {};
-          menus[resolvedMenuIndex] = {
-            ...menuAtIndex,
-            menuItems: next,
-            menuSizeValue: nextSize,
-            config: {
-              ...(menuAtIndex?.config ?? {}),
-              menuSizeValue: nextSize,
-            },
-          };
-        }
-        return {
-          ...current,
-          menus,
-          config: {
-            ...(current?.config ?? {}),
-            menuSizeValue: nextSize,
-          },
-        };
+
+    if (modifiedMenuItemIds.length === 0) {
+      Toast.show({
+        type: 'info',
+        text1: 'No changes',
+        text2: 'There are no modified items to save.',
       });
-      setMenuConfig((current) => ({
-        ...(current ?? {}),
-        menuSizeValue: nextSize,
-      }));
-      setMenuDraft((current) => ({
-        ...(current ?? {}),
-        menuSizeValue: nextSize,
-      }));
-      setCurrentMenu((current) => ({
-        ...(current ?? {}),
-        menuSizeValue: nextSize,
-      }));
-      setMenuDetailsPayload(null);
-      return next;
-    });
-  };
-
-  const renderItemDeleteAction = (menuItem: any) => (
-    <View style={styles.swipeActionWrap}>
-      <TouchableOpacity
-        style={styles.swipeDeleteButton}
-        onPress={() => handleRemoveItem(menuItem)}
-      >
-        <Ionicons name="trash" size={18} color="#FFFFFF" />
-        <Text style={styles.swipeDeleteText}>Remove</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const handleRegenerate = async () => {
-    if (regenerating) return;
-    if (!canRegenerate) {
-      Alert.alert('Missing quantity', 'Please enter a quantity to regenerate.');
       return;
     }
-    if (!parsedItem && !parsedPayload) {
-      Alert.alert('Missing data', 'No menu data available to regenerate.');
-      return;
-    }
-
-    const parsedCount = Number.parseInt(newItemCount.trim() || '0', 10);
-    const safeCount = Number.isFinite(parsedCount) ? Math.max(0, parsedCount) : 0;
-
-    const configFromItem = menuConfig ?? {};
-    const baseMenu = menuDraft ?? currentMenu ?? parsedItem;
-
-    const resolvedTitle =
-      configFromItem?.title ??
-      baseMenu?.title ??
-      baseMenu?.menuName ??
-      baseMenu?.name ??
-      (title ? String(title) : '') ??
-      '';
-
-    const baseCount = storedMenuItems.length;
-    const targetMenuSize = Math.max(0, baseCount + safeCount);
-
-    const resolvedConfig = {
-      ...(menuPayload?.config ?? {}),
-      ...(baseMenu?.config ?? {}),
-      ...configFromItem,
-      title: resolvedTitle || 'Menu Regenerate',
-      menuSizeValue: targetMenuSize,
-      layout: configFromItem?.layout ?? baseMenu?.layout ?? 0,
-      topic: configFromItem?.topic ?? baseMenu?.topic ?? 0,
-      shopStyle: configFromItem?.shopStyle ?? baseMenu?.shopStyle ?? '',
-      pricing: configFromItem?.pricing ?? baseMenu?.pricing ?? 0,
-      groups:
-        configFromItem?.groups ??
-        baseMenu?.groups ??
-        baseMenu?.menuGroups ??
-        [],
-    };
-
-    const currentMenuPayload = {
-      ...(baseMenu ?? {}),
-      menuItems: storedMenuItems,
-      menuSizeValue: targetMenuSize,
-      config: resolvedConfig,
-    };
 
     const payload = {
-      config: resolvedConfig,
-      menu: currentMenuPayload,
-      newItemCount: safeCount,
+      ...menuForSave,
+      menuId,
+      modifiedMenuItemIds,
+      imageUrl:
+        menuForSave?.imageUrl ??
+        menuForSave?.image ??
+        menuForSave?.thumbnail ??
+        menuForSave?.ImageUrl ??
+        null,
     };
 
-    console.log('[Menu Regenerate] Stored menuItems:', JSON.stringify(storedMenuItems, null, 2));
-    console.log('[Menu Regenerate] Request payload:', payload);
-
     try {
-      setRegenerating(true);
-      setDetailsReady(false);
-      setMenuDetailsPayload(null);
-      const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
+      setSavingMenuVersion(true);
+      const response = await authorizedFetch(API_ENDPOINTS.menu.saveAi(), {
         method: 'POST',
         headers: {
           Accept: '*/*',
@@ -728,13 +639,8 @@ export default function MenuDetailScreen() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-
       const responseText = await response.text();
-      let responsePayload: unknown = null;
+      let responsePayload: any = null;
       if (responseText) {
         try {
           responsePayload = JSON.parse(responseText);
@@ -743,62 +649,28 @@ export default function MenuDetailScreen() {
         }
       }
 
-      const responseMenus = (() => {
-        if (!responsePayload) return [];
-        if (Array.isArray(responsePayload)) return responsePayload;
-        if ((responsePayload as any)?.menus) return toArray((responsePayload as any).menus);
-        if ((responsePayload as any)?.data) return toArray((responsePayload as any).data);
-        if ((responsePayload as any)?.items) return toArray((responsePayload as any).items);
-        if ((responsePayload as any)?.menu) return toArray((responsePayload as any).menu);
-        if ((responsePayload as any)?.result) return toArray((responsePayload as any).result);
-        return [responsePayload];
-      })();
-
-      const responseMenu = responseMenus[resolvedMenuIndex] ?? responseMenus[0] ?? null;
-      const responseMenuItems = toArray(responseMenu?.menuItems ?? responseMenu?.menu?.menuItems ?? []);
-
-      if (responseMenu) {
-        setCurrentMenu((prev) => ({
-          ...(prev ?? {}),
-          ...responseMenu,
-        }));
-        setMenuDraft((prev) => ({
-          ...(prev ?? {}),
-          ...responseMenu,
-        }));
+      if (!response.ok) {
+        const backendError = responsePayload?.error ?? responsePayload?.message ?? responseText;
+        throw new Error(backendError || `Request failed (${response.status})`);
       }
 
-      if (responsePayload && (responsePayload as any)?.menus) {
-        const updatedMenus = toArray((responsePayload as any).menus);
-        setMenuPayload((current) => ({
-          ...(current ?? {}),
-          ...(responsePayload as any),
-          menus: updatedMenus,
-        }));
-      }
-
-      if (responseMenuItems.length > 0) {
-        const previousCount = storedMenuItems.length;
-        setStoredMenuItems(responseMenuItems);
-
-        if (safeCount > 0) {
-          const addedCount = responseMenuItems.length - previousCount;
-          if (addedCount < safeCount) {
-            Alert.alert(
-              'Generate Again',
-              `Expected ${safeCount} new items, but received ${Math.max(addedCount, 0)}.`
-            );
-          }
-        }
-      }
-
-      setNewItemCount('');
+      console.log('[Menu Save AI] Modified item IDs:', modifiedMenuItemIds);
+      const newMenuId = responsePayload?.MenuId ?? responsePayload?.menuId ?? null;
+      Toast.show({
+        type: 'success',
+        text1: 'Saved new version',
+        text2: newMenuId ? `New menu ID: ${newMenuId}` : 'Menu version saved successfully.',
+      });
+      router.replace('/(tabs)/menu');
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Unable to regenerate menu items.';
-      Alert.alert('Regenerate failed', message);
+      const message = error instanceof Error ? error.message : 'Unable to save menu version.';
+      Toast.show({
+        type: 'error',
+        text1: 'Save failed',
+        text2: message,
+      });
     } finally {
-      setRegenerating(false);
+      setSavingMenuVersion(false);
     }
   };
 
@@ -1102,101 +974,59 @@ export default function MenuDetailScreen() {
             <View key={`group-${group.beverageCategoryId}-${groupIndex}`} style={styles.groupSection}>
               <Text style={styles.groupTitle}>{group.groupName}</Text>
               <View style={styles.itemList}>
-                {group.items.map((item, itemIndex) => (
-                  <Swipeable
+                {group.items.map((item, itemIndex) => {
+                  const isModified = modifiedItemIdSet.has(Number(item.menuItemId));
+                  return (
+                  <TouchableOpacity
                     key={`${group.beverageCategoryId}-item-${itemIndex}`}
-                    renderRightActions={() => renderItemDeleteAction(item.sourceMenuItem)}
-                    overshootRight={false}
-                    containerStyle={styles.itemSwipeContainer}
-                    childrenContainerStyle={styles.itemSwipeChildren}
+                    style={[styles.itemCard, isModified && styles.itemCardModified]}
+                    onPress={() => handleItemPress(item)}
+                    activeOpacity={0.75}
                   >
-                    <TouchableOpacity
-                      style={styles.itemCard}
-                      onPress={() => handleItemPress(item)}
-                      activeOpacity={0.75}
-                    >
-                      <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
-                      <View style={styles.itemContent}>
-                        <Text style={styles.itemName}>{item.recipeName}</Text>
-                        {item.description ? (
-                          <Text style={styles.itemDescription} numberOfLines={2}>
-                            {item.description}
-                          </Text>
-                        ) : null}
-                        {item.priceInfo ? (
-                          <Text style={styles.itemPrice}>{item.priceInfo}</Text>
-                        ) : null}
+                    {isModified ? (
+                      <View style={styles.modifiedBadge}>
+                        <Ionicons name="sparkles" size={12} color="#FFFFFF" />
+                        <Text style={styles.modifiedBadgeText}>Updated</Text>
                       </View>
-                    </TouchableOpacity>
-                  </Swipeable>
-                ))}
+                    ) : null}
+                    <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
+                    <View style={styles.itemContent}>
+                      <Text style={styles.itemName}>{item.recipeName}</Text>
+                      {item.description ? (
+                        <Text style={styles.itemDescription} numberOfLines={2}>
+                          {item.description}
+                        </Text>
+                      ) : null}
+                      {item.priceInfo ? (
+                        <Text style={styles.itemPrice}>{item.priceInfo}</Text>
+                      ) : null}
+                    </View>
+                  </TouchableOpacity>
+                );
+                })}
               </View>
             </View>
           ))
         )}
-
-        {!detailsLoading && !detailsReady && !renderedMenuUrl ? (
-          <View style={styles.actionCard}>
-            <View style={styles.actionCardHeader}>
-              <Ionicons name="options-outline" size={18} color="#6B3F1D" />
-              <Text style={styles.actionCardTitle}>Regenerate Menu Items</Text>
-            </View>
-            <View style={styles.regenerateRow}>
-              <Text style={styles.regenerateLabel}>Quantity</Text>
-              <TextInput
-                style={styles.quantityInput}
-                placeholder="Enter number"
-                placeholderTextColor="#8E7B6F"
-                keyboardType="number-pad"
-                value={newItemCount}
-                onChangeText={setNewItemCount}
-              />
-            </View>
-            <Text style={styles.regenerateHint}>
-              Keep selected items and recreate remaining items to match menu size.
-            </Text>
-            <TouchableOpacity
-              style={[
-                styles.regenerateButton,
-                (regenerating || !canRegenerate) && styles.regenerateButtonDisabled,
-              ]}
-              onPress={handleRegenerate}
-              disabled={regenerating || !canRegenerate}
-            >
-              <Text style={styles.regenerateButtonText}>
-                {regenerating ? 'Regenerating...' : 'Generate Again'}
-              </Text>
-              <Ionicons name="refresh" size={16} color="#FFFFFF" />
-            </TouchableOpacity>
-          </View>
-        ) : null}
       </ScrollView>
 
       <View style={styles.bottomBar}>
         <View style={styles.bottomActionsRow}>
-          {!renderedMenuUrl ? (
-            <TouchableOpacity
-              style={[styles.detailButton, detailsLoading && styles.regenerateButtonDisabled]}
-              onPress={detailsReady ? handleRenderMenu : handleGenerateDetails}
-              disabled={detailsLoading || (detailsReady && renderingMenu)}
-            >
-              <Text style={styles.detailButtonText}>
-                {detailsReady
-                  ? renderingMenu
-                    ? 'Rendering...'
-                    : 'Save & render menu'
-                  : detailsLoading
-                    ? 'Loading Details...'
-                    : 'Recipe Details'}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
+          <TouchableOpacity
+            style={[styles.detailButton, savingMenuVersion && styles.buttonDisabled]}
+            onPress={handleSaveMenuVersion}
+            disabled={savingMenuVersion}
+          >
+            <Text style={styles.detailButtonText}>
+              {savingMenuVersion ? 'Saving...' : 'Save new version'}
+            </Text>
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.goBackButton, renderedMenuUrl && styles.goBackButtonFull]}
-            onPress={() => router.replace('/(tabs)/menu')}
+            onPress={() => router.back()}
           >
             <Ionicons name="arrow-back" size={16} color="#3C2A21" />
-            <Text style={styles.goBackButtonText}>Go Back</Text>
+            <Text style={styles.goBackButtonText}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -1358,13 +1188,6 @@ const styles = StyleSheet.create({
     gap: 12,
     overflow: 'visible',
   },
-  itemSwipeContainer: {
-    marginBottom: 4,
-    overflow: 'visible',
-  },
-  itemSwipeChildren: {
-    overflow: 'visible',
-  },
   itemHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1385,6 +1208,10 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 5,
     marginVertical: 1,
+  },
+  itemCardModified: {
+    borderColor: '#D39C5E',
+    backgroundColor: '#FFF6EA',
   },
   itemImage: {
     width: 96,
@@ -1412,6 +1239,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#2C1B13',
   },
+  modifiedBadge: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#B26A22',
+  },
+  modifiedBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
   detailButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1427,30 +1271,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  actionCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#E6D9CC',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-    gap: 10,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  actionCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  actionCardTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#3C2A21',
+  buttonDisabled: {
+    opacity: 0.6,
   },
   bottomBar: {
     position: 'absolute',
@@ -1473,48 +1295,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-  },
-  regenerateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  regenerateLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#3C2A21',
-  },
-  quantityInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#D7C7B8',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#3C2A21',
-    backgroundColor: '#FDFBFA',
-  },
-  regenerateHint: {
-    fontSize: 13,
-    color: '#A57C52',
-    lineHeight: 18,
-  },
-  regenerateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#6B3F1D',
-  },
-  regenerateButtonDisabled: {
-    opacity: 0.6,
-  },
-  regenerateButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
   },
   goBackButton: {
     flex: 1,
@@ -1664,25 +1444,6 @@ const styles = StyleSheet.create({
   renderSuccessButtonPrimaryText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#FFFFFF',
-  },
-  swipeActionWrap: {
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    marginLeft: 12,
-  },
-  swipeDeleteButton: {
-    width: 96,
-    height: 96,
-    backgroundColor: '#B23B3B',
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-  },
-  swipeDeleteText: {
-    fontSize: 11,
-    fontWeight: '700',
     color: '#FFFFFF',
   },
 });
