@@ -141,6 +141,13 @@ const getMenuImageCandidates = (menu: any): string[] => {
   return Array.from(new Set([...variants, fallbackMenuImage]));
 };
 
+const normalizeMenuImageUrl = (menu: any): string | null => {
+  const rawUrl = getRawMenuImage(menu);
+  if (!rawUrl) return null;
+  const variants = getFirebaseImageVariants(rawUrl);
+  return variants[0] ?? rawUrl;
+};
+
 function ResilientMenuImage({ menu, menuKey }: { menu: any; menuKey: string }) {
   const candidates = useMemo(() => getMenuImageCandidates(menu), [menu]);
   const [candidateIndex, setCandidateIndex] = useState(0);
@@ -284,6 +291,8 @@ export default function MenuResultsScreen() {
   const handleSaveAiMenu = async (menu: any, menuKey: string) => {
     const menuId = Number(menu?.menuId ?? menu?.id ?? 0);
     const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menu);
+    const resolvedImageUrl =
+      normalizeMenuImageUrl(menu) ?? normalizeMenuImageUrl(parsedPayload);
 
     if (!Number.isFinite(menuId) || menuId <= 0) {
       Toast.show({
@@ -307,13 +316,14 @@ export default function MenuResultsScreen() {
       ...menu,
       menuId,
       modifiedMenuItemIds,
-      imageUrl:
-        menu?.imageUrl ??
-        menu?.image ??
-        menu?.thumbnail ??
-        menu?.ImageUrl ??
-        null,
+      imageUrl: resolvedImageUrl,
     };
+
+    console.log('[Menu Save AI] Request payload:', {
+      menuId,
+      modifiedMenuItemIds,
+      imageUrl: resolvedImageUrl,
+    });
 
     try {
       setSavingMenuKey(menuKey);
