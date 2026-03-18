@@ -102,6 +102,44 @@ const resolveImageUrl = (raw?: string | null) => {
   return `${AUTH_BASE_URL}/images/${raw}`;
 };
 
+const resolveGeneratedImageUrl = (payload: any): string | null => {
+  if (!payload) return null;
+  if (typeof payload === 'string') return payload;
+  return (
+    payload.imageUrl ||
+    payload.firebaseUrl ||
+    payload.image ||
+    (Array.isArray(payload.results) && payload.results[0]?.imageUrl) ||
+    payload.data?.imageUrl ||
+    payload.data?.firebaseUrl ||
+    payload.data?.image ||
+    payload.result?.imageUrl ||
+    payload.result?.firebaseUrl ||
+    payload.result?.image ||
+    (Array.isArray(payload.images) && payload.images[0]?.url) ||
+    null
+  );
+};
+
+const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
+  if (!url || typeof url !== 'string') return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
+
+  // Encode Firebase URLs: convert / to %2F in the path after '/o/'
+  if (trimmed.includes('firebasestorage.googleapis.com')) {
+    const oIndex = trimmed.indexOf('/o/');
+    if (oIndex !== -1) {
+      const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
+      const path = trimmed.substring(oIndex + 3);
+      const encodedPath = path.replace(/\//g, '%2F');
+      return baseUrl + encodedPath;
+    }
+  }
+
+  return trimmed;
+};
+
 export default function MenuInsightsScreen() {
   const router = useRouter();
   const { menuId, menuImage } = useLocalSearchParams<{ menuId?: string; menuImage?: string }>();
@@ -357,16 +395,45 @@ export default function MenuInsightsScreen() {
         }
       }
 
+      const normalizedPayload = (() => {
+        if (!responsePayload || typeof responsePayload !== 'object') return responsePayload;
+        const resolvedUrl = encodeFirebaseImageUrl(resolveGeneratedImageUrl(responsePayload));
+        if (!resolvedUrl) return responsePayload;
+
+        const payloadObject = responsePayload as any;
+        const menus = Array.isArray(payloadObject.menus)
+          ? payloadObject.menus
+          : Array.isArray(payloadObject.data)
+            ? payloadObject.data
+            : Array.isArray(payloadObject.items)
+              ? payloadObject.items
+              : null;
+
+        if (menus) {
+          menus.forEach((menu: any) => {
+            if (menu && !menu.imageUrl && !menu.ImageUrl) {
+              menu.imageUrl = resolvedUrl;
+            }
+          });
+        }
+
+        if (!payloadObject.imageUrl && !payloadObject.ImageUrl) {
+          payloadObject.imageUrl = resolvedUrl;
+        }
+
+        return payloadObject;
+      })();
+
       let cacheKey = '';
-      if (responsePayload) {
+      if (normalizedPayload) {
         cacheKey = `menuFeedback:${Date.now()}`;
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(responsePayload));
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(normalizedPayload));
       }
 
       router.push({
         pathname: '/menu-results',
         params: {
-          data: responsePayload ? JSON.stringify(responsePayload) : '',
+          data: normalizedPayload ? JSON.stringify(normalizedPayload) : '',
           cacheKey,
         },
       });
