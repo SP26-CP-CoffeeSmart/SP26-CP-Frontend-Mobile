@@ -116,6 +116,49 @@ const cleanDescription = (description: string): string => {
   return parts[0].trim();
 };
 
+const normalizeFirebaseImageUrl = (url: string): string => {
+  if (!url.includes('firebasestorage.googleapis.com')) return url;
+  try {
+    const parsed = new URL(url);
+    const marker = '/o/';
+    const markerIndex = parsed.pathname.indexOf(marker);
+    if (markerIndex === -1) return url;
+
+    const objectPath = parsed.pathname.slice(markerIndex + marker.length);
+    const decodedObjectPath = decodeURIComponent(objectPath);
+    const normalizedObjectPath = decodedObjectPath
+      .split('/').filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('%2F');
+
+    parsed.pathname = `${parsed.pathname.slice(0, markerIndex + marker.length)}${normalizedObjectPath}`;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+};
+
+const getMenuImageForSave = (menu: any, renderedUrl?: string | null): string | null => {
+  const candidates = [
+    menu?.imageUrl,
+    menu?.image,
+    menu?.thumbnail,
+    menu?.ImageUrl,
+    menu?.menu?.imageUrl,
+    menu?.menu?.ImageUrl,
+    renderedUrl,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') continue;
+    return normalizeFirebaseImageUrl(trimmed);
+  }
+
+  return null;
+};
+
 const formatPriceFromSizes = (itemSizeViewModels: any[]): string => {
   if (!itemSizeViewModels || !Array.isArray(itemSizeViewModels) || itemSizeViewModels.length === 0) {
     return '';
@@ -597,6 +640,7 @@ export default function MenuDetailScreen() {
     const menuForSave = menuForDisplay ?? {};
     const menuId = Number(menuForSave?.menuId ?? menuForSave?.id ?? 0);
     const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menuForSave);
+    const resolvedImageUrl = getMenuImageForSave(menuForSave, renderedMenuUrl);
 
     if (!Number.isFinite(menuId) || menuId <= 0) {
       Toast.show({
@@ -620,13 +664,14 @@ export default function MenuDetailScreen() {
       ...menuForSave,
       menuId,
       modifiedMenuItemIds,
-      imageUrl:
-        menuForSave?.imageUrl ??
-        menuForSave?.image ??
-        menuForSave?.thumbnail ??
-        menuForSave?.ImageUrl ??
-        null,
+      imageUrl: resolvedImageUrl,
     };
+
+    console.log('[Menu Save AI] Request payload:', {
+      menuId,
+      modifiedMenuItemIds,
+      imageUrl: resolvedImageUrl,
+    });
 
     try {
       setSavingMenuVersion(true);
