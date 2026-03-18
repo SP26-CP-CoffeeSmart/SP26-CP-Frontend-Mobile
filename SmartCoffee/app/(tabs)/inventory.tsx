@@ -1,4 +1,4 @@
-  import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -40,10 +40,10 @@ export default function InventoryScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'out'>('all');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [sortOption, setSortOption] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
   const [draftCategory, setDraftCategory] = useState('All');
-  const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'out'>('all');
+  const [draftStatus, setDraftStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
   const [draftSort, setDraftSort] = useState<'alpha' | 'qty-asc' | 'qty-desc'>('alpha');
   const [ingredients, setIngredients] = useState<ShopInventoryItem[]>([]);
   const [filteredIngredients, setFilteredIngredients] = useState<ShopInventoryItem[]>([]);
@@ -60,7 +60,7 @@ export default function InventoryScreen() {
     card: '#FFFFFF',
     ink: '#1E1B16',
     muted: '#7A6F67',
-    accent: '#E07A2D',
+    accent: '#2B1C15',
     chip: '#F2E7DA',
     chipActive: '#2B1C15',
     border: '#EFE4D8',
@@ -111,8 +111,11 @@ export default function InventoryScreen() {
 
     if (selectedStatus !== 'all') {
       filtered = filtered.filter((item) => {
-        const status = getStockStatus(Number(item.quantity ?? 0)).label;
+        const quantity = Number(item.quantity ?? 0);
+        const minStock = Number(item.minStock ?? defaultMinStock);
+        const status = getStockStatus(quantity, minStock).label;
         if (status.includes('OUT')) return selectedStatus === 'out';
+        if (status.includes('LOW')) return selectedStatus === 'low';
         return selectedStatus === 'in';
       });
     }
@@ -172,20 +175,30 @@ export default function InventoryScreen() {
     setFilterVisible(false);
   };
 
-  const getStockStatus = (quantity: number) => {
-    if (quantity > 0) {
+  const getStockStatus = (quantity: number, minStock: number) => {
+    if (quantity <= 0) {
       return {
-        label: 'IN STOCK',
-        color: '#15803D',
-        bgColor: '#DCFCE7',
-        barColor: '#22C55E',
+        label: 'OUT OF STOCK',
+        color: '#B91C1C',
+        bgColor: '#FEE2E2',
+        barColor: '#EF4444',
       };
     }
+
+    if (quantity <= minStock) {
+      return {
+        label: 'LOW STOCK',
+        color: '#B45309',
+        bgColor: '#FEF3C7',
+        barColor: '#F59E0B',
+      };
+    }
+
     return {
-      label: 'OUT OF STOCK',
-      color: '#B91C1C',
-      bgColor: '#FEE2E2',
-      barColor: '#EF4444',
+      label: 'IN STOCK',
+      color: '#15803D',
+      bgColor: '#DCFCE7',
+      barColor: '#22C55E',
     };
   };
 
@@ -195,14 +208,14 @@ export default function InventoryScreen() {
 
   const renderItem = ({ item }: { item: ShopInventoryItem }) => {
     const quantity = Number(item.quantity ?? 0);
-    const status = getStockStatus(quantity);
+    const minStockValue = Number(item.minStock ?? defaultMinStock);
+    const status = getStockStatus(quantity, minStockValue);
     const percentage = getStockPercentage(quantity);
-    
+
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
     const ingredientImage = item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
-    const minStockValue = Number(item.minStock ?? defaultMinStock);
 
     return (
       <TouchableOpacity
@@ -397,6 +410,48 @@ export default function InventoryScreen() {
                   <Ionicons name="options-outline" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity
+                style={{
+                  marginTop: 12,
+                  backgroundColor: COLORS.accent,
+                  borderRadius: 16,
+                  paddingVertical: 14,
+                  paddingHorizontal: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  shadowColor: '#000',
+                  shadowOpacity: 0.08,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 6 },
+                  elevation: 3,
+                }}
+                onPress={() => router.push('/ai-inventory-predict')}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 12,
+                      backgroundColor: 'rgba(255,255,255,0.2)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="sparkles-outline" size={18} color="#FFFFFF" />
+                  </View>
+                  <View>
+                    <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                      AI Predict Inventory
+                    </Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
+                      Forecast low-stock items
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
             {(selectedCategory !== 'All' || selectedStatus !== 'all' || sortOption !== 'alpha') ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 6 }}>
@@ -611,7 +666,7 @@ export default function InventoryScreen() {
                   return (
                     <TouchableOpacity
                       key={item.key}
-                      onPress={() => setDraftStatus(item.key)}
+                      onPress={() => setDraftStatus(item.key as 'in' | 'low' | 'out')}
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
