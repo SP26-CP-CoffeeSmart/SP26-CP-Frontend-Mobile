@@ -48,6 +48,7 @@ interface MenuItem {
     name: string;
     status?: string;
     beverageCategoryId?: number;
+    beverageCategoryName?: string;
     imageUrl?: string | null;
     image?: string | null;
     beverageCategory?: {
@@ -109,13 +110,19 @@ const resolveGeneratedImageUrl = (payload: any): string | null => {
     payload.imageUrl ||
     payload.firebaseUrl ||
     payload.image ||
+    payload.menu?.imageUrl ||
+    payload.menu?.ImageUrl ||
     (Array.isArray(payload.results) && payload.results[0]?.imageUrl) ||
     payload.data?.imageUrl ||
     payload.data?.firebaseUrl ||
     payload.data?.image ||
+    payload.data?.menu?.imageUrl ||
+    payload.data?.menu?.ImageUrl ||
     payload.result?.imageUrl ||
     payload.result?.firebaseUrl ||
     payload.result?.image ||
+    payload.result?.menu?.imageUrl ||
+    payload.result?.menu?.ImageUrl ||
     (Array.isArray(payload.images) && payload.images[0]?.url) ||
     null
   );
@@ -126,14 +133,26 @@ const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
   const trimmed = url.trim();
   if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return undefined;
 
-  // Encode Firebase URLs: convert / to %2F in the path after '/o/'
+  // Keep Firebase query params intact and only normalize the object path after '/o/'.
   if (trimmed.includes('firebasestorage.googleapis.com')) {
-    const oIndex = trimmed.indexOf('/o/');
-    if (oIndex !== -1) {
-      const baseUrl = trimmed.substring(0, oIndex + 3); // includes '/o/'
-      const path = trimmed.substring(oIndex + 3);
-      const encodedPath = path.replace(/\//g, '%2F');
-      return baseUrl + encodedPath;
+    try {
+      const parsed = new URL(trimmed);
+      const marker = '/o/';
+      const markerIndex = parsed.pathname.indexOf(marker);
+      if (markerIndex !== -1) {
+        const objectPath = parsed.pathname.slice(markerIndex + marker.length);
+        const decodedObjectPath = decodeURIComponent(objectPath);
+        const normalizedObjectPath = decodedObjectPath
+          .split('/')
+          .filter(Boolean)
+          .map((segment) => encodeURIComponent(segment))
+          .join('%2F');
+
+        parsed.pathname = `${parsed.pathname.slice(0, markerIndex + marker.length)}${normalizedObjectPath}`;
+        return parsed.toString();
+      }
+    } catch {
+      return trimmed;
     }
   }
 
@@ -380,8 +399,11 @@ export default function MenuInsightsScreen() {
         },
       });
 
+      console.log('[AI analyze-menu-feedback] status:', response.status);
+
       if (!response.ok) {
         const text = await response.text();
+        console.log('[AI analyze-menu-feedback] error body:', text);
         throw new Error(text || `Request failed (${response.status})`);
       }
 
@@ -393,6 +415,17 @@ export default function MenuInsightsScreen() {
         } catch {
           responsePayload = responseText;
         }
+      }
+
+      console.log('[AI analyze-menu-feedback] raw payload:', responsePayload);
+      if (responsePayload && typeof responsePayload === 'object') {
+        const payloadObj = responsePayload as Record<string, any>;
+        console.log('[AI analyze-menu-feedback] imageUrl candidates:', {
+          imageUrl: payloadObj?.imageUrl,
+          ImageUrl: payloadObj?.ImageUrl,
+          menuImageUrl: payloadObj?.menu?.imageUrl,
+          menuImageUrlUpper: payloadObj?.menu?.ImageUrl,
+        });
       }
 
       const normalizedPayload = (() => {

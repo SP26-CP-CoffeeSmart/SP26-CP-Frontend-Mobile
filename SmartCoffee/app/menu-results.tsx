@@ -80,7 +80,7 @@ const getVisualTheme = (menu: any) => {
   return menu?.visualTheme ?? null;
 };
 
-const getMenuImage = (menu: any) => {
+const getRawMenuImage = (menu: any): string | null => {
   const url = String(
     menu?.image ??
       menu?.thumbnail ??
@@ -90,10 +90,101 @@ const getMenuImage = (menu: any) => {
       menu?.menu?.ImageUrl ??
       ''
   ).trim();
-  if (!url || url === 'null' || url === 'undefined') return fallbackMenuImage;
+  if (!url || url === 'null' || url === 'undefined') return null;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  return fallbackMenuImage;
+  return null;
 };
+
+const getFirebaseImageVariants = (url: string): string[] => {
+  if (!url.includes('firebasestorage.googleapis.com')) return [url];
+
+  try {
+    const parsed = new URL(url);
+    const marker = '/o/';
+    const markerIndex = parsed.pathname.indexOf(marker);
+
+    if (markerIndex === -1) return [url];
+
+    const prefix = parsed.pathname.slice(0, markerIndex + marker.length);
+    const objectPath = parsed.pathname.slice(markerIndex + marker.length);
+    const decodedObjectPath = decodeURIComponent(objectPath);
+
+    const encodedObjectPath = decodedObjectPath
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('%2F');
+
+    const slashObjectPath = decodedObjectPath
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => encodeURIComponent(segment))
+      .join('/');
+
+    const encodedUrl = new URL(url);
+    encodedUrl.pathname = `${prefix}${encodedObjectPath}`;
+
+    const slashUrl = new URL(url);
+    slashUrl.pathname = `${prefix}${slashObjectPath}`;
+
+    return Array.from(new Set([encodedUrl.toString(), slashUrl.toString(), url]));
+  } catch {
+    return [url];
+  }
+};
+
+const getMenuImageCandidates = (menu: any): string[] => {
+  const rawUrl = getRawMenuImage(menu);
+  if (!rawUrl) return [fallbackMenuImage];
+
+  const variants = getFirebaseImageVariants(rawUrl);
+  return Array.from(new Set([...variants, fallbackMenuImage]));
+};
+
+function ResilientMenuImage({ menu, menuKey }: { menu: any; menuKey: string }) {
+  const candidates = useMemo(() => getMenuImageCandidates(menu), [menu]);
+  const [candidateIndex, setCandidateIndex] = useState(0);
+  const [aspectRatio, setAspectRatio] = useState(16 / 9);
+
+  useEffect(() => {
+    setCandidateIndex(0);
+    setAspectRatio(16 / 9);
+  }, [menuKey]);
+
+  const uri = candidates[Math.min(candidateIndex, candidates.length - 1)] ?? fallbackMenuImage;
+
+  return (
+    <Image
+      source={{ uri }}
+      resizeMode="contain"
+      style={[styles.cardImage, { aspectRatio, height: undefined }]}
+      onLoad={(event) => {
+        const width = event.nativeEvent?.source?.width ?? 0;
+        const height = event.nativeEvent?.source?.height ?? 0;
+        if (width > 0 && height > 0) {
+          setAspectRatio(width / height);
+        }
+      }}
+      onError={() => {
+        const nextIndex = candidateIndex + 1;
+        if (nextIndex < candidates.length) {
+          console.log('[Menu Results] Image load failed, trying next URL variant:', {
+            menuKey,
+            failedUri: uri,
+            nextUri: candidates[nextIndex],
+          });
+          setCandidateIndex(nextIndex);
+          return;
+        }
+
+        console.log('[Menu Results] Image load failed for all URL variants:', {
+          menuKey,
+          triedUris: candidates,
+        });
+      }}
+    />
+  );
+}
 
 const normalizeModifiedMenuItemIds = (menu: any): number[] => {
   const raw =
@@ -335,8 +426,9 @@ export default function MenuResultsScreen() {
                         JSON.stringify({ menuId, title, item: menu }, null, 2)
                       );
                       router.push({
-                        pathname: `/menu-detail/${menuId}`,
+                        pathname: '/menu-detail/[id]',
                         params: {
+                          id: menuId,
                           item: JSON.stringify(menuWithConfig),
                           payload: JSON.stringify(payloadForDetail),
                           menuIndex: String(index),
@@ -350,7 +442,7 @@ export default function MenuResultsScreen() {
                 </View>
                 <Text style={styles.cardSubtitle}>{subtitle}</Text>
                 <View style={styles.cardBody}>
-                  <Image source={{ uri: getMenuImage(menu) }} style={styles.cardImage} />
+                  <ResilientMenuImage menu={menu} menuKey={menuKey} />
                   <View style={styles.groupRow}>
                     {groups.slice(0, 4).map((group, groupIndex) => (
                       <View key={`${menuKey}-${group}-${groupIndex}`} style={styles.groupChip}>
@@ -427,8 +519,9 @@ export default function MenuResultsScreen() {
                       JSON.stringify({ menuId, title, item: menu }, null, 2)
                     );
                     router.push({
-                      pathname: `/menu-detail/${menuId}`,
+                      pathname: '/menu-detail/[id]',
                       params: {
+                        id: menuId,
                         item: JSON.stringify(menuWithConfig),
                         payload: JSON.stringify(payloadForDetail),
                         menuIndex: String(index),
@@ -576,7 +669,6 @@ const styles = StyleSheet.create({
   },
   cardImage: {
     width: '100%',
-    height: 120,
     borderRadius: 12,
     backgroundColor: '#E8DED3',
   },
