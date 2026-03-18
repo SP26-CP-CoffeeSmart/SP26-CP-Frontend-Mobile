@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  Platform,
   ScrollView,
-  View,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  Dimensions,
-  Switch,
-  Platform,
+  View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
 import { LineChart } from 'react-native-chart-kit';
+import Toast from 'react-native-toast-message';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
@@ -49,15 +51,6 @@ interface ShopInventoryDetail {
   coffeeShop: CoffeeShopInfo | null;
 }
 
-interface BatchInfo {
-  batchId: string;
-  expiryDate: string;
-  importDate: string;
-  currentWeight: number;
-  totalWeight: number;
-  remainingPercent: number;
-}
-
 export default function IngredientDetailScreen() {
   const isDark = false;
   const { id } = useLocalSearchParams();
@@ -69,6 +62,8 @@ export default function IngredientDetailScreen() {
   const [minStockLevel, setMinStockLevel] = useState(5.0);
   const [isAutoSuggest, setIsAutoSuggest] = useState(false);
   const [aiSuggestedValue, setAiSuggestedValue] = useState(3.5);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [manualThresholdText, setManualThresholdText] = useState('');
 
   const COLORS = {
     background: '#F6F1EE',
@@ -81,16 +76,6 @@ export default function IngredientDetailScreen() {
     successText: '#1B7A34',
     border: '#EFE7E1',
   };
-
-  // Mock batch data
-  const [batchInfo] = useState<BatchInfo>({
-    batchId: 'BPO-202405-01',
-    expiryDate: 'Dec 06, 2025',
-    importDate: 'Oct 01, 2026',
-    currentWeight: 2.5,
-    totalWeight: 2.5,
-    remainingPercent: 100,
-  });
 
   // Mock usage forecast data
   const forecastData = {
@@ -124,7 +109,9 @@ export default function IngredientDetailScreen() {
       const data = (await response.json()) as ShopInventoryDetail;
       console.log('Shop inventory detail response:', data);
       setInventoryDetail(data);
-      setMinStockLevel(Number(data.minStock ?? 0));
+      const nextMinStock = Number(data.minStock ?? 0);
+      setMinStockLevel(nextMinStock);
+      setManualThresholdText(Number.isFinite(nextMinStock) ? nextMinStock.toFixed(1) : '');
     } catch (err) {
       console.error('Error fetching ingredient:', err);
       setError('Failed to load ingredient details');
@@ -133,12 +120,79 @@ export default function IngredientDetailScreen() {
     }
   };
 
-  const handleApplyChanges = () => {
-    // TODO: Implement API call to update minimum stock level
-    const valueToApply = isAutoSuggest ? aiSuggestedValue : minStockLevel;
-    const unitLabel = inventoryDetail?.measurement || 'unit';
-    console.log('Applying minimum stock level:', valueToApply);
-    alert(`Minimum stock level set to ${valueToApply.toFixed(1)} ${unitLabel}`);
+  const handleApplyChanges = async () => {
+    if (!inventoryDetail || isUpdating) {
+      return;
+    }
+
+    const parsedManual = Number.parseFloat(manualThresholdText.replace(',', '.'));
+    if (!isAutoSuggest && !Number.isFinite(parsedManual)) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid threshold',
+        text2: 'Please enter a valid number for the manual threshold.',
+      });
+      return;
+    }
+
+    const valueToApply = isAutoSuggest ? aiSuggestedValue : parsedManual;
+    const unitLabel = inventoryDetail.measurement || 'unit';
+
+    try {
+      setIsUpdating(true);
+      const response = await authorizedFetch(
+        API_ENDPOINTS.shopInventory.update(inventoryDetail.inventoryDetailId),
+        {
+          method: 'PUT',
+          headers: {
+            Accept: '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            inventoryDetailId: inventoryDetail.inventoryDetailId,
+            coffeeShopId: inventoryDetail.coffeeShopId,
+            ingredientId: inventoryDetail.ingredientId,
+            quantity: inventoryDetail.quantity,
+            minStock: valueToApply,
+            expirationDate: inventoryDetail.expirationDate,
+            measurement: inventoryDetail.measurement,
+            ingredient: inventoryDetail.ingredient,
+            coffeeShop: inventoryDetail.coffeeShop,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const responseText = await response.text();
+      const updated = responseText
+        ? (JSON.parse(responseText) as ShopInventoryDetail)
+        : {
+            ...inventoryDetail,
+            minStock: valueToApply,
+          };
+      setInventoryDetail(updated);
+      const updatedValue = Number(updated.minStock ?? valueToApply);
+      setMinStockLevel(updatedValue);
+      setManualThresholdText(
+        Number.isFinite(updatedValue) ? updatedValue.toFixed(1) : manualThresholdText
+      );
+      Toast.show({
+        type: 'success',
+        text1: 'Minimum stock updated',
+        text2: `Minimum stock level set to ${valueToApply.toFixed(1)} ${unitLabel}.`,
+      });
+    } catch (err) {
+      Toast.show({
+        type: 'error',
+        text1: 'Update failed',
+        text2: 'Unable to update minimum stock right now.',
+      });
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   if (loading) {
@@ -408,15 +462,23 @@ export default function IngredientDetailScreen() {
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TextInput
-              value={(isAutoSuggest ? aiSuggestedValue : minStockLevel).toFixed(1)}
+              value={isAutoSuggest ? aiSuggestedValue.toFixed(1) : manualThresholdText}
+              editable={!isAutoSuggest}
               onChangeText={(value) => {
-                const next = Number.parseFloat(value);
-                if (Number.isNaN(next)) {
+                const normalized = value.replace(',', '.');
+                setManualThresholdText(normalized);
+                const next = Number.parseFloat(normalized);
+                if (Number.isFinite(next)) {
+                  setMinStockLevel(next);
+                }
+              }}
+              onBlur={() => {
+                if (isAutoSuggest) {
                   return;
                 }
-                if (isAutoSuggest) {
-                  setAiSuggestedValue(next);
-                } else {
+                const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
+                if (Number.isFinite(next)) {
+                  setManualThresholdText(next.toFixed(1));
                   setMinStockLevel(next);
                 }
               }}
@@ -435,77 +497,19 @@ export default function IngredientDetailScreen() {
             />
             <TouchableOpacity
               onPress={handleApplyChanges}
+              disabled={isUpdating}
               style={{
                 backgroundColor: COLORS.accent,
                 paddingHorizontal: 20,
                 paddingVertical: 12,
                 borderRadius: 10,
+                opacity: isUpdating ? 0.7 : 1,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>Update</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Batch Information */}
-        <View
-          style={{
-            backgroundColor: COLORS.card,
-            padding: 16,
-            marginBottom: 12,
-            borderRadius: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 3,
-          }}
-        >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.muted, letterSpacing: 1 }}>
-              CURRENT BATCH
-            </Text>
-            <View style={{ backgroundColor: COLORS.chip, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.ink }}>IN USE</Text>
-            </View>
-          </View>
-
-          {/* Batch Details */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 }}>
-            <View>
-              <Text style={{ fontSize: 12, color: '#9AA1B1', marginBottom: 4 }}>Batch Number</Text>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>#{batchInfo.batchId}</Text>
-            </View>
-            <View>
-              <Text style={{ fontSize: 12, color: '#9AA1B1', marginBottom: 4 }}>Import Date</Text>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>{batchInfo.importDate}</Text>
-            </View>
-          </View>
-
-          {/* Weight and Progress */}
-          <View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <Text style={{ fontSize: 12, color: '#9AA1B1' }}>Remaining stock</Text>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>
-                {batchInfo.currentWeight}kg / {batchInfo.totalWeight}kg
+              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                {isUpdating ? 'Updating...' : 'Update'}
               </Text>
-            </View>
-            <View
-              style={{
-                height: 8,
-                backgroundColor: '#EEF1F5',
-                borderRadius: 999,
-                overflow: 'hidden',
-              }}
-            >
-              <View
-                style={{
-                  height: '100%',
-                  width: `${batchInfo.remainingPercent}%`,
-                  backgroundColor: COLORS.accent,
-                }}
-              />
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
 

@@ -1,4 +1,4 @@
-  import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,6 @@ import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
 interface Ingredient {
-  ingredientId: number;
   name: string;
   image: string;
   category: string;
@@ -61,7 +60,7 @@ export default function InventoryScreen() {
     card: '#FFFFFF',
     ink: '#1E1B16',
     muted: '#7A6F67',
-    accent: '#E07A2D',
+    accent: '#2B1C15',
     chip: '#F2E7DA',
     chipActive: '#2B1C15',
     border: '#EFE4D8',
@@ -112,7 +111,9 @@ export default function InventoryScreen() {
 
     if (selectedStatus !== 'all') {
       filtered = filtered.filter((item) => {
-        const status = getStockStatus(Number(item.quantity ?? 0)).label;
+        const quantity = Number(item.quantity ?? 0);
+        const minStock = Number(item.minStock ?? defaultMinStock);
+        const status = getStockStatus(quantity, minStock).label;
         if (status.includes('OUT')) return selectedStatus === 'out';
         if (status.includes('LOW')) return selectedStatus === 'low';
         return selectedStatus === 'in';
@@ -174,31 +175,8 @@ export default function InventoryScreen() {
     setFilterVisible(false);
   };
 
-  const getStockStatus = (quantity: number) => {
-    const percentage = (quantity / maxQuantity) * 100;
-
-    if (percentage >= 80) {
-      return {
-        label: 'SUFFICIENT',
-        color: '#15803D',
-        bgColor: '#DCFCE7',
-        barColor: '#22C55E',
-      };
-    } else if (percentage >= 60) {
-      return {
-        label: 'STABLE',
-        color: '#0F766E',
-        bgColor: '#CCFBF1',
-        barColor: '#14B8A6',
-      };
-    } else if (percentage >= 30) {
-      return {
-        label: 'LOW STOCK',
-        color: '#B45309',
-        bgColor: '#FEF3C7',
-        barColor: '#F59E0B',
-      };
-    } else {
+  const getStockStatus = (quantity: number, minStock: number) => {
+    if (quantity <= 0) {
       return {
         label: 'OUT OF STOCK',
         color: '#B91C1C',
@@ -206,6 +184,22 @@ export default function InventoryScreen() {
         barColor: '#EF4444',
       };
     }
+
+    if (quantity <= minStock) {
+      return {
+        label: 'LOW STOCK',
+        color: '#B45309',
+        bgColor: '#FEF3C7',
+        barColor: '#F59E0B',
+      };
+    }
+
+    return {
+      label: 'IN STOCK',
+      color: '#15803D',
+      bgColor: '#DCFCE7',
+      barColor: '#22C55E',
+    };
   };
 
   const getStockPercentage = (quantity: number) => {
@@ -214,14 +208,14 @@ export default function InventoryScreen() {
 
   const renderItem = ({ item }: { item: ShopInventoryItem }) => {
     const quantity = Number(item.quantity ?? 0);
-    const status = getStockStatus(quantity);
+    const minStockValue = Number(item.minStock ?? defaultMinStock);
+    const status = getStockStatus(quantity, minStockValue);
     const percentage = getStockPercentage(quantity);
-    
+
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
     const ingredientImage = item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
-    const minStockValue = Number(item.minStock ?? defaultMinStock);
 
     return (
       <TouchableOpacity
@@ -364,20 +358,15 @@ export default function InventoryScreen() {
                 <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
                   Inventory Dashboard
                 </Text>
-                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                  <Ionicons name="notifications-outline" size={20} color={COLORS.ink} />
-                  <View
-                    style={{
-                      position: 'absolute',
-                      top: 8,
-                      right: 10,
-                      width: 8,
-                      height: 8,
-                      borderRadius: 999,
-                      backgroundColor: '#E9563A',
-                    }}
-                  />
-                </TouchableOpacity>
+                <View className="flex-row items-center" style={{ gap: 10 }}>
+                  <TouchableOpacity
+                    className="w-10 h-10 items-center justify-center"
+                    style={{ backgroundColor: COLORS.card, borderRadius: 14 }}
+                    onPress={() => router.push('/inventory-history')}
+                  >
+                    <Ionicons name="time-outline" size={19} color={COLORS.ink} />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 
@@ -421,6 +410,48 @@ export default function InventoryScreen() {
                   <Ionicons name="options-outline" size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
+              <TouchableOpacity
+                style={{
+                  marginTop: 12,
+                  backgroundColor: COLORS.accent,
+                  borderRadius: 16,
+                  paddingVertical: 14,
+                  paddingHorizontal: 16,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  shadowColor: '#000',
+                  shadowOpacity: 0.08,
+                  shadowRadius: 12,
+                  shadowOffset: { width: 0, height: 6 },
+                  elevation: 3,
+                }}
+                onPress={() => router.push('/ai-inventory-predict')}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <View
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 12,
+                      backgroundColor: 'rgba(255,255,255,0.2)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Ionicons name="sparkles-outline" size={18} color="#FFFFFF" />
+                  </View>
+                  <View>
+                    <Text style={{ color: '#FFFFFF', fontSize: 14, fontWeight: '800' }}>
+                      AI Predict Inventory
+                    </Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12 }}>
+                      Forecast low-stock items
+                    </Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+              </TouchableOpacity>
             </View>
             {(selectedCategory !== 'All' || selectedStatus !== 'all' || sortOption !== 'alpha') ? (
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 16, paddingBottom: 6 }}>
@@ -452,7 +483,7 @@ export default function InventoryScreen() {
                       backgroundColor: COLORS.chipActive,
                     }}>
                     <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
-                      {selectedStatus === 'in' ? 'In Stock' : selectedStatus === 'low' ? 'Low Stock' : 'Out of Stock'}
+                      {selectedStatus === 'in' ? 'In Stock' : 'Out of Stock'}
                     </Text>
                   </View>
                 ) : null}
@@ -635,7 +666,7 @@ export default function InventoryScreen() {
                   return (
                     <TouchableOpacity
                       key={item.key}
-                      onPress={() => setDraftStatus(item.key)}
+                      onPress={() => setDraftStatus(item.key as 'in' | 'low' | 'out')}
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',

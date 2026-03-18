@@ -59,6 +59,10 @@ type ExportDetail = {
   reason: string;
 };
 
+type ExportNoteResponse = {
+  exportNoteId?: number;
+};
+
 const REASONS = ['Daily Sales', 'Internal Use', 'Expired', 'Damaged'];
 
 export default function ExportRequestScreen() {
@@ -253,6 +257,11 @@ export default function ExportRequestScreen() {
         throw new Error(`Request failed: ${noteResponse.status}`);
       }
 
+      const noteData = (await noteResponse.json()) as ExportNoteResponse;
+      if (!noteData.exportNoteId) {
+        throw new Error('Export note id is missing in response.');
+      }
+
       const response = await authorizedFetch(API_ENDPOINTS.shopInventory.export(), {
         method: 'POST',
         headers: {
@@ -265,6 +274,37 @@ export default function ExportRequestScreen() {
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
+
+      const detailPayloads = details
+        .filter((detail) => detail.exportQuantity > 0)
+        .map((detail) => ({
+          exportNoteId: noteData.exportNoteId,
+          ingredientId: detail.ingredientId,
+          currentQuantity: detail.ingredient.currentQuantity ?? 0,
+          exportQuantity: detail.exportQuantity,
+          remainQuantity: Math.max(
+            (detail.ingredient.currentQuantity ?? 0) - detail.exportQuantity,
+            0
+          ),
+          measurement: detail.ingredient.measurement ?? null,
+        }));
+
+      await Promise.all(
+        detailPayloads.map(async (payload) => {
+          const detailResponse = await authorizedFetch(API_ENDPOINTS.exportDetail.create(), {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!detailResponse.ok) {
+            throw new Error(`Request failed: ${detailResponse.status}`);
+          }
+        })
+      );
 
       Toast.show({
         type: 'success',

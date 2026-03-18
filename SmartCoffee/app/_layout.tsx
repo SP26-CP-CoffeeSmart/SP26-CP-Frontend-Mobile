@@ -71,15 +71,18 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs-staff)" options={{ headerShown: false }} />
         <Stack.Screen name="change-password" options={{ headerShown: false }} />
-        <Stack.Screen name="recipe-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="recipe-detail/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="coffee-detail" options={{ headerShown: false }} />
         <Stack.Screen name="inventory" options={{ headerShown: false }} />
-        <Stack.Screen name="ingredient-detail" options={{ headerShown: false }} />
+        <Stack.Screen name="ingredient-detail/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="inventory-history" options={{ headerShown: false }} />
         <Stack.Screen name="ai-loading" options={{ headerShown: false }} />
         <Stack.Screen name="ai-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="ai-result" options={{ headerShown: false }} />
         <Stack.Screen name="ai-order-suggestions" options={{ headerShown: false }} />
         <Stack.Screen name="ai-order-add-ingredients" options={{ headerShown: false }} />
+        <Stack.Screen name="ai-inventory-predict" options={{ headerShown: false }} />
+        <Stack.Screen name="notifications" options={{ headerShown: false }} />
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="menu-results" options={{ headerShown: false }} />

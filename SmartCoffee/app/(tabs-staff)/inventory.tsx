@@ -270,7 +270,12 @@ export default function InventoryScreen() {
                                 <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
                             </TouchableOpacity>
                             <Text style={styles.headerTitle}>Staff Inventory</Text>
-                            <View style={styles.headerSpacer} />
+                            <TouchableOpacity
+                                style={styles.headerIcon}
+                                onPress={() => router.push('/inventory-history')}
+                            >
+                                <Ionicons name="time-outline" size={20} color={COLORS.ink} />
+                            </TouchableOpacity>
                         </View>
 
                         <View style={styles.requestRow}>

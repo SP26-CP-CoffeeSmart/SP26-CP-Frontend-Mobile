@@ -76,12 +76,15 @@ export const API_ENDPOINTS = {
     createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
     createMenuDetails: () => `${AUTH_BASE_URL}/AI/create-menu-p2-details`,
     createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
+    analyzeMenuFeedback: (menuId: number) => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/${menuId}`,
+    predictInventory: () => `${AUTH_BASE_URL}/AI/predict-inventory`,
   },
   menu: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/by-shop/${shopId}`,
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
     byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
+    saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
   },
   menuHeader: {
     getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,
@@ -92,6 +95,10 @@ export const API_ENDPOINTS = {
   menuItem: {
     getAll: () => `${AUTH_BASE_URL}/MenuItem`,
     getById: (id: number) => `${AUTH_BASE_URL}/MenuItem/${id}`,
+  },
+  ingredient: {
+    getAll: () => `${AUTH_BASE_URL}/Ingredient`,
+    getById: (id: number) => `${AUTH_BASE_URL}/Ingredient/${id}`,
   },
   shopStaff: {
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopStaff/by-shop/${shopId}`,
@@ -114,9 +121,19 @@ export const API_ENDPOINTS = {
   },
   importNote: {
     create: () => `${AUTH_BASE_URL}/ImportNote`,
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ImportNote/by-shop/${shopId}`,
+  },
+  importDetail: {
+    create: () => `${AUTH_BASE_URL}/ImportDetail`,
+    getByNote: (importNoteId: number | string) => `${AUTH_BASE_URL}/ImportDetail/by-note/${importNoteId}`,
   },
   exportNote: {
     create: () => `${AUTH_BASE_URL}/ExportNote`,
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ExportNote/by-shop/${shopId}`,
+  },
+  exportDetail: {
+    create: () => `${AUTH_BASE_URL}/ExportDetail`,
+    getByNote: (exportNoteId: number | string) => `${AUTH_BASE_URL}/ExportDetail/by-note/${exportNoteId}`,
   },
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
@@ -132,7 +149,9 @@ export const API_ENDPOINTS = {
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopInventory/by-shop/${shopId}`,
+    update: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
     export: () => `${AUTH_BASE_URL}/ShopInventory/export`,
     importFromOrder: (orderId: number) => `${AUTH_BASE_URL}/ShopInventory/import-from-order/${orderId}`,
+    manualImport: () => `${AUTH_BASE_URL}/ShopInventory/manual-import`,
   },
 };

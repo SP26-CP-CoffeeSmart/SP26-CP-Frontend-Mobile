@@ -10,6 +10,7 @@ import {
   Modal,
   FlatList,
   Image,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -23,6 +24,7 @@ import menuPerformanceService, {
 import { API_ENDPOINTS, AUTH_BASE_URL } from '../../services/api';
 import { authorizedFetch } from '../../services/authService';
 import { useBeverageCategories } from '../../context/beverage-category-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define MenuItem interface similar to daily-sales.tsx for proper data mapping
 interface MenuItem {
@@ -116,6 +118,7 @@ export default function MenuInsightsScreen() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [menuImageUri, setMenuImageUri] = useState<string | null>(menuImage ?? null);
   const [showImageViewer, setShowImageViewer] = useState(false);
+  const [generatingMenu, setGeneratingMenu] = useState(false);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -318,6 +321,62 @@ export default function MenuInsightsScreen() {
       console.error('Error fetching items sales data:', err);
     }
   };
+
+  const handleGenerateMenuVersion = async () => {
+    if (!menuId) {
+      Alert.alert('Missing menu', 'Menu ID is missing.');
+      return;
+    }
+
+    const id = Number(menuId);
+    if (!Number.isFinite(id)) {
+      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      return;
+    }
+
+    try {
+      setGeneratingMenu(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ai.analyzeMenuFeedback(id), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const responseText = await response.text();
+      let responsePayload: unknown = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      let cacheKey = '';
+      if (responsePayload) {
+        cacheKey = `menuFeedback:${Date.now()}`;
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(responsePayload));
+      }
+
+      router.push({
+        pathname: '/menu-results',
+        params: {
+          data: responsePayload ? JSON.stringify(responsePayload) : '',
+          cacheKey,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to generate menu.';
+      Alert.alert('Generate failed', message);
+    } finally {
+      setGeneratingMenu(false);
+    }
+  };
   
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('vi-VN', {
@@ -438,7 +497,10 @@ export default function MenuInsightsScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Menu Insights</Text>
-          <TouchableOpacity style={styles.notificationButton}>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => router.push('/notifications')}
+          >
             <Ionicons name="notifications-outline" size={24} color="#4a3621" />
           </TouchableOpacity>
         </View>
@@ -700,9 +762,19 @@ export default function MenuInsightsScreen() {
                 </Text>
               </View>
             </View>
-            <TouchableOpacity style={styles.aiButton}>
-              <Text style={styles.aiButtonText}>Generate Menu</Text>
-              <Ionicons name="rocket" size={16} color="#FFF" />
+            <TouchableOpacity
+              style={[styles.aiButton, generatingMenu && styles.aiButtonDisabled]}
+              onPress={handleGenerateMenuVersion}
+              disabled={generatingMenu}
+            >
+              {generatingMenu ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Text style={styles.aiButtonText}>Generate New Menu Version</Text>
+                  <Ionicons name="rocket" size={16} color="#FFF" />
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </View>
@@ -1420,6 +1492,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
+  },
+  aiButtonDisabled: {
+    opacity: 0.7,
   },
   aiButtonText: {
     color: '#FFF',

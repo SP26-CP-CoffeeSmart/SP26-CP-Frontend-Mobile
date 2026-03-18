@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import {
   Alert,
   ActivityIndicator,
@@ -39,12 +39,25 @@ type Ingredient = {
   currentQuantity: number;
 };
 
+type IngredientResponse = {
+  ingredientId?: number;
+  IngredientId?: number;
+  name?: string;
+  Name?: string;
+  image?: string | null;
+  Image?: string | null;
+  category?: string;
+  Category?: string;
+};
+
 type ImportDetail = {
   ingredientId: number;
   ingredient: Ingredient;
   importQuantity: number;
-  expirationDate: string;
-  supplier: string;
+};
+
+type ImportNoteResponse = {
+  importNoteId?: number;
 };
 
 type OrderItem = {
@@ -83,6 +96,7 @@ type OrderResponse = {
   expectedDeliveryTime?: string;
   supplierId?: number;
   ghnOrderCode?: string;
+  notes?: string;
   orderDetails?: OrderDetailResponse[];
 };
 
@@ -176,6 +190,9 @@ const getStatusStyle = (status?: string) => {
   return styles.statusTransit;
 };
 
+const isImportedOrder = (order: OrderResponse) =>
+  (order.notes ?? '').toLowerCase().includes('[imported]');
+
 export default function ImportRequestScreen() {
   const router = useRouter();
   const { coffeeShopId } = useAuth();
@@ -192,21 +209,72 @@ export default function ImportRequestScreen() {
   const [orders, setOrders] = useState<OrderSummary[]>([]);
   const [orderLoading, setOrderLoading] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [ingredientLoading, setIngredientLoading] = useState(false);
+  const [ingredientError, setIngredientError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
   const details = activeTab === 'manual' ? manualDetails : orderDetails;
 
+  const categoryOptions = useMemo(() => {
+    if (!ingredients.length) {
+      return CATEGORY_OPTIONS;
+    }
+    const dynamicCategories = Array.from(
+      new Set(ingredients.map((item) => item.category).filter((category) => category))
+    );
+    return ['All', ...dynamicCategories];
+  }, [ingredients]);
+
   const filteredIngredients = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return MOCK_INGREDIENTS.filter((item) => {
+    return ingredients.filter((item) => {
       const matchesCategory =
         selectedCategory === 'All' || item.category.toLowerCase() === selectedCategory.toLowerCase();
       const matchesQuery = !query || item.name.toLowerCase().includes(query);
       return matchesCategory && matchesQuery;
     });
-  }, [searchQuery, selectedCategory]);
+  }, [searchQuery, selectedCategory, ingredients]);
+
+  const loadIngredients = useCallback(async () => {
+    try {
+      setIngredientLoading(true);
+      setIngredientError(null);
+      const response = await authorizedFetch(API_ENDPOINTS.ingredient.getAll(), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as IngredientResponse[];
+      const mapped = (Array.isArray(data) ? data : []).map((item, index) => {
+        const ingredientId = item.ingredientId ?? item.IngredientId ?? index + 1;
+        const name = item.name ?? item.Name ?? 'Ingredient';
+        const category = item.category ?? item.Category ?? 'Other';
+        const image = item.image ?? item.Image ?? null;
+        return {
+          ingredientId: Number(ingredientId),
+          name: String(name),
+          category: String(category),
+          image: image ? String(image) : null,
+          measurement: 'unit',
+          currentQuantity: 0,
+        };
+      });
+      setIngredients(mapped);
+    } catch (error) {
+      setIngredients([]);
+      setIngredientError('Unable to load ingredients.');
+    } finally {
+      setIngredientLoading(false);
+    }
+  }, []);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
     setManualDetails((prev) => {
@@ -225,8 +293,6 @@ export default function ImportRequestScreen() {
           ingredientId: ingredient.ingredientId,
           ingredient,
           importQuantity: 1,
-          expirationDate: '',
-          supplier: '',
         },
       ];
     });
@@ -248,18 +314,6 @@ export default function ImportRequestScreen() {
     setManualDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
   };
 
-  const handleUpdateDetailField = (
-    ingredientId: number,
-    field: 'expirationDate' | 'supplier',
-    value: string
-  ) => {
-    setManualDetails((prev) =>
-      prev.map((detail) =>
-        detail.ingredientId === ingredientId ? { ...detail, [field]: value } : detail
-      )
-    );
-  };
-
   const handleLoadOrder = () => {
     if (!orderId.trim()) {
       Alert.alert('Missing order ID', 'Please enter an order ID to continue.');
@@ -271,15 +325,11 @@ export default function ImportRequestScreen() {
         ingredientId: MOCK_INGREDIENTS[0].ingredientId,
         ingredient: MOCK_INGREDIENTS[0],
         importQuantity: 12,
-        expirationDate: '',
-        supplier: 'Auto from order',
       },
       {
         ingredientId: MOCK_INGREDIENTS[1].ingredientId,
         ingredient: MOCK_INGREDIENTS[1],
         importQuantity: 6,
-        expirationDate: '',
-        supplier: 'Auto from order',
       },
     ];
 
@@ -308,8 +358,6 @@ export default function ImportRequestScreen() {
         ingredientId: ingredient.ingredientId,
         ingredient,
         importQuantity: item.receivedQty,
-        expirationDate: '',
-        supplier: order.supplier,
       };
     });
 
@@ -342,7 +390,8 @@ export default function ImportRequestScreen() {
 
       const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
       const list = Array.isArray(data) ? data : data.items ?? [];
-      const mapped = list.map(mapOrderToSummary);
+      const filtered = list.filter((order) => !isImportedOrder(order));
+      const mapped = filtered.map(mapOrderToSummary);
       console.log('Fetched orders:', mapped);
       setOrders(mapped);
 
@@ -364,6 +413,12 @@ export default function ImportRequestScreen() {
       }
     }, [activeTab, loadOrders])
   );
+
+  useEffect(() => {
+    if (activeTab === 'manual') {
+      loadIngredients();
+    }
+  }, [activeTab, loadIngredients]);
 
   const filteredOrders = orders.filter((order) => {
     const query = orderSearchQuery.trim().toLowerCase();
@@ -412,12 +467,47 @@ export default function ImportRequestScreen() {
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
+
+      const data = (await response.json()) as ImportNoteResponse;
+      if (!data.importNoteId) {
+        throw new Error('Import note id is missing in response.');
+      }
+      return data.importNoteId;
+    };
+
+    const createImportDetails = async (importNoteId: number, items: ImportDetail[]) => {
+      const payloads = items
+        .filter((detail) => detail.importQuantity > 0)
+        .map((detail) => ({
+          importNoteId,
+          ingredientId: detail.ingredientId,
+          currentQuantity: detail.ingredient.currentQuantity ?? 0,
+          importQuantity: detail.importQuantity,
+          updatedQuantity: (detail.ingredient.currentQuantity ?? 0) + detail.importQuantity,
+          measurement: detail.ingredient.measurement ?? null,
+        }));
+
+      await Promise.all(
+        payloads.map(async (payload) => {
+          const response = await authorizedFetch(API_ENDPOINTS.importDetail.create(), {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+        })
+      );
     };
 
     if (activeTab === 'order' && selectedOrder) {
       try {
         setIsSubmitting(true);
-        await createImportNote();
         const response = await authorizedFetch(
           API_ENDPOINTS.shopInventory.importFromOrder(selectedOrder.orderId),
           {
@@ -431,6 +521,10 @@ export default function ImportRequestScreen() {
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
+
+        const importNoteId = await createImportNote();
+        await createImportDetails(importNoteId, details);
+        await loadOrders();
 
         Toast.show({
           type: 'success',
@@ -449,9 +543,55 @@ export default function ImportRequestScreen() {
       return;
     }
 
+    if (activeTab === 'manual') {
+      try {
+        setIsSubmitting(true);
+        const items = details
+          .filter((detail) => detail.importQuantity > 0)
+          .map((detail) => ({
+            ingredientId: detail.ingredientId,
+            quantity: detail.importQuantity,
+            measurement: detail.ingredient.measurement ?? null,
+            note: null,
+          }));
+
+        const response = await authorizedFetch(API_ENDPOINTS.shopInventory.manualImport(), {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: noteTitle.trim() || 'Manual import',
+            items,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        Toast.show({
+          type: 'success',
+          text1: 'Manual import successful',
+          text2: 'Inventory was updated from manual entries.',
+        });
+      } catch (error) {
+        Toast.show({
+          type: 'error',
+          text1: 'Manual import failed',
+          text2: 'Unable to import inventory manually.',
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     try {
       setIsSubmitting(true);
-      await createImportNote();
+      const importNoteId = await createImportNote();
+      await createImportDetails(importNoteId, details);
       Toast.show({
         type: 'success',
         text1: 'Import request submitted',
@@ -579,7 +719,7 @@ export default function ImportRequestScreen() {
               />
             </View>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-              {CATEGORY_OPTIONS.map((category) => {
+              {categoryOptions.map((category) => {
                 const isActive = selectedCategory === category;
                 return (
                   <TouchableOpacity
@@ -594,31 +734,40 @@ export default function ImportRequestScreen() {
             </ScrollView>
 
             <View style={styles.ingredientList}>
-              {filteredIngredients.map((ingredient) => (
-                <TouchableOpacity
-                  key={ingredient.ingredientId}
-                  style={styles.ingredientRow}
-                  onPress={() => handleAddIngredient(ingredient)}
-                >
-                  <View style={styles.ingredientImageWrap}>
-                    {ingredient.image ? (
-                      <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
-                    ) : (
-                      <Ionicons name="cafe" size={22} color={COLORS.muted} />
-                    )}
-                  </View>
-                  <View style={styles.ingredientInfo}>
-                    <Text style={styles.ingredientName}>{ingredient.name}</Text>
-                    <Text style={styles.ingredientMeta}>
-                      {ingredient.category} - {ingredient.currentQuantity} {ingredient.measurement}
-                    </Text>
-                  </View>
-                  <Ionicons name="add-circle" size={22} color={COLORS.accent} />
-                </TouchableOpacity>
-              ))}
-              {!filteredIngredients.length ? (
-                <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
-              ) : null}
+              {ingredientLoading ? (
+                <View style={styles.emptyState}>
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                  <Text style={styles.emptyText}>Loading ingredients...</Text>
+                </View>
+              ) : ingredientError ? (
+                <Text style={styles.emptyText}>{ingredientError}</Text>
+              ) : (
+                <>
+                  {filteredIngredients.map((ingredient) => (
+                    <TouchableOpacity
+                      key={ingredient.ingredientId}
+                      style={styles.ingredientRow}
+                      onPress={() => handleAddIngredient(ingredient)}
+                    >
+                      <View style={styles.ingredientImageWrap}>
+                        {ingredient.image ? (
+                          <Image source={{ uri: ingredient.image }} style={styles.ingredientImage} />
+                        ) : (
+                          <Ionicons name="cafe" size={22} color={COLORS.muted} />
+                        )}
+                      </View>
+                      <View style={styles.ingredientInfo}>
+                        <Text style={styles.ingredientName}>{ingredient.name}</Text>
+                        <Text style={styles.ingredientMeta}>{ingredient.category}</Text>
+                      </View>
+                      <Ionicons name="add-circle" size={22} color={COLORS.accent} />
+                    </TouchableOpacity>
+                  ))}
+                  {!filteredIngredients.length ? (
+                    <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
+                  ) : null}
+                </>
+              )}
             </View>
           </View>
         )}
@@ -729,27 +878,6 @@ export default function ImportRequestScreen() {
 
                   <Text style={styles.detailMeta}>New total: {newTotal} {detail.ingredient.measurement}</Text>
 
-                  <Text style={styles.fieldLabel}>Expiry date</Text>
-                  <TextInput
-                    value={detail.expirationDate}
-                    onChangeText={(value) =>
-                      handleUpdateDetailField(detail.ingredientId, 'expirationDate', value)
-                    }
-                    placeholder="MM/DD/YYYY"
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.input}
-                  />
-
-                  <Text style={styles.fieldLabel}>Supplier</Text>
-                  <TextInput
-                    value={detail.supplier}
-                    onChangeText={(value) =>
-                      handleUpdateDetailField(detail.ingredientId, 'supplier', value)
-                    }
-                    placeholder="Highland Roasters Co."
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.input}
-                  />
                 </View>
               );
             })
