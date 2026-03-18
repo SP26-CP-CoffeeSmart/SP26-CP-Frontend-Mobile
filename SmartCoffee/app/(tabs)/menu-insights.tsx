@@ -14,11 +14,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
 } from '../../services/menuPerformanceService';
-import { API_ENDPOINTS } from '../../services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '../../services/api';
 import { authorizedFetch } from '../../services/authService';
 import { useBeverageCategories } from '../../context/beverage-category-context';
 
@@ -82,12 +84,25 @@ interface MenuData {
   versionNumber: string;
   status: string;
   isActive: boolean;
+  image?: string | null;
   menuGroups: MenuGroup[];
 }
 
+const fallbackMenuImage =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+
+const MAX_ZOOM_SCALE = 3;
+
+const resolveImageUrl = (raw?: string | null) => {
+  if (!raw || raw === 'null' || raw === 'undefined') return null;
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+  if (raw.startsWith('/')) return `${AUTH_BASE_URL}${raw}`;
+  return `${AUTH_BASE_URL}/images/${raw}`;
+};
+
 export default function MenuInsightsScreen() {
   const router = useRouter();
-  const { menuId } = useLocalSearchParams<{ menuId?: string }>();
+  const { menuId, menuImage } = useLocalSearchParams<{ menuId?: string; menuImage?: string }>();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,8 +114,86 @@ export default function MenuInsightsScreen() {
   const [itemSalesMap, setItemSalesMap] = useState<Map<number, number>>(new Map());
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+  const [menuImageUri, setMenuImageUri] = useState<string | null>(menuImage ?? null);
+  const [showImageViewer, setShowImageViewer] = useState(false);
+
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
   
   const { categories } = useBeverageCategories();
+
+  const resetZoom = () => {
+    scale.value = 1;
+    savedScale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  };
+
+  const pinchGesture = Gesture.Pinch()
+    .onUpdate((event) => {
+      const next = savedScale.value * event.scale;
+      scale.value = Math.max(1, Math.min(MAX_ZOOM_SCALE, next));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1) {
+        translateX.value = 0;
+        translateY.value = 0;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onUpdate((event) => {
+      if (scale.value <= 1) {
+        translateX.value = 0;
+        translateY.value = 0;
+        return;
+      }
+      const limit = (scale.value - 1) * 260;
+      const nextX = savedTranslateX.value + event.translationX;
+      const nextY = savedTranslateY.value + event.translationY;
+      translateX.value = Math.max(-limit, Math.min(limit, nextX));
+      translateY.value = Math.max(-limit, Math.min(limit, nextY));
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        scale.value = 1;
+        savedScale.value = 1;
+        translateX.value = 0;
+        translateY.value = 0;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      } else {
+        scale.value = 2;
+        savedScale.value = 2;
+      }
+    });
+
+  const pinchPanGesture = Gesture.Simultaneous(pinchGesture, panGesture);
+  const imageGesture = Gesture.Exclusive(doubleTapGesture, pinchPanGesture);
+
+  const animatedImageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
 
   useEffect(() => {
     fetchMenuPerformance();
@@ -154,6 +247,13 @@ export default function MenuInsightsScreen() {
 
       const menuData: MenuData = await menuResponse.json();
       console.log('[Menu Insights] Full menu data:', menuData);
+
+      const resolvedMenuImage =
+        resolveImageUrl(menuData.image) ??
+        (menuImage && menuImage.length > 0 ? menuImage : null);
+      if (resolvedMenuImage) {
+        setMenuImageUri(resolvedMenuImage);
+      }
 
       // Flatten all menu items from all groups (like daily-sales.tsx)
       const items: MenuItem[] = [];
@@ -343,6 +443,48 @@ export default function MenuInsightsScreen() {
             onPress={() => router.push('/notifications')}
           >
             <Ionicons name="notifications-outline" size={24} color="#4a3621" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.feedbackInsightsButtonWrap}>
+          <TouchableOpacity
+            style={styles.feedbackInsightsButton}
+            activeOpacity={0.9}
+            onPress={() =>
+              router.push({
+                pathname: '/feedback-insights',
+                params: {
+                  menuId: String(menuId ?? ''),
+                },
+              })
+            }
+          >
+            <View style={styles.feedbackInsightsButtonLeft}>
+              <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.feedbackInsightsButtonText}>View feedback insights</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.menuImageSection}>
+          <TouchableOpacity
+            activeOpacity={0.92}
+            style={styles.menuImageCard}
+            onPress={() => {
+              resetZoom();
+              setShowImageViewer(true);
+            }}
+          >
+            <Image
+              source={{ uri: menuImageUri || fallbackMenuImage }}
+              style={styles.menuImagePreview}
+              resizeMode="cover"
+            />
+            <View style={styles.menuImageHintChip}>
+              <Ionicons name="expand-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.menuImageHintText}>Zoom menu image</Text>
+            </View>
           </TouchableOpacity>
         </View>
 
@@ -573,6 +715,40 @@ export default function MenuInsightsScreen() {
 
       {/* Date Picker Modal */}
       <Modal
+        visible={showImageViewer}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowImageViewer(false);
+          resetZoom();
+        }}
+      >
+        <GestureHandlerRootView style={styles.imageViewerRoot}>
+          <View style={styles.imageViewerOverlay}>
+            <TouchableOpacity
+              style={styles.imageViewerCloseButton}
+              onPress={() => {
+                setShowImageViewer(false);
+                resetZoom();
+              }}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={styles.imageViewerGestureArea}>
+              <GestureDetector gesture={imageGesture}>
+                <Animated.Image
+                  source={{ uri: menuImageUri || fallbackMenuImage }}
+                  resizeMode="contain"
+                  style={[styles.imageViewerImage, animatedImageStyle]}
+                />
+              </GestureDetector>
+            </View>
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
+
+      <Modal
         visible={showDatePicker}
         transparent={true}
         animationType="slide"
@@ -734,6 +910,98 @@ const styles = StyleSheet.create({
   bannerContainer: {
     paddingHorizontal: 24,
     paddingVertical: 8,
+  },
+  feedbackInsightsButtonWrap: {
+    paddingHorizontal: 24,
+    paddingBottom: 4,
+  },
+  feedbackInsightsButton: {
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#2D6A4F',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  feedbackInsightsButtonLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  feedbackInsightsButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  menuImageSection: {
+    paddingHorizontal: 24,
+    paddingBottom: 8,
+  },
+  menuImageCard: {
+    height: 180,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    backgroundColor: '#FFF',
+  },
+  menuImagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  menuImageHintChip: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: 'rgba(31, 31, 31, 0.78)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  menuImageHintText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  imageViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerRoot: {
+    flex: 1,
+  },
+  imageViewerGestureArea: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerCloseButton: {
+    position: 'absolute',
+    top: 52,
+    right: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  imageViewerImage: {
+    width: '95%',
+    height: '75%',
   },
   banner: {
     backgroundColor: '#4a3621',
