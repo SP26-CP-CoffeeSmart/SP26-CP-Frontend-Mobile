@@ -37,6 +37,22 @@ export default function AIOrderSuggestionsScreen() {
   const [isReviewing, setIsReviewing] = useState(false);
   const [availableStockByProduct, setAvailableStockByProduct] = useState<Record<number, number>>({});
 
+  const getSafeQty = (rawQty: unknown) => {
+    const num =
+      typeof rawQty === 'number'
+        ? rawQty
+        : typeof rawQty === 'string'
+          ? parseFloat(rawQty)
+          : NaN;
+
+    if (!Number.isFinite(num) || num <= 0) {
+      return 1;
+    }
+
+    const rounded = Math.round(num);
+    return rounded > 0 ? rounded : 1;
+  };
+
   const getItemLimit = (item: (typeof suggestions)[number]) => {
     if (typeof item.availableStock === 'number' && Number.isFinite(item.availableStock)) {
       return Math.max(0, Math.floor(item.availableStock));
@@ -89,14 +105,13 @@ export default function AIOrderSuggestionsScreen() {
               return item;
             }
 
-            const currentQty = Number.isFinite(item.qtyNeeded) && item.qtyNeeded > 0
-              ? item.qtyNeeded
-              : 1;
+            const currentQty = getSafeQty(item.qtyNeeded);
+            const nextQty = limit > 0 ? Math.min(currentQty, limit) : currentQty;
 
             return {
               ...item,
               availableStock: limit,
-              qtyNeeded: limit > 0 ? Math.min(currentQty, limit) : currentQty,
+              qtyNeeded: Math.max(1, Math.round(nextQty)),
             };
           })
         );
@@ -133,7 +148,10 @@ export default function AIOrderSuggestionsScreen() {
   }, [suggestions]);
 
   const totalVnd = suggestions.reduce(
-    (sum, item) => sum + item.priceVnd * (item.qtyNeeded > 0 ? item.qtyNeeded : 1),
+    (sum, item) => {
+      const qty = getSafeQty(item.qtyNeeded);
+      return sum + item.priceVnd * qty;
+    },
     0
   );
 
@@ -147,7 +165,8 @@ export default function AIOrderSuggestionsScreen() {
 
     const invalidItems = suggestions.filter((item) => {
       const limit = getItemLimit(item);
-      return limit !== null && (limit <= 0 || item.qtyNeeded > limit);
+      const qty = getSafeQty(item.qtyNeeded);
+      return limit !== null && (limit <= 0 || qty > limit);
     });
 
     if (invalidItems.length > 0) {
@@ -189,9 +208,7 @@ export default function AIOrderSuggestionsScreen() {
           return;
         }
 
-        const currentQty = Number.isFinite(item.qtyNeeded) && item.qtyNeeded > 0
-          ? item.qtyNeeded
-          : 1;
+        const currentQty = getSafeQty(item.qtyNeeded);
         const updatedQty = currentQty + delta;
         const limit = getItemLimit(item);
 
@@ -201,10 +218,14 @@ export default function AIOrderSuggestionsScreen() {
           return;
         }
 
-        const safeQty =
-          limit === null
-            ? Math.max(1, updatedQty)
-            : Math.max(1, Math.min(updatedQty, Math.max(1, limit)));
+        const safeQty = (() => {
+          const base =
+            limit === null
+              ? Math.max(1, updatedQty)
+              : Math.max(1, Math.min(updatedQty, Math.max(1, limit)));
+          const rounded = Math.round(base);
+          return rounded > 0 ? rounded : 1;
+        })();
 
         next.push({ ...item, qtyNeeded: safeQty });
       });
@@ -292,12 +313,8 @@ export default function AIOrderSuggestionsScreen() {
           </View>
         )}
 
-        {filteredSuggestions.map((item) => (
-          <Swipeable
-            key={item.id}
-            renderRightActions={() => renderRightActions(item.id)}
-            rightThreshold={32}
-          >
+        {filteredSuggestions.map((item) => {
+          const card = (
             <View style={styles.itemCard}>
               <View style={styles.itemLeft}>
                 <View style={styles.itemInfo}>
@@ -309,7 +326,7 @@ export default function AIOrderSuggestionsScreen() {
                     {formattedVnd(item.priceVnd)} VND /
                     {item.packageSize ? ` ${item.packageSize}${item.measurement}` : ''}
                   </Text>
-                  <Text style={styles.itemQty}>Qty needed: {item.qtyNeeded}</Text>
+                  <Text style={styles.itemQty}>Qty needed: {getSafeQty(item.qtyNeeded)}</Text>
                   {typeof getItemLimit(item) === 'number' && (
                     <Text style={styles.itemQty}>Available: {getItemLimit(item)}</Text>
                   )}
@@ -333,7 +350,7 @@ export default function AIOrderSuggestionsScreen() {
                       >
                         <Ionicons name="remove" size={16} color="#2C1B13" />
                       </TouchableOpacity>
-                      <Text style={styles.qtyValue}>{item.qtyNeeded}</Text>
+                      <Text style={styles.qtyValue}>{getSafeQty(item.qtyNeeded)}</Text>
                       <TouchableOpacity
                         style={styles.qtyButton}
                         onPress={() => handleChangeQuantity(item.id, 1)}
@@ -354,8 +371,26 @@ export default function AIOrderSuggestionsScreen() {
                 />
               </View>
             </View>
-          </Swipeable>
-        ))}
+          );
+
+          if (!isReviewing) {
+            return (
+              <View key={item.id}>
+                {card}
+              </View>
+            );
+          }
+
+          return (
+            <Swipeable
+              key={item.id}
+              renderRightActions={() => renderRightActions(item.id)}
+              rightThreshold={32}
+            >
+              {card}
+            </Swipeable>
+          );
+        })}
 
         {/* Bottom spacing */}
         <View style={styles.bottomSpacer} />
