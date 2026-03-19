@@ -111,7 +111,18 @@ export const API_ENDPOINTS = {
   },
   order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
-    byOwner: (ownerId: number) => `${AUTH_BASE_URL}/Order/by-owner/${ownerId}`,
+    byOwner: (
+      ownerId: number,
+      params?: { page?: number; pageSize?: number; orderStatus?: string }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      if (params?.orderStatus) query.set('orderStatus', params.orderStatus);
+
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Order/by-owner/${ownerId}${qs ? `?${qs}` : ''}`;
+    },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
   },
   supplier: {
