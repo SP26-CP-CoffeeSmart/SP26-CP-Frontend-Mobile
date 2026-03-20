@@ -174,6 +174,7 @@ export default function MenuInsightsScreen() {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [menuImageUri, setMenuImageUri] = useState<string | null>(menuImage ?? null);
+  const [currentMenuRaw, setCurrentMenuRaw] = useState<any>(null);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [generatingMenu, setGeneratingMenu] = useState(false);
 
@@ -307,6 +308,7 @@ export default function MenuInsightsScreen() {
 
       const menuData: MenuData = await menuResponse.json();
       console.log('[Menu Insights] Full menu data:', menuData);
+      setCurrentMenuRaw(menuData);
 
       const resolvedMenuImage =
         resolveImageUrl(menuData.image) ??
@@ -393,27 +395,148 @@ export default function MenuInsightsScreen() {
 
     try {
       setGeneratingMenu(true);
-      const response = await authorizedFetch(API_ENDPOINTS.ai.analyzeMenuFeedback(id), {
-        headers: {
-          Accept: '*/*',
-        },
-      });
 
-      console.log('[AI analyze-menu-feedback] status:', response.status);
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.log('[AI analyze-menu-feedback] error body:', text);
-        throw new Error(text || `Request failed (${response.status})`);
+      let unappliedFeedbackItems: any[] = [];
+      try {
+        const feedbackResponse = await authorizedFetch(API_ENDPOINTS.feedback.listByMenu(id, 1, 300), {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+        if (feedbackResponse.ok) {
+          const feedbackPayload = await feedbackResponse.json();
+          const feedbackItems = Array.isArray(feedbackPayload?.items)
+            ? feedbackPayload.items
+            : Array.isArray(feedbackPayload)
+              ? feedbackPayload
+              : [];
+          unappliedFeedbackItems = feedbackItems.filter((item: any) => item?.isApplied !== true);
+        }
+      } catch {
+        unappliedFeedbackItems = [];
       }
 
-      const responseText = await response.text();
-      let responsePayload: unknown = null;
-      if (responseText) {
+      const getModifiedCount = (payload: any): number => {
+        if (!payload || typeof payload !== 'object') return 0;
+        const toModified = (menuLike: any): number => {
+          if (!menuLike) return 0;
+          const raw =
+            menuLike?.modifiedMenuItemIds ??
+            menuLike?.ModifiedMenuItemIds ??
+            menuLike?.modifiedMenuItemIDs ??
+            [];
+          if (Array.isArray(raw)) return raw.length;
+          if (typeof raw === 'string') {
+            const trimmed = raw.trim();
+            if (!trimmed) return 0;
+            try {
+              const parsed = JSON.parse(trimmed);
+              if (Array.isArray(parsed)) return parsed.length;
+            } catch {
+              return trimmed.split(',').map((x) => x.trim()).filter(Boolean).length;
+            }
+          }
+          return 0;
+        };
+
+        const objectPayload = payload as any;
+        if (Array.isArray(objectPayload?.menus) && objectPayload.menus.length > 0) {
+          return objectPayload.menus.reduce((sum: number, menu: any) => sum + toModified(menu), 0);
+        }
+        if (objectPayload?.menu) return toModified(objectPayload.menu);
+        return toModified(objectPayload);
+      };
+
+      const inferCurrentLayout = (): number | null => {
+        const rawLayout =
+          currentMenuRaw?.layout ??
+          currentMenuRaw?.config?.layout ??
+          currentMenuRaw?.menuConfig?.layout ??
+          currentMenuRaw?.requestConfig?.layout ??
+          currentMenuRaw?.request?.config?.layout ??
+          null;
+        if (typeof rawLayout === 'number' && Number.isFinite(rawLayout)) return rawLayout;
+        if (typeof rawLayout === 'string' && rawLayout.trim() !== '') {
+          const parsed = Number(rawLayout);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      };
+
+      const applyLayoutToPayload = (payload: any, layoutValue: number | null) => {
+        if (!payload || typeof payload !== 'object' || layoutValue == null) return payload;
+        const payloadObject = payload as any;
+
+        if (payloadObject.config && typeof payloadObject.config === 'object') {
+          payloadObject.config.layout = layoutValue;
+        }
+        if (Array.isArray(payloadObject.menus)) {
+          payloadObject.menus = payloadObject.menus.map((menu: any) => ({
+            ...menu,
+            layout: layoutValue,
+            config: {
+              ...(menu?.config ?? payloadObject?.config ?? {}),
+              layout: layoutValue,
+            },
+          }));
+        }
+        if (payloadObject.menu && typeof payloadObject.menu === 'object') {
+          payloadObject.menu = {
+            ...payloadObject.menu,
+            layout: layoutValue,
+            config: {
+              ...(payloadObject.menu?.config ?? payloadObject?.config ?? {}),
+              layout: layoutValue,
+            },
+          };
+        }
+
+        return payloadObject;
+      };
+
+      const callAnalyze = async (method: 'GET' | 'POST') => {
+        const response = await authorizedFetch(API_ENDPOINTS.ai.analyzeMenuFeedback(id), {
+          method,
+          headers: {
+            Accept: '*/*',
+            ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+          },
+          ...(method === 'POST'
+            ? {
+                body: JSON.stringify({
+                  menuId: id,
+                  feedbackItems: unappliedFeedbackItems,
+                }),
+              }
+            : {}),
+        });
+
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || `Request failed (${response.status})`);
+        }
+
+        const responseText = await response.text();
+        if (!responseText) return null;
         try {
-          responsePayload = JSON.parse(responseText);
+          return JSON.parse(responseText);
         } catch {
-          responsePayload = responseText;
+          return responseText;
+        }
+      };
+
+      let responsePayload = await callAnalyze('GET');
+
+      const modifiedCountFromGet = getModifiedCount(responsePayload);
+      if (modifiedCountFromGet === 0 && unappliedFeedbackItems.length > 0) {
+        try {
+          const postPayload = await callAnalyze('POST');
+          const modifiedCountFromPost = getModifiedCount(postPayload);
+          if (modifiedCountFromPost > 0) {
+            responsePayload = postPayload;
+          }
+        } catch {
+          // Keep GET payload if POST path is unavailable on backend.
         }
       }
 
@@ -454,8 +577,20 @@ export default function MenuInsightsScreen() {
           payloadObject.imageUrl = resolvedUrl;
         }
 
+        // Preserve the current menu layout for new version generation.
+        const currentLayout = inferCurrentLayout();
+        applyLayoutToPayload(payloadObject, currentLayout);
+
         return payloadObject;
       })();
+
+      const modifiedCount = getModifiedCount(normalizedPayload);
+      if (unappliedFeedbackItems.length > 0 && modifiedCount === 0) {
+        Alert.alert(
+          'No menu items updated',
+          `Detected ${unappliedFeedbackItems.length} unapplied feedback item(s), but AI returned no modified items. Please review feedback mapping for this menu version.`
+        );
+      }
 
       let cacheKey = '';
       if (normalizedPayload) {
@@ -468,6 +603,7 @@ export default function MenuInsightsScreen() {
         params: {
           data: normalizedPayload ? JSON.stringify(normalizedPayload) : '',
           cacheKey,
+          flow: 'menu-version-feedback',
         },
       });
     } catch (error) {

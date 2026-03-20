@@ -18,7 +18,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -72,6 +73,8 @@ const fallbackMenuImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
 const fallbackBeverageImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
+
+const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 
 const resolveImageUrl = (baseUrl: string, image?: string) => {
   if (!image) return null;
@@ -288,6 +291,34 @@ export default function MenuScreen() {
   useEffect(() => {
     fetchMenus();
   }, [fetchMenus]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const refreshIfNeeded = async () => {
+        try {
+          const shouldRefresh = await AsyncStorage.getItem(MENU_REFRESH_FLAG_KEY);
+          if (!isActive || shouldRefresh !== '1') {
+            return;
+          }
+
+          await AsyncStorage.removeItem(MENU_REFRESH_FLAG_KEY);
+          if (isActive) {
+            fetchMenus();
+          }
+        } catch {
+          // Ignore storage errors to avoid blocking UI flow.
+        }
+      };
+
+      refreshIfNeeded();
+
+      return () => {
+        isActive = false;
+      };
+    }, [fetchMenus])
+  );
 
   const fetchBeverageCount = useCallback(async () => {
     if (authLoading) {

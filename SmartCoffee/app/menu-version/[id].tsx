@@ -16,6 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 
 interface MenuVersion {
     id: string;
@@ -205,6 +208,8 @@ const MenuVersionPage = () => {
                 console.log('[Menu Activate] body:', errorBody);
                 throw new Error(`Request failed: ${response.status}`);
             }
+
+            await AsyncStorage.setItem(MENU_REFRESH_FLAG_KEY, '1');
 
             // Refresh from endpoint containing isApplied to keep button state in sync.
             await fetchMenuVersions();

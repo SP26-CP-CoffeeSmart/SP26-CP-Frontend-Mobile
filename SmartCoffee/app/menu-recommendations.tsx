@@ -355,6 +355,7 @@ export default function MenuRecommendationsScreen() {
         params: {
           data: responsePayload ? JSON.stringify(responsePayload) : '',
           cacheKey,
+          flow: 'create-menu',
         },
       });
     } catch (error) {
