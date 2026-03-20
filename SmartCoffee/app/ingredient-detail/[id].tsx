@@ -51,6 +51,17 @@ interface ShopInventoryDetail {
   coffeeShop: CoffeeShopInfo | null;
 }
 
+const formatMeasurement = (measurement?: string) => {
+  if (!measurement) return 'units';
+  const normalized = measurement.trim().toLowerCase();
+  if (['g', 'gram', 'grams', 'gam'].includes(normalized)) return 'g';
+  if (['kg', 'kilogram', 'kilograms'].includes(normalized)) return 'kg';
+  if (['ml', 'milliliter', 'milliliters'].includes(normalized)) return 'ml';
+  if (['l', 'liter', 'liters', 'litre', 'litres'].includes(normalized)) return 'l';
+  if (['unit', 'units', 'pcs', 'pc', 'piece', 'pieces'].includes(normalized)) return 'units';
+  return measurement;
+};
+
 export default function IngredientDetailScreen() {
   const isDark = false;
   const { id } = useLocalSearchParams();
@@ -136,7 +147,7 @@ export default function IngredientDetailScreen() {
     }
 
     const valueToApply = isAutoSuggest ? aiSuggestedValue : parsedManual;
-    const unitLabel = inventoryDetail.measurement || 'unit';
+    const unitLabel = formatMeasurement(inventoryDetail.measurement);
 
     try {
       setIsUpdating(true);
@@ -247,7 +258,7 @@ export default function IngredientDetailScreen() {
   const ingredientImage = inventoryDetail.ingredient?.image || null;
   const ingredientCategory = inventoryDetail.ingredient?.category || 'Unknown';
   const ingredientEndDate = inventoryDetail.ingredient?.endDate || new Date().toISOString();
-  const measurementUnit = inventoryDetail.measurement || 'unit';
+  const measurementUnit = formatMeasurement(inventoryDetail.measurement);
   const quantityValue = Number(inventoryDetail.quantity ?? 0);
   const statusLabel = quantityValue > 0 ? 'IN STOCK' : 'OUT OF STOCK';
 
@@ -344,7 +355,7 @@ export default function IngredientDetailScreen() {
         </View>
 
         {/* Usage Forecast */}
-        <View
+        {/* <View
           style={{
             backgroundColor: COLORS.card,
             padding: 16,
@@ -392,7 +403,7 @@ export default function IngredientDetailScreen() {
               borderRadius: 16,
             }}
           />
-        </View>
+        </View> */}
 
         {/* Set Minimum Stock Level */}
         <View
