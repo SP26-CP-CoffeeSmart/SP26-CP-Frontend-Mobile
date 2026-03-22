@@ -2,15 +2,18 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -34,6 +37,12 @@ type PostDetail = {
 type CoffeeShopItem = {
   coffeeShopId: number;
   shopName?: string | null;
+};
+
+type PostCategory = {
+  postCategoryId: number;
+  name?: string | null;
+  categoryName?: string | null;
 };
 
 const COLORS = {
@@ -63,8 +72,17 @@ export default function PostDetailScreen() {
   const { id } = useLocalSearchParams();
   const [post, setPost] = useState<PostDetail | null>(null);
   const [shopName, setShopName] = useState<string | null>(null);
+  const [categories, setCategories] = useState<PostCategory[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [disabling, setDisabling] = useState(false);
+  const [showDisableModal, setShowDisableModal] = useState(false);
 
   const postId = useMemo(() => Number(id ?? 0), [id]);
 
@@ -89,6 +107,9 @@ export default function PostDetailScreen() {
 
       const data = (await response.json()) as PostDetail;
       setPost(data);
+      setEditTitle(data?.title ?? '');
+      setEditContent(data?.content ?? '');
+      setSelectedCategoryId(data?.postCategoryId ?? null);
 
       if (data?.coffeeShopId) {
         const shopResponse = await authorizedFetch(
@@ -108,12 +129,109 @@ export default function PostDetailScreen() {
     }
   }, [postId]);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      setLoadingCategories(true);
+      const response = await authorizedFetch(API_ENDPOINTS.postCategory.list(), {
+        headers: { Accept: 'application/json' },
+      });
+      const payload = await response.json();
+      const normalized = Array.isArray(payload) ? payload : payload?.data ?? payload?.items ?? [];
+      setCategories(normalized);
+    } catch {
+      setCategories([]);
+    } finally {
+      setLoadingCategories(false);
+    }
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!post) return;
+    if (!editTitle.trim()) {
+      Toast.show({ type: 'error', text1: 'Missing title', text2: 'Please enter a title.' });
+      return;
+    }
+
+    if (!selectedCategoryId) {
+      Toast.show({ type: 'error', text1: 'Missing category', text2: 'Please select a category.' });
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const response = await authorizedFetch(API_ENDPOINTS.post.update(post.postId), {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: editTitle.trim(),
+          content: editContent.trim(),
+          postCategoryId: selectedCategoryId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const updated = (await response.json()) as PostDetail;
+      setPost(updated);
+      setIsEditing(false);
+      Toast.show({ type: 'success', text1: 'Post updated successfully' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Update failed.';
+      Toast.show({ type: 'error', text1: 'Update failed', text2: message });
+    } finally {
+      setSaving(false);
+    }
+  }, [editContent, editTitle, post, selectedCategoryId]);
+
+  const handleDisableConfirm = useCallback(async () => {
+    if (!post) return;
+    try {
+      setDisabling(true);
+      const response = await authorizedFetch(API_ENDPOINTS.post.disable(post.postId), {
+        method: 'PUT',
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const updated = (await response.json()) as PostDetail;
+      setPost(updated);
+      Toast.show({ type: 'success', text1: 'Post disabled' });
+      setShowDisableModal(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Disable failed.';
+      Toast.show({ type: 'error', text1: 'Disable failed', text2: message });
+    } finally {
+      setDisabling(false);
+    }
+  }, [post]);
+
   useEffect(() => {
     loadPost();
-  }, [loadPost]);
+    loadCategories();
+  }, [loadPost, loadCategories]);
 
   const contentLines = useMemo(() => splitLines(post?.content), [post?.content]);
   const dateLabel = formatDate(post?.publishedAt ?? post?.createdAt);
+  const categoryMap = useMemo(() => {
+    return categories.reduce<Record<number, string>>((acc, item) => {
+      const label = item.categoryName ?? item.name;
+      if (item.postCategoryId && label) {
+        acc[item.postCategoryId] = label;
+      }
+      return acc;
+    }, {});
+  }, [categories]);
+  const categoryLabel = post?.postCategoryId
+    ? categoryMap[post.postCategoryId] ?? `#${post.postCategoryId}`
+    : 'General';
 
   if (loading) {
     return (
@@ -160,12 +278,60 @@ export default function PostDetailScreen() {
         <View style={styles.card}>
           <View style={styles.tagRow}>
             <View style={styles.tagPill}>
-              <Text style={styles.tagText}>#{post?.postCategoryId ?? 'General'}</Text>
+              <Text style={styles.tagText}>{categoryLabel}</Text>
             </View>
             <Text style={styles.metaText}>{dateLabel}</Text>
           </View>
 
-          <Text style={styles.title}>{post?.title}</Text>
+          {isEditing ? (
+            <View style={styles.editBlock}>
+              <Text style={styles.inputLabel}>Title</Text>
+              <TextInput
+                style={styles.input}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                placeholder="Enter title"
+                placeholderTextColor={COLORS.muted}
+              />
+              <Text style={styles.inputLabel}>Category</Text>
+              {loadingCategories ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                  <Text style={styles.metaText}>Loading categories...</Text>
+                </View>
+              ) : (
+                <View style={styles.chipRow}>
+                  {categories.map((category) => {
+                    const active = category.postCategoryId === selectedCategoryId;
+                    const label =
+                      category.categoryName ?? category.name ?? `#${category.postCategoryId}`;
+                    return (
+                      <TouchableOpacity
+                        key={category.postCategoryId}
+                        onPress={() => setSelectedCategoryId(category.postCategoryId)}
+                        style={[styles.chip, active && styles.chipActive]}
+                      >
+                        <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                          {label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
+              <Text style={styles.inputLabel}>Content</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                value={editContent}
+                onChangeText={setEditContent}
+                placeholder="Write content"
+                placeholderTextColor={COLORS.muted}
+                multiline
+              />
+            </View>
+          ) : (
+            <Text style={styles.title}>{post?.title}</Text>
+          )}
 
           <View style={styles.metaRow}>
             <View style={styles.metaPill}>
@@ -180,19 +346,89 @@ export default function PostDetailScreen() {
             </View>
           </View>
 
-          <View style={styles.contentBlock}>
-            {contentLines.length === 0 ? (
-              <Text style={styles.contentText}>No content available.</Text>
+          {!isEditing && (
+            <View style={styles.contentBlock}>
+              {contentLines.length === 0 ? (
+                <Text style={styles.contentText}>No content available.</Text>
+              ) : (
+                contentLines.map((line, index) => (
+                  <Text key={`${index}-${line}`} style={styles.contentText}>
+                    {line}
+                  </Text>
+                ))
+              )}
+            </View>
+          )}
+
+          <View style={styles.actionRow}>
+            {isEditing ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.secondaryButton]}
+                  onPress={() => setIsEditing(false)}
+                  disabled={saving}
+                >
+                  <Text style={styles.secondaryText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.primaryButton]}
+                  onPress={handleSave}
+                  disabled={saving}
+                >
+                  <Text style={styles.primaryText}>{saving ? 'Saving...' : 'Save'}</Text>
+                </TouchableOpacity>
+              </>
             ) : (
-              contentLines.map((line, index) => (
-                <Text key={`${index}-${line}`} style={styles.contentText}>
-                  {line}
-                </Text>
-              ))
+              <>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.secondaryButton]}
+                  onPress={() => setIsEditing(true)}
+                >
+                  <Text style={styles.secondaryText}>Edit</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.dangerButton]}
+                  onPress={() => setShowDisableModal(true)}
+                  disabled={disabling}
+                >
+                  <Text style={styles.dangerText}>
+                    {disabling ? 'Disabling...' : 'Disable'}
+                  </Text>
+                </TouchableOpacity>
+              </>
             )}
           </View>
         </View>
       </ScrollView>
+
+      <Modal transparent visible={showDisableModal} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Disable this post?</Text>
+            <Text style={styles.modalText}>
+              The post will be hidden from the community feed.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.secondaryButton]}
+                onPress={() => setShowDisableModal(false)}
+                disabled={disabling}
+              >
+                <Text style={styles.secondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.dangerButton]}
+                onPress={handleDisableConfirm}
+                disabled={disabling}
+              >
+                <Text style={styles.dangerText}>
+                  {disabling ? 'Disabling...' : 'Disable'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -306,6 +542,57 @@ const styles = StyleSheet.create({
     color: COLORS.ink,
     fontFamily: 'Georgia',
   },
+  editBlock: {
+    gap: 10,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.ink,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: COLORS.ink,
+    backgroundColor: '#FBF7F3',
+  },
+  textArea: {
+    minHeight: 120,
+    textAlignVertical: 'top',
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#FBF7F3',
+  },
+  chipActive: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentSoft,
+  },
+  chipText: {
+    fontSize: 12,
+    color: COLORS.ink,
+  },
+  chipTextActive: {
+    color: COLORS.accent,
+    fontWeight: '700',
+  },
   metaRow: {
     flexDirection: 'row',
     gap: 10,
@@ -332,5 +619,66 @@ const styles = StyleSheet.create({
   contentText: {
     color: COLORS.ink,
     lineHeight: 22,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  actionButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 999,
+    alignItems: 'center',
+  },
+  primaryButton: {
+    backgroundColor: COLORS.accent,
+  },
+  secondaryButton: {
+    backgroundColor: COLORS.accentSoft,
+  },
+  dangerButton: {
+    backgroundColor: '#3B1F1A',
+  },
+  primaryText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  secondaryText: {
+    color: COLORS.ink,
+    fontWeight: '700',
+  },
+  dangerText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(19, 14, 10, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 18,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.ink,
+  },
+  modalText: {
+    color: COLORS.muted,
+    lineHeight: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
   },
 });

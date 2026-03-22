@@ -61,6 +61,8 @@ export const API_ENDPOINTS = {
   post: {
     list: () => `${AUTH_BASE_URL}/post`,
     getById: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
+    update: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
+    disable: (id: number) => `${AUTH_BASE_URL}/post/${id}/disable`,
   },
   coffeeShop: {
     list: () => `${AUTH_BASE_URL}/CoffeeShop`,

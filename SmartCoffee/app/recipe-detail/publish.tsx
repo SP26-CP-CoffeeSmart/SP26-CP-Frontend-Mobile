@@ -16,7 +16,8 @@ import { authorizedFetch } from '@/services/authService';
 
 type PostCategory = {
   postCategoryId: number;
-  name: string;
+  name?: string | null;
+  categoryName?: string | null;
   description?: string | null;
 };
 
@@ -205,6 +206,7 @@ export default function PublishRecipeScreen() {
             <View style={styles.chipRow}>
               {categories.map((category) => {
                 const active = category.postCategoryId === selectedCategoryId;
+                const label = category.categoryName ?? category.name ?? `#${category.postCategoryId}`;
                 return (
                   <TouchableOpacity
                     key={category.postCategoryId}
@@ -212,7 +214,7 @@ export default function PublishRecipeScreen() {
                     style={[styles.chip, active && styles.chipActive]}
                   >
                     <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                      {category.name}
+                      {label}
                     </Text>
                   </TouchableOpacity>
                 );
