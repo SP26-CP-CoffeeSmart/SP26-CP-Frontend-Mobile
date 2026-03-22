@@ -18,12 +18,14 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 import { BeverageCategory, useBeverageCategories } from '@/context/beverage-category-context';
+import Toast from 'react-native-toast-message';
 
 interface MenuItem {
   id: string;
@@ -36,10 +38,13 @@ interface MenuItem {
 
 interface BeverageItem {
   id: string;
+  beverageId?: number;
   name: string;
   flavor: string;
   time: string;
   image: any;
+  imageUrl?: string | null;
+  hasRealImage?: boolean;
   createDate?: string;
 }
 
@@ -69,11 +74,28 @@ const fallbackMenuImage =
 const fallbackBeverageImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
 
+const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
+
 const resolveImageUrl = (baseUrl: string, image?: string) => {
   if (!image) return null;
   if (image.startsWith('http://') || image.startsWith('https://')) return image;
   if (image.startsWith('/')) return `${baseUrl}${image}`;
   return `${baseUrl}/images/${image}`;
+};
+
+const isRealMenuImage = (raw?: string | null) => {
+  if (!raw || raw === 'null' || raw === 'undefined') return false;
+  const normalized = raw.toLowerCase();
+  return !normalized.includes('unsplash.com') && !normalized.includes('aida-public');
+};
+
+const hasRealBeverageImage = (raw?: string | null) => {
+  if (!raw || raw === 'null' || raw === 'undefined') return false;
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('unsplash.com') || normalized.includes('aida-public')) {
+    return false;
+  }
+  return true;
 };
 
 export default function MenuScreen() {
@@ -105,6 +127,7 @@ export default function MenuScreen() {
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createImageUploading, setCreateImageUploading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [uploadingBeverageId, setUploadingBeverageId] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const [scrollY, setScrollY] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -138,15 +161,55 @@ export default function MenuScreen() {
       const result = await response.json();
       const rawList: MenuHeaderApiItem[] = Array.isArray(result) ? result : [];
 
+      let activeHeaderIds = new Set<number>();
+      try {
+        const activeResponse = await authorizedFetch(
+          `${AUTH_BASE_URL}/Menu/active-by-shop/${coffeeShopId}`,
+          {
+            headers: { Accept: '*/*' },
+          }
+        );
+
+        if (activeResponse.ok) {
+          const activePayload = await activeResponse.json();
+          const activeMenus = Array.isArray(activePayload)
+            ? activePayload
+            : Array.isArray(activePayload?.items)
+              ? activePayload.items
+              : activePayload
+                ? [activePayload]
+                : [];
+
+          activeHeaderIds = new Set(
+            activeMenus
+              .map((menu: any) => Number(menu?.menuHeaderId ?? 0))
+              .filter((id: number) => Number.isFinite(id) && id > 0)
+          );
+        }
+      } catch {
+        // Keep fallback using isApplied from MenuHeader if active endpoint fails.
+      }
+
       const parseCreateDate = (value?: string) => {
         if (!value) return 0;
         const parsed = Date.parse(value);
         return Number.isNaN(parsed) ? 0 : parsed;
       };
 
-      const sortedList = [...rawList].sort(
-        (a, b) => parseCreateDate(b.createDate) - parseCreateDate(a.createDate)
-      );
+      const sortedList = [...rawList].sort((a, b) => {
+        const aHeaderId = Number(a?.menuHeaderId ?? 0);
+        const bHeaderId = Number(b?.menuHeaderId ?? 0);
+        const aApplied = activeHeaderIds.size
+          ? activeHeaderIds.has(aHeaderId)
+          : Boolean(a?.isApplied ?? false);
+        const bApplied = activeHeaderIds.size
+          ? activeHeaderIds.has(bHeaderId)
+          : Boolean(b?.isApplied ?? false);
+        if (aApplied !== bApplied) {
+          return aApplied ? -1 : 1;
+        }
+        return parseCreateDate(b.createDate) - parseCreateDate(a.createDate);
+      });
 
       if (sortedList.length === 0) {
         setMenuItems([]);
@@ -154,36 +217,64 @@ export default function MenuScreen() {
         return;
       }
 
-      const fetchVersionCount = async (menuHeaderId?: number) => {
-        if (!menuHeaderId) return 0;
+      const fetchVersionMeta = async (menuHeaderId?: number) => {
+        if (!menuHeaderId) {
+          return { count: 0, imageFromVersion: null as string | null };
+        }
+
         try {
           const response = await authorizedFetch(
             `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
             { headers: { Accept: '*/*' } }
           );
-          if (!response.ok) return 0;
+          if (!response.ok) {
+            return { count: 0, imageFromVersion: null as string | null };
+          }
+
           const data = await response.json();
-          return Array.isArray(data) ? data.length : 0;
+          const versions = Array.isArray(data) ? data : [];
+
+          const versionWithRealImage = versions.find((version: any) =>
+            isRealMenuImage(String(version?.image ?? version?.imageUrl ?? ''))
+          );
+
+          return {
+            count: versions.length,
+            imageFromVersion: versionWithRealImage
+              ? String(versionWithRealImage?.image ?? versionWithRealImage?.imageUrl ?? '')
+              : null,
+          };
         } catch {
-          return 0;
+          return { count: 0, imageFromVersion: null as string | null };
         }
       };
 
-      const versionCounts = await Promise.all(
-        sortedList.map((item) => fetchVersionCount(item.menuHeaderId))
+      const versionMetas = await Promise.all(
+        sortedList.map((item) => fetchVersionMeta(item.menuHeaderId))
       );
 
       const mapped = sortedList.map((item, index) => {
+        const rawHeaderImage = String(item?.image ?? item?.imageUrl ?? '');
+        const rawVersionImage = String(versionMetas[index]?.imageFromVersion ?? '');
+        const selectedImage = isRealMenuImage(rawHeaderImage)
+          ? rawHeaderImage
+          : isRealMenuImage(rawVersionImage)
+            ? rawVersionImage
+            : rawHeaderImage;
+
         const imageUrl = resolveImageUrl(
           AUTH_BASE_URL,
-          String(item?.image ?? item?.imageUrl ?? '')
+          selectedImage
         );
+
         return {
           id: String(item?.menuHeaderId ?? index),
           name: String(item?.name ?? 'Unknown'),
-          versions: Number(versionCounts[index] ?? 0),
+          versions: Number(versionMetas[index]?.count ?? 0),
           image: imageUrl ? { uri: imageUrl } : { uri: fallbackMenuImage },
-          isApplied: Boolean(item?.isApplied ?? false),
+          isApplied: activeHeaderIds.size
+            ? activeHeaderIds.has(Number(item?.menuHeaderId ?? 0))
+            : Boolean(item?.isApplied ?? false),
           createDate: item?.createDate,
         } as MenuItem;
       });
@@ -200,6 +291,34 @@ export default function MenuScreen() {
   useEffect(() => {
     fetchMenus();
   }, [fetchMenus]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const refreshIfNeeded = async () => {
+        try {
+          const shouldRefresh = await AsyncStorage.getItem(MENU_REFRESH_FLAG_KEY);
+          if (!isActive || shouldRefresh !== '1') {
+            return;
+          }
+
+          await AsyncStorage.removeItem(MENU_REFRESH_FLAG_KEY);
+          if (isActive) {
+            fetchMenus();
+          }
+        } catch {
+          // Ignore storage errors to avoid blocking UI flow.
+        }
+      };
+
+      refreshIfNeeded();
+
+      return () => {
+        isActive = false;
+      };
+    }, [fetchMenus])
+  );
 
   const fetchBeverageCount = useCallback(async () => {
     if (authLoading) {
@@ -287,13 +406,17 @@ export default function MenuScreen() {
       }
 
       const mapped = sortedList.map((item, index) => {
-        const imageUrl = resolveImageUrl(AUTH_BASE_URL, String(item?.image ?? item?.imageUrl ?? ''));
+        const rawImage = String(item?.image ?? item?.imageUrl ?? '');
+        const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage);
         return {
           id: String(item?.beverageId ?? item?.id ?? index),
+          beverageId: Number(item?.beverageId ?? item?.id ?? 0),
           name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
           flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
           time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
           image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+          imageUrl: imageUrl ?? null,
+          hasRealImage: hasRealBeverageImage(rawImage),
           createDate: String(
             item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
           ),
@@ -503,6 +626,53 @@ export default function MenuScreen() {
       }
 
       const asset = result.assets[0];
+      // Keep local URI for preview; actual upload happens after beverage is created and returns id.
+      setCreateImageUrl(asset.uri);
+    } catch (error) {
+      setCreateError('Failed to pick image.');
+    } finally {
+      setCreateImageUploading(false);
+    }
+  };
+
+  const handleUploadBeverageImage = async (beverage: BeverageItem) => {
+    if (uploadingBeverageId) {
+      return;
+    }
+
+    const beverageId = Number(beverage?.beverageId ?? beverage?.id ?? 0);
+    if (!Number.isFinite(beverageId) || beverageId <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid beverage',
+        text2: 'Cannot determine beverage id for image upload.',
+      });
+      return;
+    }
+
+    try {
+      setUploadingBeverageId(String(beverageId));
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Toast.show({
+          type: 'info',
+          text1: 'Permission required',
+          text2: 'Please allow photo access to upload beverage image.',
+        });
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.85,
+      });
+
+      if (result.canceled || !result.assets?.length) {
+        return;
+      }
+
+      const asset = result.assets[0];
       const { fileName, mimeType } = getUploadFileInfo(asset.uri);
       const formData = new FormData();
       formData.append('image', {
@@ -511,39 +681,38 @@ export default function MenuScreen() {
         type: mimeType,
       } as any);
 
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/upload-image`, {
-        method: 'POST',
-        headers: {
-          Accept: '*/*',
-        },
-        body: formData,
-      });
+      const response = await authorizedFetch(
+        `${AUTH_BASE_URL}/ShopBeverage/upload-image?id=${beverageId}`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+          body: formData,
+        }
+      );
 
       if (!response.ok) {
-        const errorBody = await response.text();
-        console.log('[Upload Image] status:', response.status);
-        console.log('[Upload Image] body:', errorBody);
+        const body = await response.text();
+        console.log('[Upload Beverage Image] status:', response.status);
+        console.log('[Upload Beverage Image] body:', body);
         throw new Error(`Request failed: ${response.status}`);
       }
 
-      const uploaded = await response.json();
-      console.log('[Upload Image] response:', uploaded);
-      const uploadedUrl = String(
-        uploaded?.url ??
-        uploaded?.imageUrl ??
-        uploaded?.data?.url ??
-        uploaded?.data?.imageUrl ??
-        ''
-      ).trim();
-      if (!uploadedUrl) {
-        throw new Error('Missing upload url');
-      }
-
-      setCreateImageUrl(uploadedUrl);
-    } catch (error) {
-      setCreateError('Failed to upload image.');
+      Toast.show({
+        type: 'success',
+        text1: 'Success',
+        text2: 'Beverage image uploaded successfully.',
+      });
+      await fetchBeverages();
+    } catch {
+      Toast.show({
+        type: 'error',
+        text1: 'Upload failed',
+        text2: 'Unable to upload beverage image. Please try again.',
+      });
     } finally {
-      setCreateImageUploading(false);
+      setUploadingBeverageId(null);
     }
   };
 
@@ -554,7 +723,7 @@ export default function MenuScreen() {
 
     const trimmedName = createName.trim();
     const trimmedCategory = createCategoryName.trim();
-    const trimmedImage = createImageUrl.trim();
+    const selectedImageUri = createImageUrl.trim();
 
     if (!trimmedName) {
       setCreateError('Please enter a beverage name.');
@@ -566,8 +735,8 @@ export default function MenuScreen() {
       return;
     }
 
-    if (!trimmedImage) {
-      setCreateError('Please upload an image before creating.');
+    if (!selectedImageUri) {
+      setCreateError('Please select an image before creating.');
       return;
     }
 
@@ -594,7 +763,6 @@ export default function MenuScreen() {
           name: trimmedName,
           status: 'ACTIVE',
           coffeeShopId,
-          image: trimmedImage,
           beverageCategory: {
             beverageCategoryId: createCategoryId ?? 0,
             name: createCategoryId ? selectedCategoryName : trimmedCategory,
@@ -607,9 +775,57 @@ export default function MenuScreen() {
       }
 
       const created = await response.json();
+      const createdBeverageId = Number(
+        created?.beverageId ??
+        created?.id ??
+        created?.data?.beverageId ??
+        created?.data?.id ??
+        0
+      );
+
+      if (!Number.isFinite(createdBeverageId) || createdBeverageId <= 0) {
+        throw new Error('Create succeeded but response does not contain beverage id.');
+      }
+
+      const { fileName, mimeType } = getUploadFileInfo(selectedImageUri);
+      const formData = new FormData();
+      formData.append('image', {
+        uri: selectedImageUri,
+        name: fileName,
+        type: mimeType,
+      } as any);
+
+      const uploadResponse = await authorizedFetch(
+        `${AUTH_BASE_URL}/ShopBeverage/upload-image?id=${createdBeverageId}`,
+        {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+          body: formData,
+        }
+      );
+
+      if (!uploadResponse.ok) {
+        const uploadErrorBody = await uploadResponse.text();
+        console.log('[Upload Beverage Image] status:', uploadResponse.status);
+        console.log('[Upload Beverage Image] body:', uploadErrorBody);
+        throw new Error(`Image upload failed: ${uploadResponse.status}`);
+      }
+
+      const uploaded = await uploadResponse.json();
+      console.log('[Upload Beverage Image] response:', uploaded);
       const imageUrl = resolveImageUrl(
         AUTH_BASE_URL,
-        String(created?.imageUrl ?? created?.image ?? '')
+        String(
+          uploaded?.url ??
+          uploaded?.imageUrl ??
+          uploaded?.data?.url ??
+          uploaded?.data?.imageUrl ??
+          created?.imageUrl ??
+          created?.image ??
+          ''
+        )
       );
 
       const mapped: BeverageItem = {
@@ -713,70 +929,74 @@ export default function MenuScreen() {
                 contentContainerStyle={styles.menuCarouselContent}
                 renderItem={({ item }) => (
                   <View style={styles.menuCardWrapper}>
-                    <View style={styles.featureCard}>
-                      <View style={styles.featureHeader}>
-                        <View style={styles.featureHeaderLeft}>
-                          <Text style={styles.featureTitle}>{item.name}</Text>
-                          {!!item.createDate && (
-                            <Text style={styles.featureSubtitle}>
-                              Created: {formatMenuCreateDate(item.createDate)}
-                            </Text>
-                          )}
-                        </View>
-                        <TouchableOpacity
-                          style={styles.versionBadge}
-                          onPress={() =>
-                            router.push({
-                              pathname: '/menu-version/[id]',
-                              params: { id: item.id, name: item.name },
-                            })
-                          }
-                        >
-                          <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
-                        </TouchableOpacity>
-                      </View>
+                    <View style={[styles.featureCard, item.isApplied && styles.featureCardApplied]}>
                       <View style={styles.featureImageWrapper}>
                         <Image source={item.image} style={styles.featureImage} />
-                      </View>
-                      <View style={styles.featureActions}>
+                        <View style={styles.featureImageOverlay} />
+
+                        <View style={styles.featureHeaderOverlay}>
+                          <View style={styles.featureHeaderLeft}>
+                            <Text numberOfLines={1} style={styles.featureTitleOverlay}>{item.name}</Text>
+                            {!!item.createDate && (
+                              <Text style={styles.featureSubtitleOverlay}>
+                                Created: {formatMenuCreateDate(item.createDate)}
+                              </Text>
+                            )}
+                          </View>
+                          <TouchableOpacity
+                            style={styles.versionBadge}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/menu-version/[id]',
+                                params: { id: item.id, name: item.name },
+                              })
+                            }
+                          >
+                            <Text style={styles.versionBadgeText}>{item.versions} versions</Text>
+                          </TouchableOpacity>
+                        </View>
+
                         {item.isApplied && (
-                          <View style={styles.appliedBadge}>
+                          <View style={styles.appliedBadgeOverlay}>
                             <Ionicons
                               name="checkmark-circle"
                               size={14}
-                              color={stylesVars.primary}
+                              color="#FFFFFF"
                             />
-                            <Text style={styles.appliedText}>Applied</Text>
+                            <Text style={styles.appliedTextOverlay}>ACTIVED</Text>
                           </View>
                         )}
-                        <TouchableOpacity
-                          style={styles.featureActionButton}
-                          onPress={() =>
-                            router.push({
-                              pathname: '/menu-version/[id]',
-                              params: { id: item.id, name: item.name },
-                            })
-                          }
-                        >
-                          <Ionicons name="create-outline" size={16} color={stylesVars.espresso} />
-                          <Text style={styles.featureActionText}>Detail</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={styles.featureActionButton}
-                          onPress={() =>
-                            router.push({
-                              pathname: '/feedback',
-                              params: { menuName: item.name, menuId: item.id },
-                            })
-                          }
-                        >
-                          <Ionicons
-                            name="bookmark-outline"
-                            size={16}
-                            color={stylesVars.espresso}
-                          />
-                          <Text style={styles.featureActionText}>Rating</Text>
-                        </TouchableOpacity>
+
+                        <View style={styles.featureActionsOverlay}>
+                          <TouchableOpacity
+                            style={styles.featureActionButtonOverlay}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/menu-version/[id]',
+                                params: { id: item.id, name: item.name },
+                              })
+                            }
+                          >
+                            <Ionicons name="create-outline" size={16} color="#FFFFFF" />
+                            <Text style={styles.featureActionTextOverlay}>Detail</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={styles.featureActionButtonOverlay}
+                            onPress={() =>
+                              router.push({
+                                pathname: '/feedback',
+                                params: { menuName: item.name, menuId: item.id },
+                              })
+                            }
+                          >
+                            <Ionicons
+                              name="bookmark-outline"
+                              size={16}
+                              color="#FFFFFF"
+                            />
+                            <Text style={styles.featureActionTextOverlay}>Rating</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     </View>
                   </View>
@@ -850,18 +1070,31 @@ export default function MenuScreen() {
                         <TouchableOpacity
                           key={item.id}
                           style={styles.beverageCard}
-                          onPress={() => router.push(`/recipe-detail/${item.id}`)}
+                          onPress={() =>
+                            router.push({
+                              pathname: '/recipe-detail/[id]',
+                              params: { id: item.id },
+                            })
+                          }
                         >
                           <View style={styles.beverageImageWrap}>
                             <Image source={item.image} style={styles.beverageImage} />
-                            <TouchableOpacity
-                              style={styles.beverageEditButton}
-                              onPress={(e) => {
-                                e.stopPropagation();
-                              }}
-                            >
-                              <Ionicons name="create-outline" size={18} color={stylesVars.espresso} />
-                            </TouchableOpacity>
+                            {!item.hasRealImage ? (
+                              <TouchableOpacity
+                                style={styles.beverageEditButton}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  handleUploadBeverageImage(item);
+                                }}
+                                disabled={uploadingBeverageId === item.id}
+                              >
+                                {uploadingBeverageId === item.id ? (
+                                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                                ) : (
+                                  <Ionicons name="camera-outline" size={18} color={stylesVars.espresso} />
+                                )}
+                              </TouchableOpacity>
+                            ) : null}
                           </View>
                           <View style={styles.beverageContent}>
                             <Text style={styles.beverageTitle}>{item.name}</Text>
@@ -1141,14 +1374,14 @@ export default function MenuScreen() {
                   <>
                     <Ionicons name="image-outline" size={16} color={stylesVars.espresso} />
                     <Text style={styles.uploadButtonText}>
-                      {createImageUrl ? 'Change image' : 'Upload image'}
+                      {createImageUrl ? 'Change image' : 'Select image'}
                     </Text>
                   </>
                 )}
               </TouchableOpacity>
               {createImageUrl ? (
                 <>
-                  <Text style={styles.uploadHint}>Image uploaded</Text>
+                  <Text style={styles.uploadHint}>Image selected (will upload after create)</Text>
                   <Image source={{ uri: createImageUrl }} style={styles.uploadPreview} />
                   <TouchableOpacity
                     style={styles.removeImageButton}
@@ -1328,7 +1561,7 @@ const styles = StyleSheet.create({
   },
   featureCard: {
     width: MENU_CARD_WIDTH,
-    padding: 20,
+    height: width * 0.72,
     borderRadius: 28,
     borderWidth: 1,
     borderColor: 'rgba(217, 160, 91, 0.25)',
@@ -1338,6 +1571,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 15,
     elevation: 3,
+    overflow: 'hidden',
+  },
+  featureCardApplied: {
+    borderColor: 'rgba(217, 160, 91, 0.85)',
+    borderWidth: 2,
+    shadowOpacity: 0.15,
   },
   menuCarouselContent: {
     justifyContent: 'center',
@@ -1382,7 +1621,7 @@ const styles = StyleSheet.create({
     color: stylesVars.muted,
   },
   versionBadge: {
-    backgroundColor: 'rgba(217,160,91,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.9)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
@@ -1394,17 +1633,85 @@ const styles = StyleSheet.create({
   },
   featureImageWrapper: {
     width: '100%',
-    height: width * 0.45,
-    borderRadius: 20,
-    overflow: 'hidden',
+    height: '100%',
     backgroundColor: 'rgba(62,39,35,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(62,39,35,0.06)',
-    marginBottom: 16,
   },
   featureImage: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
+  },
+  featureImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(25,16,14,0.24)',
+  },
+  featureHeaderOverlay: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  featureTitleOverlay: {
+    fontSize: 30,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0,0,0,0.4)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  featureSubtitleOverlay: {
+    marginTop: 4,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.92)',
+    textShadowColor: 'rgba(0,0,0,0.35)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  appliedBadgeOverlay: {
+    position: 'absolute',
+    top: 64,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(62,39,35,0.72)',
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  appliedTextOverlay: {
+    fontSize: 11,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  featureActionsOverlay: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 14,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  featureActionButtonOverlay: {
+    flex: 1,
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    backgroundColor: 'rgba(35,25,23,0.45)',
+  },
+  featureActionTextOverlay: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   featureActions: {
     flexDirection: 'row',

@@ -71,6 +71,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs-staff)" options={{ headerShown: false }} />
         <Stack.Screen name="change-password" options={{ headerShown: false }} />
+        <Stack.Screen name="recipe-detail" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-detail/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="recipe-detail/publish" options={{ headerShown: false }} />
         <Stack.Screen name="post-detail/[id]" options={{ headerShown: false }} />
@@ -88,6 +89,7 @@ function RootLayoutNav() {
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
         <Stack.Screen name="menu-results" options={{ headerShown: false }} />
+        <Stack.Screen name="menu-insights" options={{ headerShown: false }} />
         <Stack.Screen name="menu-detail/[id]" options={{ headerShown: false }} />
         <Stack.Screen name="staff-management" options={{ headerShown: false }} />
         <Stack.Screen name="create-staff" options={{ headerShown: false }} />

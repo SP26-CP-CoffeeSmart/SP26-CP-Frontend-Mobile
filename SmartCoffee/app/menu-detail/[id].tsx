@@ -10,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -20,6 +21,7 @@ import {
   Gesture,
   GestureDetector,
   GestureHandlerRootView,
+  Swipeable,
 } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
 import * as FileSystem from 'expo-file-system';
@@ -138,7 +140,10 @@ const normalizeFirebaseImageUrl = (url: string): string => {
   }
 };
 
-const getMenuImageForSave = (menu: any, renderedUrl?: string | null): string | null => {
+const getMenuImageForSave = (menu: any, renderedUrls?: string[]): string | null => {
+  const firstRenderedUrl = Array.isArray(renderedUrls) && renderedUrls.length > 0
+    ? renderedUrls[0]
+    : null;
   const candidates = [
     menu?.imageUrl,
     menu?.image,
@@ -146,7 +151,7 @@ const getMenuImageForSave = (menu: any, renderedUrl?: string | null): string | n
     menu?.ImageUrl,
     menu?.menu?.imageUrl,
     menu?.menu?.ImageUrl,
-    renderedUrl,
+    firstRenderedUrl,
   ];
 
   for (const value of candidates) {
@@ -157,6 +162,40 @@ const getMenuImageForSave = (menu: any, renderedUrl?: string | null): string | n
   }
 
   return null;
+};
+
+const extractRenderedUrls = (payload: any): string[] => {
+  if (!payload || typeof payload !== 'object') return [];
+
+  const urls: string[] = [];
+  const pushIfValid = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return;
+    urls.push(trimmed);
+  };
+
+  pushIfValid(payload?.ImageUrl);
+  pushIfValid(payload?.imageUrl);
+
+  if (Array.isArray(payload?.imageUrls)) {
+    payload.imageUrls.forEach(pushIfValid);
+  }
+  if (Array.isArray(payload?.ImageUrls)) {
+    payload.ImageUrls.forEach(pushIfValid);
+  }
+  if (Array.isArray(payload?.urls)) {
+    payload.urls.forEach(pushIfValid);
+  }
+  if (Array.isArray(payload?.results)) {
+    payload.results.forEach((item: any) => {
+      pushIfValid(item?.imageUrl);
+      pushIfValid(item?.ImageUrl);
+      pushIfValid(item?.url);
+    });
+  }
+
+  return Array.from(new Set(urls));
 };
 
 const formatPriceFromSizes = (itemSizeViewModels: any[]): string => {
@@ -326,11 +365,12 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
 export default function MenuDetailScreen() {
   const router = useRouter();
-  const { item, title, payload, menuIndex } = useLocalSearchParams<{
+  const { item, title, payload, menuIndex, flow } = useLocalSearchParams<{
     item?: string;
     title?: string;
     payload?: string;
     menuIndex?: string;
+    flow?: string;
   }>();
   const parsedItem = useMemo(() => safeParseJson(item), [item]);
   const parsedPayload = useMemo(() => safeParseJson(payload), [payload]);
@@ -345,13 +385,17 @@ export default function MenuDetailScreen() {
   const [menuDraft, setMenuDraft] = useState<any>(null);
   const [menuPayload, setMenuPayload] = useState<any>(null);
   const [menuConfig, setMenuConfig] = useState<any>(null);
+  const [fullP15Response, setFullP15Response] = useState<any>(null);
   const [storedMenuItems, setStoredMenuItems] = useState<any[]>([]);
   const [menuDetailsPayload, setMenuDetailsPayload] = useState<any>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsReady, setDetailsReady] = useState(false);
+  const [regenerateQuantity, setRegenerateQuantity] = useState('1');
+  const [regeneratingMenu, setRegeneratingMenu] = useState(false);
   const [savingMenuVersion, setSavingMenuVersion] = useState(false);
   const [renderingMenu, setRenderingMenu] = useState(false);
-  const [renderedMenuUrl, setRenderedMenuUrl] = useState<string | null>(null);
+  const [renderedMenuUrls, setRenderedMenuUrls] = useState<string[]>([]);
+  const [selectedRenderPreviewUrl, setSelectedRenderPreviewUrl] = useState<string | null>(null);
   const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
   const [isRenderSuccessOpen, setIsRenderSuccessOpen] = useState(false);
   const [renderSuccessMessage, setRenderSuccessMessage] = useState('');
@@ -370,6 +414,8 @@ export default function MenuDetailScreen() {
       { scale: zoomScale.value },
     ],
   }));
+  const isCreateMenuFlow = flow === 'create-menu';
+  const hasRenderedResult = renderedMenuUrls.length > 0;
 
   useEffect(() => {
     if (!isImageZoomOpen) {
@@ -384,6 +430,7 @@ export default function MenuDetailScreen() {
       setMenuDraft(null);
       setMenuPayload(null);
       setMenuConfig(null);
+      setFullP15Response(null);
       setStoredMenuItems([]);
       setMenuDetailsPayload(null);
       setDetailsReady(false);
@@ -392,7 +439,9 @@ export default function MenuDetailScreen() {
 
     const payloadMenus = toArray(
       parsedPayload?.menus ??
+        parsedPayload?.menu ??
         parsedPayload?.data ??
+        parsedPayload?.result ??
         parsedPayload?.items ??
         []
     );
@@ -411,6 +460,7 @@ export default function MenuDetailScreen() {
       });
       setMenuConfig(payloadConfig);
     }
+    setFullP15Response(null);
 
     const selectedFromPayload = payloadMenus[resolvedMenuIndex];
     const baseMenu = selectedFromPayload ?? parsedItem;
@@ -485,10 +535,71 @@ export default function MenuDetailScreen() {
     });
   };
 
-  const handleGenerateDetails = async () => {
-    if (detailsLoading) return;
-    if (!parsedItem && !parsedPayload) {
-      Alert.alert('Missing data', 'No menu data available to generate details.');
+  const applyMenuItemsToPayload = (source: any, nextItems: any[]) => {
+    if (!source || typeof source !== 'object') return source;
+
+    const next = { ...source };
+
+    if (next.menu && typeof next.menu === 'object') {
+      next.menu = { ...next.menu, menuItems: nextItems };
+    }
+
+    if (Array.isArray(next.menus)) {
+      next.menus = next.menus.map((menu: any, index: number) =>
+        index === resolvedMenuIndex ? { ...menu, menuItems: nextItems } : menu
+      );
+    }
+
+    if (next.p3Input?.menu && typeof next.p3Input.menu === 'object') {
+      next.p3Input = {
+        ...next.p3Input,
+        menu: {
+          ...next.p3Input.menu,
+          menuItems: nextItems,
+        },
+      };
+    }
+
+    return next;
+  };
+
+  const handleDeleteMenuItem = (targetItem: any) => {
+    if (!targetItem) return;
+
+    const targetMenuItemId = Number(
+      targetItem?.menuItemId ?? targetItem?.sourceMenuItem?.menuItemId ?? targetItem?.id ?? 0
+    );
+
+    const nextItems = storedMenuItems.filter((item) => {
+      const currentId = Number(item?.menuItemId ?? item?.id ?? 0);
+      if (Number.isFinite(targetMenuItemId) && targetMenuItemId > 0) {
+        return currentId !== targetMenuItemId;
+      }
+
+      // Fallback for newly generated items that do not have menuItemId yet.
+      return item !== targetItem?.sourceMenuItem;
+    });
+
+    if (nextItems.length === storedMenuItems.length) return;
+
+    setStoredMenuItems(nextItems);
+    setCurrentMenu((prev) => (prev ? { ...prev, menuItems: nextItems } : prev));
+    setMenuDraft((prev) => (prev ? { ...prev, menuItems: nextItems } : prev));
+    setMenuPayload((prev) => applyMenuItemsToPayload(prev, nextItems));
+    setFullP15Response((prev) => applyMenuItemsToPayload(prev, nextItems));
+    setMenuDetailsPayload((prev) => applyMenuItemsToPayload(prev, nextItems));
+
+    // Menu changed manually, so any previous render output becomes stale.
+    setRenderedMenuUrls([]);
+    setSelectedRenderPreviewUrl(null);
+  };
+
+  const handleRegenerateMenu = async () => {
+    if (!isCreateMenuFlow || regeneratingMenu) return;
+
+    const quantity = Number.parseInt(regenerateQuantity, 10);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      Alert.alert('Invalid quantity', 'Please enter a valid quantity greater than 0.');
       return;
     }
 
@@ -499,13 +610,155 @@ export default function MenuDetailScreen() {
       parsedItem ??
       {};
 
+    const resolvedConfig =
+      menuConfig ??
+      menuPayload?.config ??
+      parsedPayload?.config ??
+      parsedPayload?.request?.config ??
+      parsedPayload?.requestConfig ??
+      menuFromState?.config ??
+      null;
+
+    const menuForRegenerate = {
+      ...(menuFromState ?? {}),
+      menuItems: storedMenuItems,
+    };
+
+    const payload = {
+      // P1.5 contract: keep exact shape and use newItemCount from user quantity.
+      config: resolvedConfig,
+      menu: menuForRegenerate,
+      newItemCount: quantity,
+    };
+
+    try {
+      setRegeneratingMenu(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRegenerate(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+      if (!response.ok) {
+        throw new Error(responseText || `Request failed (${response.status})`);
+      }
+
+      let responsePayload: unknown = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      const responseMenus = (() => {
+        if (!responsePayload || typeof responsePayload !== 'object') return [] as any[];
+        const payloadObject = responsePayload as any;
+        if (Array.isArray(payloadObject)) return payloadObject;
+        if (payloadObject?.menus) return toArray(payloadObject.menus);
+        if (payloadObject?.data) return toArray(payloadObject.data);
+        if (payloadObject?.items) return toArray(payloadObject.items);
+        if (payloadObject?.menu) return toArray(payloadObject.menu);
+        if (payloadObject?.result) return toArray(payloadObject.result);
+        return [payloadObject];
+      })();
+
+      const responseConfig =
+        (responsePayload as any)?.config ??
+        (responsePayload as any)?.request?.config ??
+        (responsePayload as any)?.requestConfig ??
+        (responsePayload as any)?.menuConfig ??
+        resolvedConfig ??
+        null;
+
+      const responseMenu = responseMenus[resolvedMenuIndex] ?? responseMenus[0] ?? null;
+      const responseMenuItems = toArray(
+        responseMenu?.menuItems ??
+          responseMenu?.menu?.menuItems ??
+          []
+      );
+
+      if (responseMenu) {
+        setCurrentMenu((prev) => ({
+          ...(prev ?? {}),
+          ...responseMenu,
+        }));
+        setMenuDraft((prev) => ({
+          ...(prev ?? {}),
+          ...responseMenu,
+        }));
+      }
+
+      if (responseMenus.length > 0 || responseConfig) {
+        const fullResponseObject =
+          typeof responsePayload === 'object' && responsePayload
+            ? (responsePayload as any)
+            : {
+                menus: responseMenus,
+                config: responseConfig,
+              };
+
+        setFullP15Response(fullResponseObject);
+        setMenuPayload({
+          ...fullResponseObject,
+          menus: responseMenus.length > 0 ? responseMenus : toArray(fullResponseObject?.menus),
+          config: responseConfig,
+        });
+        setMenuConfig(responseConfig);
+      }
+
+      if (responseMenuItems.length > 0) {
+        setStoredMenuItems(responseMenuItems);
+      }
+
+      // Regeneration changes base menu items, so previous detail/render states are no longer valid.
+      setMenuDetailsPayload(null);
+      setDetailsReady(false);
+      setRenderedMenuUrls([]);
+      setSelectedRenderPreviewUrl(null);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Regenerated successfully',
+        text2: 'New menu items have been updated on this page.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to regenerate menu options.';
+      Alert.alert('Generate again failed', message);
+    } finally {
+      setRegeneratingMenu(false);
+    }
+  };
+
+  const handleGenerateDetails = async () => {
+    if (detailsLoading) return;
+    if (!parsedItem && !parsedPayload) {
+      Alert.alert('Missing data', 'No menu data available to generate details.');
+      return;
+    }
+
+    const p15Source = fullP15Response ?? menuPayload ?? parsedPayload ?? null;
+
+    const menuFromState =
+      p15Source?.menu ??
+      menuDraft ??
+      currentMenu ??
+      p15Source?.menus?.[resolvedMenuIndex] ??
+      parsedItem ??
+      {};
+
     const resolvedConfig = {
-      ...(menuConfig ?? menuPayload?.config ?? menuFromState?.config ?? {}),
+      ...(menuConfig ?? p15Source?.config ?? p15Source?.request?.config ?? menuFromState?.config ?? {}),
       menuSizeValue: storedMenuItems.length,
     };
 
     const menuForDetails = {
-      ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
+      ...(p15Source?.menu ?? p15Source?.menus?.[resolvedMenuIndex] ?? {}),
       ...(menuFromState ?? {}),
       menuItems: storedMenuItems,
       menuSizeValue: storedMenuItems.length,
@@ -513,8 +766,8 @@ export default function MenuDetailScreen() {
     };
 
     const payload = {
+      // P2 contract: body must contain only menu and config.
       menu: menuForDetails,
-      menus: menuForDetails,
       config: resolvedConfig,
     };
 
@@ -626,6 +879,8 @@ export default function MenuDetailScreen() {
         text1: 'Recipe details generated',
         text2: 'You can now save and render the menu.',
       });
+      setRenderedMenuUrls([]);
+      setSelectedRenderPreviewUrl(null);
       setDetailsReady(true);
     } catch (error) {
       const message =
@@ -640,7 +895,7 @@ export default function MenuDetailScreen() {
     const menuForSave = menuForDisplay ?? {};
     const menuId = Number(menuForSave?.menuId ?? menuForSave?.id ?? 0);
     const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menuForSave);
-    const resolvedImageUrl = getMenuImageForSave(menuForSave, renderedMenuUrl);
+    const resolvedImageUrl = getMenuImageForSave(menuForSave, renderedMenuUrls);
 
     if (!Number.isFinite(menuId) || menuId <= 0) {
       Toast.show({
@@ -720,55 +975,28 @@ export default function MenuDetailScreen() {
   };
 
   const buildMenuRenderPayload = () => {
-    const sanitizeMenuForP3 = (menu: any) => {
-      if (!menu || typeof menu !== 'object') return menu;
-      const { config: _config, menuSizeValue: _menuSizeValue, ...rest } = menu;
-      return rest;
-    };
-
-    if (menuDetailsPayload) {
-      const source = menuDetailsPayload as any;
-      const normalizedMenu =
-        source?.menu ??
-        source?.p3Input?.menu ??
-        (Array.isArray(source?.menus) ? source.menus[0] : source?.menus) ??
-        null;
-      const normalizedConfig =
-        source?.config ??
-        source?.p3Input?.config ??
-        normalizedMenu?.config ??
-        null;
-
-      if (normalizedMenu) {
-        return {
-          menu: sanitizeMenuForP3(normalizedMenu),
-          config: normalizedConfig,
-        };
-      }
-    }
-
+    const p2Source = menuDetailsPayload ?? fullP15Response ?? menuPayload ?? parsedPayload ?? null;
     const menuFromState =
+      p2Source?.menu ??
       menuDraft ??
       currentMenu ??
-      menuPayload?.menus?.[resolvedMenuIndex] ??
+      p2Source?.menus?.[resolvedMenuIndex] ??
       parsedItem ??
       {};
 
     const resolvedConfig = {
-      ...(menuConfig ?? menuPayload?.config ?? menuFromState?.config ?? {}),
+      ...(menuConfig ?? p2Source?.config ?? p2Source?.request?.config ?? menuFromState?.config ?? {}),
       menuSizeValue: storedMenuItems.length,
     };
 
     const menuForRender = {
-      ...(menuPayload?.menus?.[resolvedMenuIndex] ?? {}),
+      ...(p2Source?.menu ?? p2Source?.menus?.[resolvedMenuIndex] ?? {}),
       ...(menuFromState ?? {}),
       menuItems: storedMenuItems,
-      menuSizeValue: storedMenuItems.length,
-      config: resolvedConfig,
     };
 
     return {
-      menu: sanitizeMenuForP3(menuForRender),
+      menu: menuForRender,
       config: resolvedConfig,
     };
   };
@@ -781,25 +1009,9 @@ export default function MenuDetailScreen() {
     }
 
     const payload = buildMenuRenderPayload();
-    const rawP2Payload = (() => {
-      const source = menuDetailsPayload as any;
-      if (source?.menu && source?.config) {
-        return {
-          menu: source.menu,
-          config: source.config,
-        };
-      }
-      if (source?.p3Input?.menu && source?.p3Input?.config) {
-        return {
-          menu: source.p3Input.menu,
-          config: source.p3Input.config,
-        };
-      }
-      return null;
-    })();
 
-    const callRenderApi = async (requestPayload: any, label: string) => {
-      console.log(`[Menu Render] Request payload (${label}):`, JSON.stringify(requestPayload, null, 2));
+    const callRenderApi = async (requestPayload: any) => {
+      console.log('[Menu Render] Request payload:', JSON.stringify(requestPayload, null, 2));
 
       const response = await authorizedFetch(API_ENDPOINTS.ai.createMenuRender(), {
         method: 'POST',
@@ -830,44 +1042,17 @@ export default function MenuDetailScreen() {
         throw new Error(responsePayload?.error || 'Menu render failed.');
       }
 
-      const finalUrl =
-        responsePayload?.ImageUrl ??
-        responsePayload?.imageUrl ??
-        (Array.isArray(responsePayload?.imageUrls) ? responsePayload.imageUrls[0] : null) ??
-        null;
-
-      return { finalUrl, responsePayload };
+      const urls = extractRenderedUrls(responsePayload);
+      return { urls, responsePayload };
     };
 
     try {
       setRenderingMenu(true);
-      let finalUrl: string | null = null;
+      const result = await callRenderApi(payload);
+      setRenderedMenuUrls(result.urls);
+      setSelectedRenderPreviewUrl(result.urls[0] ?? null);
 
-      try {
-        const result = await callRenderApi(payload, 'normalized');
-        finalUrl = result.finalUrl;
-      } catch (firstError) {
-        if (!rawP2Payload) {
-          throw firstError;
-        }
-
-        const shouldRetryWithRaw =
-          JSON.stringify(rawP2Payload) !== JSON.stringify(payload);
-
-        if (!shouldRetryWithRaw) {
-          throw firstError;
-        }
-
-        console.log('[Menu Render] Normalized payload failed, retrying with raw P2 payload');
-        const retryResult = await callRenderApi(rawP2Payload, 'raw-p2');
-        finalUrl = retryResult.finalUrl;
-      }
-
-      if (finalUrl) {
-        setRenderedMenuUrl(finalUrl);
-      }
-
-      setRenderSuccessMessage(finalUrl ? 'Menu image is ready.' : 'Menu render completed.');
+      setRenderSuccessMessage(result.urls.length > 0 ? 'Menu image is ready.' : 'Menu render completed.');
       setIsRenderSuccessOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to render menu.';
@@ -878,13 +1063,14 @@ export default function MenuDetailScreen() {
   };
 
   const handleDownloadRenderedMenu = async () => {
-    if (!renderedMenuUrl) {
+    const targetUrl = selectedRenderPreviewUrl ?? renderedMenuUrls[0] ?? null;
+    if (!targetUrl) {
       Toast.show({ type: 'info', text1: 'No render available yet' });
       return;
     }
 
     if (Platform.OS === 'web') {
-      Linking.openURL(renderedMenuUrl);
+      Linking.openURL(targetUrl);
       return;
     }
 
@@ -894,7 +1080,7 @@ export default function MenuDetailScreen() {
         text1: 'Download unavailable',
         text2: 'Please rebuild the app to enable photo saving.',
       });
-      Linking.openURL(renderedMenuUrl);
+      Linking.openURL(targetUrl);
       return;
     }
 
@@ -907,14 +1093,14 @@ export default function MenuDetailScreen() {
       }
 
       const safeExtension = (() => {
-        const cleanUrl = renderedMenuUrl.split('?')[0];
+        const cleanUrl = targetUrl.split('?')[0];
         const parts = cleanUrl.split('.');
         const last = parts[parts.length - 1];
         return last && last.length <= 4 ? last : 'jpg';
       })();
 
       const targetUri = `${FileSystem.cacheDirectory}menu-render-${Date.now()}.${safeExtension}`;
-      const downloadResult = await FileSystem.downloadAsync(renderedMenuUrl, targetUri);
+      const downloadResult = await FileSystem.downloadAsync(targetUrl, targetUri);
       const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
       await MediaLibrary.createAlbumAsync('SmartCoffee', asset, false);
 
@@ -988,7 +1174,16 @@ export default function MenuDetailScreen() {
       >
         <View style={styles.headerOverlay} />
         <View style={styles.headerContent}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => {
+              if (isCreateMenuFlow && hasRenderedResult) {
+                router.replace('/(tabs)/menu');
+                return;
+              }
+              router.back();
+            }}
+          >
             <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
@@ -999,16 +1194,27 @@ export default function MenuDetailScreen() {
       </ImageBackground>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {renderedMenuUrl ? (
+        {renderedMenuUrls.length > 0 ? (
           <View style={styles.renderedSection}>
             <Text style={styles.renderedTitle}>Rendered Menu</Text>
-            <TouchableOpacity activeOpacity={0.8} onPress={() => setIsImageZoomOpen(true)}>
-              <Image
-                source={{ uri: renderedMenuUrl }}
-                style={styles.renderedImage}
-                resizeMode="contain"
-              />
-            </TouchableOpacity>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.renderedImageList}>
+              {renderedMenuUrls.map((url, index) => (
+                <TouchableOpacity
+                  key={`${url}-${index}`}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    setSelectedRenderPreviewUrl(url);
+                    setIsImageZoomOpen(true);
+                  }}
+                >
+                  <Image
+                    source={{ uri: url }}
+                    style={styles.renderedImage}
+                    resizeMode="contain"
+                  />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         ) : null}
 
@@ -1021,33 +1227,55 @@ export default function MenuDetailScreen() {
               <View style={styles.itemList}>
                 {group.items.map((item, itemIndex) => {
                   const isModified = modifiedItemIdSet.has(Number(item.menuItemId));
-                  return (
-                  <TouchableOpacity
-                    key={`${group.beverageCategoryId}-item-${itemIndex}`}
-                    style={[styles.itemCard, isModified && styles.itemCardModified]}
-                    onPress={() => handleItemPress(item)}
-                    activeOpacity={0.75}
-                  >
-                    {isModified ? (
-                      <View style={styles.modifiedBadge}>
-                        <Ionicons name="sparkles" size={12} color="#FFFFFF" />
-                        <Text style={styles.modifiedBadgeText}>Updated</Text>
+                  const card = (
+                    <TouchableOpacity
+                      key={`${group.beverageCategoryId}-item-${itemIndex}`}
+                      style={[styles.itemCard, isModified && styles.itemCardModified]}
+                      onPress={() => handleItemPress(item)}
+                      activeOpacity={0.75}
+                    >
+                      {isModified ? (
+                        <View style={styles.modifiedBadge}>
+                          <Ionicons name="sparkles" size={12} color="#FFFFFF" />
+                          <Text style={styles.modifiedBadgeText}>Updated</Text>
+                        </View>
+                      ) : null}
+                      <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
+                      <View style={styles.itemContent}>
+                        <Text style={styles.itemName}>{item.recipeName}</Text>
+                        {item.description ? (
+                          <Text style={styles.itemDescription} numberOfLines={2}>
+                            {item.description}
+                          </Text>
+                        ) : null}
+                        {item.priceInfo ? (
+                          <Text style={styles.itemPrice}>{item.priceInfo}</Text>
+                        ) : null}
                       </View>
-                    ) : null}
-                    <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
-                    <View style={styles.itemContent}>
-                      <Text style={styles.itemName}>{item.recipeName}</Text>
-                      {item.description ? (
-                        <Text style={styles.itemDescription} numberOfLines={2}>
-                          {item.description}
-                        </Text>
-                      ) : null}
-                      {item.priceInfo ? (
-                        <Text style={styles.itemPrice}>{item.priceInfo}</Text>
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                );
+                    </TouchableOpacity>
+                  );
+
+                  if (!isCreateMenuFlow || hasRenderedResult) {
+                    return card;
+                  }
+
+                  return (
+                    <Swipeable
+                      key={`${group.beverageCategoryId}-item-${itemIndex}`}
+                      overshootRight={false}
+                      renderRightActions={() => (
+                        <TouchableOpacity
+                          style={styles.deleteSwipeAction}
+                          onPress={() => handleDeleteMenuItem(item)}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
+                          <Text style={styles.deleteSwipeText}>Delete</Text>
+                        </TouchableOpacity>
+                      )}
+                    >
+                      {card}
+                    </Swipeable>
+                  );
                 })}
               </View>
             </View>
@@ -1055,26 +1283,97 @@ export default function MenuDetailScreen() {
         )}
       </ScrollView>
 
+      {!hasRenderedResult ? (
       <View style={styles.bottomBar}>
-        <View style={styles.bottomActionsRow}>
-          <TouchableOpacity
-            style={[styles.detailButton, savingMenuVersion && styles.buttonDisabled]}
-            onPress={handleSaveMenuVersion}
-            disabled={savingMenuVersion}
-          >
-            <Text style={styles.detailButtonText}>
-              {savingMenuVersion ? 'Saving...' : 'Save new version'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.goBackButton, renderedMenuUrl && styles.goBackButtonFull]}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={16} color="#3C2A21" />
-            <Text style={styles.goBackButtonText}>Cancel</Text>
-          </TouchableOpacity>
-        </View>
+        {isCreateMenuFlow ? (
+          <>
+            <View style={styles.regenerateRow}>
+              <TextInput
+                style={styles.quantityInput}
+                value={regenerateQuantity}
+                onChangeText={(text) => setRegenerateQuantity(text.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                placeholder="Qty"
+                placeholderTextColor="#9E8C7E"
+                maxLength={2}
+              />
+              <TouchableOpacity
+                style={[styles.generateAgainButton, regeneratingMenu && styles.buttonDisabled]}
+                onPress={handleRegenerateMenu}
+                disabled={regeneratingMenu}
+              >
+                <Text style={styles.generateAgainButtonText}>
+                  {regeneratingMenu ? 'Generating...' : 'Generate again'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {!detailsReady ? (
+              <View style={styles.bottomActionsRow}>
+                <TouchableOpacity
+                  style={[styles.detailButton, detailsLoading && styles.buttonDisabled]}
+                  onPress={handleGenerateDetails}
+                  disabled={detailsLoading}
+                >
+                  <Text style={styles.detailButtonText}>
+                    {detailsLoading ? 'Generating detail...' : 'Generate detail'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.goBackButton} onPress={() => router.back()}>
+                  <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+                  <Text style={styles.goBackButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={styles.bottomActionsRow}>
+                <TouchableOpacity
+                  style={[styles.detailButton, renderingMenu && styles.buttonDisabled]}
+                  onPress={handleRenderMenu}
+                  disabled={renderingMenu}
+                >
+                  <Text style={styles.detailButtonText}>
+                    {renderingMenu ? 'Saving & rendering...' : 'Save & render'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.goBackButton} onPress={() => router.back()}>
+                  <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+                  <Text style={styles.goBackButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.bottomActionsRow}>
+            <TouchableOpacity
+              style={[styles.detailButton, savingMenuVersion && styles.buttonDisabled]}
+              onPress={handleSaveMenuVersion}
+              disabled={savingMenuVersion}
+            >
+              <Text style={styles.detailButtonText}>
+                {savingMenuVersion ? 'Saving...' : 'Save new version'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.goBackButton, hasRenderedResult && styles.goBackButtonFull]}
+              onPress={() => router.back()}
+            >
+              <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+              <Text style={styles.goBackButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
+      ) : (
+      <View style={styles.bottomBar}>
+        <TouchableOpacity
+          style={styles.goBackAfterRenderButton}
+          onPress={() => router.replace('/(tabs)/menu')}
+        >
+          <Ionicons name="arrow-back" size={16} color="#3C2A21" />
+          <Text style={styles.goBackButtonText}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+      )}
 
       <Modal
         visible={isImageZoomOpen}
@@ -1095,7 +1394,7 @@ export default function MenuDetailScreen() {
             >
               <Text style={styles.zoomCloseText}>Close</Text>
             </TouchableOpacity>
-            {renderedMenuUrl ? (
+            {selectedRenderPreviewUrl ? (
               <GestureDetector gesture={zoomGesture}>
                 <Animated.View
                   collapsable={false}
@@ -1106,7 +1405,7 @@ export default function MenuDetailScreen() {
                   ]}
                 >
                   <Image
-                    source={{ uri: renderedMenuUrl }}
+                    source={{ uri: selectedRenderPreviewUrl }}
                     style={styles.zoomImage}
                     resizeMode="contain"
                   />
@@ -1341,6 +1640,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  regenerateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  quantityInput: {
+    width: 72,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5D8CC',
+    backgroundColor: '#F9F4EF',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    color: '#3C2A21',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  generateAgainButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: '#6E4B33',
+    paddingVertical: 11,
+  },
+  generateAgainButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   goBackButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1375,11 +1706,45 @@ const styles = StyleSheet.create({
     color: '#3C2A21',
     marginBottom: 10,
   },
+  renderedImageList: {
+    gap: 10,
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   renderedImage: {
-    width: '100%',
+    width: 260,
     height: 320,
     borderRadius: 12,
     backgroundColor: '#E8DED3',
+    alignSelf: 'center',
+  },
+  goBackAfterRenderButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F1E7DC',
+    borderWidth: 1,
+    borderColor: '#E5D8CC',
+  },
+  deleteSwipeAction: {
+    height: '100%',
+    minWidth: 88,
+    borderRadius: 18,
+    backgroundColor: '#B63A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginLeft: 10,
+    paddingHorizontal: 12,
+  },
+  deleteSwipeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   zoomOverlay: {
     flex: 1,

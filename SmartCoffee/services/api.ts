@@ -100,6 +100,7 @@ export const API_ENDPOINTS = {
     getActiveByShop: (shopId: number) => `${AUTH_BASE_URL}/Menu/active-by-shop/${shopId}`,
     getById: (id: number) => `${AUTH_BASE_URL}/Menu/${id}`,
     byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
+    activate: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
     saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
   },
   menuHeader: {
@@ -126,7 +127,18 @@ export const API_ENDPOINTS = {
   },
   order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
-    byOwner: (ownerId: number) => `${AUTH_BASE_URL}/Order/by-owner/${ownerId}`,
+    byOwner: (
+      ownerId: number,
+      params?: { page?: number; pageSize?: number; orderStatus?: string }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      if (params?.orderStatus) query.set('orderStatus', params.orderStatus);
+
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Order/by-owner/${ownerId}${qs ? `?${qs}` : ''}`;
+    },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
   },
   supplier: {
@@ -153,6 +165,14 @@ export const API_ENDPOINTS = {
   },
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
+  },
+  subscription: {
+    byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,
+    subscribe: (packageId: number, isMobile = true) =>
+      `${AUTH_BASE_URL}/Subscription/subscribe?packageId=${packageId}&isMobile=${isMobile}`,
+  },
+  subscriptionPackage: {
+    list: () => `${AUTH_BASE_URL}/SubscriptionPackage`,
   },
   feedback: {
     byMenuItem: (menuId: number, menuItemId: number) =>
