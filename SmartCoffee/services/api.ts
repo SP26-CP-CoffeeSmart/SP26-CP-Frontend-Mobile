@@ -150,6 +150,14 @@ export const API_ENDPOINTS = {
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
   },
+  subscription: {
+    byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,
+    subscribe: (packageId: number, isMobile = true) =>
+      `${AUTH_BASE_URL}/Subscription/subscribe?packageId=${packageId}&isMobile=${isMobile}`,
+  },
+  subscriptionPackage: {
+    list: () => `${AUTH_BASE_URL}/SubscriptionPackage`,
+  },
   feedback: {
     byMenuItem: (menuId: number, menuItemId: number) =>
       `${AUTH_BASE_URL}/Feedback/MenuItem/${menuId}/${menuItemId}`,
