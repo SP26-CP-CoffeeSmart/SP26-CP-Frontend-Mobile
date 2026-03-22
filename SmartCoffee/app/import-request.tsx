@@ -39,15 +39,17 @@ type Ingredient = {
   currentQuantity: number;
 };
 
-type IngredientResponse = {
+type ShopInventoryItem = {
+  inventoryDetailId: number;
   ingredientId?: number;
-  IngredientId?: number;
-  name?: string;
-  Name?: string;
-  image?: string | null;
-  Image?: string | null;
-  category?: string;
-  Category?: string;
+  quantity?: number;
+  measurement?: string;
+  ingredient?: {
+    ingredientId: number;
+    name: string;
+    category: string;
+    image: string | null;
+  } | null;
 };
 
 type ImportDetail = {
@@ -239,42 +241,53 @@ export default function ImportRequestScreen() {
   }, [searchQuery, selectedCategory, ingredients]);
 
   const loadIngredients = useCallback(async () => {
+    if (!coffeeShopId) {
+      setIngredients([]);
+      setIngredientError('Missing shop information. Please sign in again.');
+      return;
+    }
+
     try {
       setIngredientLoading(true);
       setIngredientError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.ingredient.getAll(), {
-        headers: {
-          Accept: '*/*',
-        },
-      });
+      const response = await authorizedFetch(
+        API_ENDPOINTS.shopInventory.getByShop(coffeeShopId),
+        {
+          headers: {
+            Accept: '*/*',
+          },
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
 
-      const data = (await response.json()) as IngredientResponse[];
-      const mapped = (Array.isArray(data) ? data : []).map((item, index) => {
-        const ingredientId = item.ingredientId ?? item.IngredientId ?? index + 1;
-        const name = item.name ?? item.Name ?? 'Ingredient';
-        const category = item.category ?? item.Category ?? 'Other';
-        const image = item.image ?? item.Image ?? null;
+      const data = (await response.json()) as ShopInventoryItem[];
+      const mapped: Ingredient[] = (Array.isArray(data) ? data : []).map((item) => {
+        const rawId = item.ingredientId ?? item.ingredient?.ingredientId ?? item.inventoryDetailId;
+        const ingredientId = Number.isFinite(rawId) ? Number(rawId) : item.inventoryDetailId;
         return {
-          ingredientId: Number(ingredientId),
-          name: String(name),
-          category: String(category),
-          image: image ? String(image) : null,
-          measurement: 'unit',
-          currentQuantity: 0,
+          ingredientId,
+          name: item.ingredient?.name || `Ingredient #${item.inventoryDetailId}`,
+          category: item.ingredient?.category || 'Uncategorized',
+          image: item.ingredient?.image ?? null,
+          measurement: item.measurement || 'unit',
+          currentQuantity: Number(item.quantity ?? 0),
         };
       });
+
       setIngredients(mapped);
+      if (selectedCategory !== 'All' && !mapped.some((item) => item.category === selectedCategory)) {
+        setSelectedCategory('All');
+      }
     } catch (error) {
       setIngredients([]);
-      setIngredientError('Unable to load ingredients.');
+      setIngredientError('Unable to load inventory for this shop.');
     } finally {
       setIngredientLoading(false);
     }
-  }, []);
+  }, [coffeeShopId, selectedCategory]);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
     setManualDetails((prev) => {
