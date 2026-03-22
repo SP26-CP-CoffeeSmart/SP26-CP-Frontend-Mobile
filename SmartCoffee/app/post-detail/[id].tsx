@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -83,6 +84,9 @@ export default function PostDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [disabling, setDisabling] = useState(false);
   const [showDisableModal, setShowDisableModal] = useState(false);
+  const [enabling, setEnabling] = useState(false);
+  const [showEnableModal, setShowEnableModal] = useState(false);
+  const lastReportedViewKey = useRef<string | null>(null);
 
   const postId = useMemo(() => Number(id ?? 0), [id]);
 
@@ -213,10 +217,58 @@ export default function PostDetailScreen() {
     }
   }, [post]);
 
+  const handleEnableConfirm = useCallback(async () => {
+    if (!post) return;
+    try {
+      setEnabling(true);
+      const response = await authorizedFetch(API_ENDPOINTS.post.update(post.postId), {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          title: post.title,
+          content: post.content,
+          postCategoryId: post.postCategoryId,
+          status: 'Active',
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const updated = (await response.json()) as PostDetail;
+      setPost(updated);
+      Toast.show({ type: 'success', text1: 'Post enabled' });
+      setShowEnableModal(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Enable failed.';
+      Toast.show({ type: 'error', text1: 'Enable failed', text2: message });
+    } finally {
+      setEnabling(false);
+    }
+  }, [post]);
+
   useEffect(() => {
     loadPost();
     loadCategories();
   }, [loadPost, loadCategories]);
+
+  useEffect(() => {
+    if (!post?.postId) return;
+    const viewKey = `${post.postId}:${post.viewCount ?? 0}`;
+    if (lastReportedViewKey.current === viewKey) return;
+    lastReportedViewKey.current = viewKey;
+
+    AsyncStorage.setItem(
+      'postViewUpdate',
+      JSON.stringify({ postId: post.postId, viewCount: post.viewCount ?? 0 })
+    ).catch(() => {
+      // Ignore persistence errors.
+    });
+  }, [post?.postId, post?.viewCount]);
 
   const contentLines = useMemo(() => splitLines(post?.content), [post?.content]);
   const dateLabel = formatDate(post?.publishedAt ?? post?.createdAt);
@@ -386,15 +438,27 @@ export default function PostDetailScreen() {
                 >
                   <Text style={styles.secondaryText}>Edit</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.dangerButton]}
-                  onPress={() => setShowDisableModal(true)}
-                  disabled={disabling}
-                >
-                  <Text style={styles.dangerText}>
-                    {disabling ? 'Disabling...' : 'Disable'}
-                  </Text>
-                </TouchableOpacity>
+                {post?.status?.toLowerCase() === 'hidden' ? (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.primaryButton]}
+                    onPress={() => setShowEnableModal(true)}
+                    disabled={enabling}
+                  >
+                    <Text style={styles.primaryText}>
+                      {enabling ? 'Enabling...' : 'Enable'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.dangerButton]}
+                    onPress={() => setShowDisableModal(true)}
+                    disabled={disabling}
+                  >
+                    <Text style={styles.dangerText}>
+                      {disabling ? 'Disabling...' : 'Disable'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
           </View>
@@ -423,6 +487,35 @@ export default function PostDetailScreen() {
               >
                 <Text style={styles.dangerText}>
                   {disabling ? 'Disabling...' : 'Disable'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal transparent visible={showEnableModal} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Enable this post?</Text>
+            <Text style={styles.modalText}>
+              The post will be visible in the community feed.
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.secondaryButton]}
+                onPress={() => setShowEnableModal(false)}
+                disabled={enabling}
+              >
+                <Text style={styles.secondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.primaryButton]}
+                onPress={handleEnableConfirm}
+                disabled={enabling}
+              >
+                <Text style={styles.primaryText}>
+                  {enabling ? 'Enabling...' : 'Enable'}
                 </Text>
               </TouchableOpacity>
             </View>

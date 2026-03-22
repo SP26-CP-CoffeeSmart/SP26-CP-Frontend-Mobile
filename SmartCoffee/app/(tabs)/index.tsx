@@ -12,9 +12,12 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 type PostItem = {
   postId: number;
@@ -66,16 +69,24 @@ const buildSnippet = (content?: string | null) => {
   return `${trimmed.slice(0, 140).trim()}...`;
 };
 
-const buildPostUrl = (pageNo: number) => {
+const buildPostUrl = (pageNo: number, status?: string | null) => {
   const params = new URLSearchParams();
   params.set('pageNo', String(pageNo));
   params.set('pageSize', String(PAGE_SIZE));
-  params.set('status', 'Active');
+  if (status) {
+    params.set('status', status);
+  }
   return `${API_ENDPOINTS.post.list()}?${params.toString()}`;
+};
+
+const isActiveStatus = (status?: string | null) => {
+  if (!status) return true;
+  return status.toLowerCase() === 'active';
 };
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { role, coffeeShopId } = useAuth();
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [pageNo, setPageNo] = useState(1);
@@ -85,10 +96,12 @@ export default function HomeScreen() {
   const [shopNames, setShopNames] = useState<Record<number, string>>({});
 
   const hasMore = posts.length < totalCount;
+  const canSeeDisabled = role && role !== 'Staff';
 
   const loadPosts = useCallback(
     async (page: number, mode: 'replace' | 'append') => {
-      const response = await authorizedFetch(buildPostUrl(page), {
+      const statusFilter = canSeeDisabled ? null : 'Active';
+      const response = await authorizedFetch(buildPostUrl(page, statusFilter), {
         headers: { Accept: 'application/json' },
       });
 
@@ -97,14 +110,20 @@ export default function HomeScreen() {
       }
 
       const payload = (await response.json()) as PostApiResponse;
-      const items = Array.isArray(payload?.items) ? payload.items : [];
+      const rawItems = Array.isArray(payload?.items) ? payload.items : [];
+      const approvedItems = rawItems.filter((item) => item.isApproved === true);
+      const items = canSeeDisabled && coffeeShopId
+        ? approvedItems.filter((item) =>
+            isActiveStatus(item.status) || item.coffeeShopId === coffeeShopId
+          )
+        : approvedItems;
       const count = Number(payload?.totalCount ?? items.length);
 
       setTotalCount(count);
       setPageNo(page);
       setPosts((prev) => (mode === 'replace' ? items : [...prev, ...items]));
     },
-    []
+    [canSeeDisabled, coffeeShopId]
   );
 
   const fetchFirstPage = useCallback(async () => {
@@ -120,7 +139,6 @@ export default function HomeScreen() {
     const response = await authorizedFetch(API_ENDPOINTS.coffeeShop.list(), {
       headers: { Accept: 'application/json' },
     });
-
     if (!response.ok) {
       throw new Error(`Request failed (${response.status})`);
     }
@@ -161,6 +179,38 @@ export default function HomeScreen() {
     loadCoffeeShops();
   }, [fetchFirstPage, loadCoffeeShops]);
 
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const applyViewUpdate = async () => {
+        try {
+          const raw = await AsyncStorage.getItem('postViewUpdate');
+          if (!raw || !isActive) return;
+          const parsed = JSON.parse(raw) as { postId?: number; viewCount?: number };
+          if (parsed?.postId) {
+            setPosts((prev) =>
+              prev.map((item) =>
+                item.postId === parsed.postId
+                  ? { ...item, viewCount: parsed.viewCount ?? item.viewCount }
+                  : item
+              )
+            );
+          }
+          await AsyncStorage.removeItem('postViewUpdate');
+        } catch {
+          // Ignore persistence errors.
+        }
+      };
+
+      applyViewUpdate();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
+
   const header = useMemo(
     () => (
       <View style={styles.headerBlock}>
@@ -182,11 +232,13 @@ export default function HomeScreen() {
     const snippet = buildSnippet(item.content);
     const dateLabel = formatDate(item.publishedAt ?? item.createdAt);
     const shopName = item.coffeeShopId ? shopNames[item.coffeeShopId] : undefined;
+    const isDisabled = !isActiveStatus(item.status);
+    const showDisabled = Boolean(canSeeDisabled && coffeeShopId && isDisabled && item.coffeeShopId === coffeeShopId);
 
     return (
       <TouchableOpacity
         activeOpacity={0.9}
-        style={styles.card}
+        style={[styles.card, showDisabled && styles.cardDisabled]}
         onPress={() => router.push(`/post-detail/${item.postId}`)}
       >
         {item.recipeImageUrl ? (
@@ -203,7 +255,14 @@ export default function HomeScreen() {
             <View style={styles.tagPill}>
               <Text style={styles.tagText}>#{item.postCategoryId ?? 'General'}</Text>
             </View>
-            <Text style={styles.metaText}>{dateLabel}</Text>
+            <View style={styles.tagMetaRow}>
+              {showDisabled ? (
+                <View style={styles.statusPill}>
+                  <Text style={styles.statusText}>Disabled</Text>
+                </View>
+              ) : null}
+              <Text style={styles.metaText}>{dateLabel}</Text>
+            </View>
           </View>
           <Text style={styles.cardTitle} numberOfLines={2}>
             {item.title}
@@ -302,6 +361,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 5,
   },
+  cardDisabled: {
+    opacity: 0.55,
+  },
   cardImage: {
     width: '100%',
     height: 180,
@@ -326,11 +388,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  tagMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   tagPill: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: COLORS.accentSoft,
+  },
+  statusPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#B29C8A',
+    backgroundColor: '#F2E7DD',
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#5E4331',
   },
   tagText: {
     fontSize: 12,
