@@ -18,6 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 type PostDetail = {
   postId: number;
@@ -70,6 +71,7 @@ const splitLines = (text?: string | null) => {
 
 export default function PostDetailScreen() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const { id } = useLocalSearchParams();
   const [post, setPost] = useState<PostDetail | null>(null);
   const [shopName, setShopName] = useState<string | null>(null);
@@ -284,6 +286,9 @@ export default function PostDetailScreen() {
   const categoryLabel = post?.postCategoryId
     ? categoryMap[post.postCategoryId] ?? `#${post.postCategoryId}`
     : 'General';
+  const canManagePost = Boolean(
+    coffeeShopId && post?.coffeeShopId && coffeeShopId === post.coffeeShopId
+  );
 
   if (loading) {
     return (
@@ -412,56 +417,58 @@ export default function PostDetailScreen() {
             </View>
           )}
 
-          <View style={styles.actionRow}>
-            {isEditing ? (
-              <>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.secondaryButton]}
-                  onPress={() => setIsEditing(false)}
-                  disabled={saving}
-                >
-                  <Text style={styles.secondaryText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.primaryButton]}
-                  onPress={handleSave}
-                  disabled={saving}
-                >
-                  <Text style={styles.primaryText}>{saving ? 'Saving...' : 'Save'}</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.secondaryButton]}
-                  onPress={() => setIsEditing(true)}
-                >
-                  <Text style={styles.secondaryText}>Edit</Text>
-                </TouchableOpacity>
-                {post?.status?.toLowerCase() === 'hidden' ? (
+          {canManagePost && (
+            <View style={styles.actionRow}>
+              {isEditing ? (
+                <>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.secondaryButton]}
+                    onPress={() => setIsEditing(false)}
+                    disabled={saving}
+                  >
+                    <Text style={styles.secondaryText}>Cancel</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={[styles.actionButton, styles.primaryButton]}
-                    onPress={() => setShowEnableModal(true)}
-                    disabled={enabling}
+                    onPress={handleSave}
+                    disabled={saving}
                   >
-                    <Text style={styles.primaryText}>
-                      {enabling ? 'Enabling...' : 'Enable'}
-                    </Text>
+                    <Text style={styles.primaryText}>{saving ? 'Saving...' : 'Save'}</Text>
                   </TouchableOpacity>
-                ) : (
+                </>
+              ) : (
+                <>
                   <TouchableOpacity
-                    style={[styles.actionButton, styles.dangerButton]}
-                    onPress={() => setShowDisableModal(true)}
-                    disabled={disabling}
+                    style={[styles.actionButton, styles.secondaryButton]}
+                    onPress={() => setIsEditing(true)}
                   >
-                    <Text style={styles.dangerText}>
-                      {disabling ? 'Disabling...' : 'Disable'}
-                    </Text>
+                    <Text style={styles.secondaryText}>Edit</Text>
                   </TouchableOpacity>
-                )}
-              </>
-            )}
-          </View>
+                  {post?.status?.toLowerCase() === 'hidden' ? (
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.primaryButton]}
+                      onPress={() => setShowEnableModal(true)}
+                      disabled={enabling}
+                    >
+                      <Text style={styles.primaryText}>
+                        {enabling ? 'Enabling...' : 'Enable'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.dangerButton]}
+                      onPress={() => setShowDisableModal(true)}
+                      disabled={disabling}
+                    >
+                      <Text style={styles.dangerText}>
+                        {disabling ? 'Disabling...' : 'Disable'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              )}
+            </View>
+          )}
         </View>
       </ScrollView>
 
