@@ -206,11 +206,23 @@ export default function InventoryScreen() {
     return Math.min((quantity / maxQuantity) * 100, 100);
   };
 
+  const formatMeasurement = (measurement?: string) => {
+    if (!measurement) return 'units';
+    const normalized = measurement.trim().toLowerCase();
+    if (['g', 'gram', 'grams', 'gam'].includes(normalized)) return 'g';
+    if (['kg', 'kilogram', 'kilograms'].includes(normalized)) return 'kg';
+    if (['ml', 'milliliter', 'milliliters'].includes(normalized)) return 'ml';
+    if (['l', 'liter', 'liters', 'litre', 'litres'].includes(normalized)) return 'l';
+    if (['unit', 'units', 'pcs', 'pc', 'piece', 'pieces'].includes(normalized)) return 'units';
+    return measurement;
+  };
+
   const renderItem = ({ item }: { item: ShopInventoryItem }) => {
     const quantity = Number(item.quantity ?? 0);
     const minStockValue = Number(item.minStock ?? defaultMinStock);
     const status = getStockStatus(quantity, minStockValue);
     const percentage = getStockPercentage(quantity);
+    const unitLabel = formatMeasurement(item.measurement);
 
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
@@ -282,10 +294,10 @@ export default function InventoryScreen() {
             </View>
             <View className="flex-row items-baseline justify-between mb-2">
               <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink }}>
-                {quantity} Units
+                {quantity} {unitLabel}
               </Text>
               <Text style={{ fontSize: 12, color: COLORS.muted }}>
-                Min: {minStockValue}
+                Min: {minStockValue} {unitLabel}
               </Text>
             </View>
 

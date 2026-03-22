@@ -34,6 +34,7 @@ interface RecipeVariant {
 }
 
 interface RecipeData {
+    shopRecipeId?: number;
     recipeId: number;
     recipeName: string;
     image: string;
@@ -107,6 +108,19 @@ export default function RecipeDetailScreen() {
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
     const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
     const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
+
+    const handleOpenPublish = () => {
+        if (!recipeData) return;
+        const resolvedRecipeId = Number(recipeData.shopRecipeId ?? recipeData.recipeId);
+        router.push({
+            pathname: '/recipe-detail/publish',
+            params: {
+                recipeId: String(resolvedRecipeId || 0),
+                recipe: JSON.stringify(recipeData),
+                ingredients: JSON.stringify(ingredients),
+            },
+        });
+    };
 
     useEffect(() => {
         const fetchSupplierProductImages = async () => {
@@ -629,6 +643,14 @@ export default function RecipeDetailScreen() {
                                 resizeMode="cover"
                             />
 
+                            <TouchableOpacity
+                                className="absolute top-3 right-3 bg-black/65 rounded-full px-4 py-2 flex-row items-center"
+                                onPress={handleOpenPublish}
+                                activeOpacity={0.85}
+                            >
+                                <Text className="text-white text-xs font-semibold">Publish Recipe</Text>
+                            </TouchableOpacity>
+
                             {!hasRealRecipeImage() && (
                                 <TouchableOpacity
                                     className="absolute right-3 bottom-3 bg-black/70 rounded-full px-4 py-2 flex-row items-center"
@@ -648,7 +670,6 @@ export default function RecipeDetailScreen() {
                             )}
                         </View>
                     </View>
-
                     {/* Title & Description */}
                     <Text className={`text-[44px] font-bold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-[#2E2220]'}`}>{variant.name || ''}</Text>
                     <Text className={`text-base text-center mb-4 leading-6 ${isDark ? 'text-gray-400' : 'text-[#5F5A57]'}`}>

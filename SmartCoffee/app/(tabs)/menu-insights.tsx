@@ -95,6 +95,7 @@ const fallbackMenuImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
 
 const MAX_ZOOM_SCALE = 3;
+const MENU_PAGE_SIZE = 10;
 
 const resolveImageUrl = (raw?: string | null) => {
   if (!raw || raw === 'null' || raw === 'undefined') return null;
@@ -177,6 +178,7 @@ export default function MenuInsightsScreen() {
   const [currentMenuRaw, setCurrentMenuRaw] = useState<any>(null);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [generatingMenu, setGeneratingMenu] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(MENU_PAGE_SIZE);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -267,6 +269,16 @@ export default function MenuInsightsScreen() {
       fetchItemsSalesData();
     }
   }, [selectedDateIndex, menuItems.length]);
+
+  useEffect(() => {
+    if (menuItems.length > 0) {
+      console.log('[Menu Insights] menuItems:', menuItems);
+    }
+  }, [menuItems]);
+
+  useEffect(() => {
+    setVisibleCount(MENU_PAGE_SIZE);
+  }, [searchQuery, selectedCategoryIds, menuItems.length]);
 
   const fetchMenuPerformance = async () => {
     try {
@@ -902,6 +914,7 @@ export default function MenuInsightsScreen() {
         {/* Menu Items Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
+          <Text style={styles.sectionSubtitle}>Quick view of item performance and sales.</Text>
         </View>
 
         {/* Menu Items List */}
@@ -919,17 +932,17 @@ export default function MenuInsightsScreen() {
               </Text>
             </View>
           ) : (
-            getFilteredMenuItems().map((item) => (
+            getFilteredMenuItems().slice(0, visibleCount).map((item) => (
               <View key={item.menuItemId} style={styles.menuItem}>
                 <View style={styles.menuItemImage}>
-                  {item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl ? (
-                    <Image 
-                      source={{ uri: (item.shopRecipe?.image || item.shopBeverage?.image || item.shopBeverage?.imageUrl) as string }} 
-                      style={{ width: 80, height: 80, borderRadius: 12 }}
+                  {item.shopRecipe?.image ? (
+                    <Image
+                      source={{ uri: item.shopRecipe.image }}
+                      style={styles.menuItemImageAsset}
                       resizeMode="cover"
                     />
                   ) : (
-                    <View style={{ backgroundColor: '#e1dbd6', width: 80, height: 80, borderRadius: 12, justifyContent: 'center', alignItems: 'center' }}>
+                    <View style={styles.menuItemImageFallback}>
                       <Ionicons name="cafe" size={32} color="#847362" />
                     </View>
                   )}
@@ -937,7 +950,7 @@ export default function MenuInsightsScreen() {
                 <View style={styles.menuItemContent}>
                   <View style={styles.menuItemHeader}>
                     <Text style={styles.menuItemTitle} numberOfLines={2}>
-                      {item.shopRecipe?.recipeName || item.shopBeverage?.name || 'Unnamed Item'}
+                      {item.shopRecipe?.recipeName || 'Unnamed Item'}
                     </Text>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
@@ -965,7 +978,7 @@ export default function MenuInsightsScreen() {
                       {formatCurrency(item.sellingPrice)}
                     </Text>
                   </View>
-                  {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
+                  {/* {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
                     <View style={styles.sizesContainer}>
                       <Text style={styles.sizesLabel}>Sizes: </Text>
                       {item.itemSizeViewModels.map((size, index) => (
@@ -977,12 +990,24 @@ export default function MenuInsightsScreen() {
                         </Text>
                       ))}
                     </View>
-                  )}
+                  )} */}
                 </View>
               </View>
             ))
           )}
         </View>
+
+        {!loadingItems && getFilteredMenuItems().length > visibleCount && (
+          <View style={styles.loadMoreWrap}>
+            <TouchableOpacity
+              style={styles.loadMoreButton}
+              onPress={() => setVisibleCount((prev) => prev + MENU_PAGE_SIZE)}
+            >
+              <Text style={styles.loadMoreText}>Load more items</Text>
+              <Ionicons name="chevron-down" size={18} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* AI Suggestions */}
         <View style={styles.itemsList}>
@@ -1243,6 +1268,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '700',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  sectionSubtitle: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#847362',
   },
   menuImageSection: {
     paddingHorizontal: 24,
@@ -1567,14 +1602,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 1,
-    borderColor: '#e1dbd6',
+    borderColor: '#eadfd3',
     flexDirection: 'row',
     gap: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
   menuItemWarning: {
     borderLeftWidth: 4,
@@ -1584,6 +1619,19 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#f1ebe5',
+  },
+  menuItemImageAsset: {
+    width: '100%',
+    height: '100%',
+  },
+  menuItemImageFallback: {
+    backgroundColor: '#efe8e0',
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1602,6 +1650,29 @@ const styles = StyleSheet.create({
     color: '#4a3621',
     flex: 1,
     marginRight: 8,
+  },
+  loadMoreWrap: {
+    paddingHorizontal: 24,
+    paddingBottom: 28,
+  },
+  loadMoreButton: {
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#4a3621',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  loadMoreText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   badgeGreen: {
     backgroundColor: 'rgba(7, 136, 14, 0.1)',
@@ -1739,12 +1810,6 @@ const styles = StyleSheet.create({
   },
   bottomSpacing: {
     height: 100,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#4a3621',
-    marginBottom: 8,
   },
   emptyState: {
     padding: 40,
