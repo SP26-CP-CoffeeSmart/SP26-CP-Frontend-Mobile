@@ -252,6 +252,13 @@ export default function RecipeDetailScreen() {
         }
     }, [id, recipeParam, ingredientsParam]);
 
+    useEffect(() => {
+        if (!recipeData) return;
+        const resolvedId = Number(recipeData.shopRecipeId ?? recipeData.recipeId ?? 0);
+        console.log('[RecipeDetail] recipeId:', resolvedId);
+        console.log('[RecipeDetail] image:', recipeData.image ?? null);
+    }, [recipeData]);
+
     // Fetch ingredients when recipeData changes
     useEffect(() => {
         // Nếu đã có ingredients từ params, không cần fetch

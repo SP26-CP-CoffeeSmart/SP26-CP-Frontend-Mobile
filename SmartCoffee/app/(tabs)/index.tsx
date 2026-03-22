@@ -85,10 +85,8 @@ const buildPostUrl = (pageNo: number, status?: string | null) => {
   return `${API_ENDPOINTS.post.list()}?${params.toString()}`;
 };
 
-const isActiveStatus = (status?: string | null) => {
-  if (!status) return true;
-  return status.toLowerCase() === 'active';
-};
+const isHiddenStatus = (status?: string | null) =>
+  status?.toLowerCase() === 'hidden';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -118,12 +116,10 @@ export default function HomeScreen() {
 
       const payload = (await response.json()) as PostApiResponse;
       const rawItems = Array.isArray(payload?.items) ? payload.items : [];
-      const approvedItems = rawItems.filter((item) => item.isApproved === true);
-      const items = canSeeDisabled && coffeeShopId
-        ? approvedItems.filter((item) =>
-            isActiveStatus(item.status) || item.coffeeShopId === coffeeShopId
-          )
-        : approvedItems;
+      const publicItems = rawItems.filter(
+        (item) => item.status?.toLowerCase() === 'public'
+      );
+      const items = publicItems;
       const count = Number(payload?.totalCount ?? items.length);
 
       setTotalCount(count);
@@ -263,8 +259,10 @@ export default function HomeScreen() {
     const snippet = buildSnippet(item.content);
     const dateLabel = formatDate(item.publishedAt ?? item.createdAt);
     const shopName = item.coffeeShopId ? shopNames[item.coffeeShopId] : undefined;
-    const isDisabled = !isActiveStatus(item.status);
-    const showDisabled = Boolean(canSeeDisabled && coffeeShopId && isDisabled && item.coffeeShopId === coffeeShopId);
+    const isDisabled = isHiddenStatus(item.status);
+    const showDisabled = Boolean(
+      canSeeDisabled && coffeeShopId && isDisabled && item.coffeeShopId === coffeeShopId
+    );
     const categoryLabel = item.postCategoryId
       ? categoryMap[item.postCategoryId] ?? `#${item.postCategoryId}`
       : 'General';

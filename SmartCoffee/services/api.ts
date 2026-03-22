@@ -63,6 +63,7 @@ export const API_ENDPOINTS = {
     getById: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
     update: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
     disable: (id: number) => `${AUTH_BASE_URL}/post/${id}/disable`,
+    toggleVisibility: (id: number) => `${AUTH_BASE_URL}/post/${id}/toggle-visibility`,
   },
   coffeeShop: {
     list: () => `${AUTH_BASE_URL}/CoffeeShop`,
