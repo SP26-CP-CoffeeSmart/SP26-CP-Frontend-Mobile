@@ -43,6 +43,12 @@ type CoffeeShopItem = {
   shopName?: string | null;
 };
 
+type PostCategory = {
+  postCategoryId: number;
+  name?: string | null;
+  categoryName?: string | null;
+};
+
 const PAGE_SIZE = 8;
 
 const COLORS = {
@@ -94,6 +100,7 @@ export default function HomeScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [shopNames, setShopNames] = useState<Record<number, string>>({});
+  const [categoryMap, setCategoryMap] = useState<Record<number, string>>({});
 
   const hasMore = posts.length < totalCount;
   const canSeeDisabled = role && role !== 'Staff';
@@ -155,6 +162,29 @@ export default function HomeScreen() {
     setShopNames(map);
   }, []);
 
+  const loadPostCategories = useCallback(async () => {
+    const response = await authorizedFetch(API_ENDPOINTS.postCategory.list(), {
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Request failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const items: PostCategory[] = Array.isArray(payload)
+      ? payload
+      : payload?.data ?? payload?.items ?? [];
+    const map = items.reduce<Record<number, string>>((acc, item) => {
+      const label = item.categoryName ?? item.name;
+      if (item.postCategoryId && label) {
+        acc[item.postCategoryId] = label;
+      }
+      return acc;
+    }, {});
+    setCategoryMap(map);
+  }, []);
+
   const onRefresh = useCallback(async () => {
     try {
       setRefreshing(true);
@@ -177,7 +207,8 @@ export default function HomeScreen() {
   useEffect(() => {
     fetchFirstPage();
     loadCoffeeShops();
-  }, [fetchFirstPage, loadCoffeeShops]);
+    loadPostCategories();
+  }, [fetchFirstPage, loadCoffeeShops, loadPostCategories]);
 
   useFocusEffect(
     useCallback(() => {
@@ -234,6 +265,9 @@ export default function HomeScreen() {
     const shopName = item.coffeeShopId ? shopNames[item.coffeeShopId] : undefined;
     const isDisabled = !isActiveStatus(item.status);
     const showDisabled = Boolean(canSeeDisabled && coffeeShopId && isDisabled && item.coffeeShopId === coffeeShopId);
+    const categoryLabel = item.postCategoryId
+      ? categoryMap[item.postCategoryId] ?? `#${item.postCategoryId}`
+      : 'General';
 
     return (
       <TouchableOpacity
@@ -253,7 +287,7 @@ export default function HomeScreen() {
         <View style={styles.cardBody}>
           <View style={styles.tagRow}>
             <View style={styles.tagPill}>
-              <Text style={styles.tagText}>#{item.postCategoryId ?? 'General'}</Text>
+              <Text style={styles.tagText}>{categoryLabel}</Text>
             </View>
             <View style={styles.tagMetaRow}>
               {showDisabled ? (
