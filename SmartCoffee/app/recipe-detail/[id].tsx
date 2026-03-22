@@ -29,6 +29,7 @@ interface RecipeVariant {
 }
 
 interface RecipeData {
+    shopRecipeId?: number;
     recipeId: number;
     recipeName: string;
     image: string;
@@ -81,6 +82,19 @@ export default function RecipeDetailScreen() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+
+    const handleOpenPublish = () => {
+        if (!recipeData) return;
+        const resolvedRecipeId = Number(recipeData.shopRecipeId ?? recipeData.recipeId);
+        router.push({
+            pathname: '/recipe-detail/publish',
+            params: {
+                recipeId: String(resolvedRecipeId || 0),
+                recipe: JSON.stringify(recipeData),
+                ingredients: JSON.stringify(ingredients),
+            },
+        });
+    };
 
     useEffect(() => {
         const safeParseJson = (value?: string) => {
@@ -390,7 +404,12 @@ export default function RecipeDetailScreen() {
                             source={getRecipeImageSource()}
                             className={`w-32 h-44 rounded-2xl border-2 ${isDark ? 'border-gray-700' : 'border-secondary'}`}
                         />
-
+                        <TouchableOpacity
+                            className="mt-4 bg-primary rounded-full py-3 px-6"
+                            onPress={handleOpenPublish}
+                        >
+                            <Text className="text-white text-sm font-semibold">Publish Recipe</Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* Title & Description */}
