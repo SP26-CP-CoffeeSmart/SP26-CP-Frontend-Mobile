@@ -60,7 +60,18 @@ type OrderResponse = {
 };
 
 type PagedOrderResponse = {
+  totalCount?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
   items?: OrderResponse[];
+};
+
+const ORDER_PAGE_SIZE = 10;
+
+const toApiOrderStatus = (key: string): string => {
+  const found = statuses.find((s) => s.key === key);
+  return found?.label ?? key;
 };
 
 export default function OrderScreen() {
@@ -71,77 +82,112 @@ export default function OrderScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<string>('pending');
-  const [visibleCount, setVisibleCount] = useState(4);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderResponse | null>(null);
 
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
-  const loadOrders = useCallback(async (isRefresh = false) => {
+  const loadOrders = useCallback(async (options?: { isRefresh?: boolean; page?: number; append?: boolean; statusKey?: string }) => {
+    const isRefresh = Boolean(options?.isRefresh);
+    const page = options?.page ?? 1;
+    const append = Boolean(options?.append);
+    const statusKey = options?.statusKey ?? selectedStatus;
+
     if (!accountId) {
       setOrders([]);
+      setCurrentPage(1);
+      setTotalPages(1);
       return;
     }
 
     try {
       if (isRefresh) {
         setRefreshing(true);
+      } else if (append) {
+        setLoadingMore(true);
       } else {
         setLoading(true);
       }
       setError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.order.byOwner(accountId), {
+
+      const response = await authorizedFetch(
+        API_ENDPOINTS.order.byOwner(accountId, {
+          page,
+          pageSize: ORDER_PAGE_SIZE,
+          orderStatus: toApiOrderStatus(statusKey),
+        }),
+        {
         headers: {
           Accept: '*/*',
         },
-      });
+      }
+      );
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
 
       const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
+      let nextOrders: OrderResponse[] = [];
+      let nextPage = page;
+      let nextTotalPages = 1;
+
       if (Array.isArray(data)) {
-        setOrders(data);
+        nextOrders = data;
+        nextPage = page;
+        nextTotalPages = data.length >= ORDER_PAGE_SIZE ? page + 1 : page;
       } else if (Array.isArray(data?.items)) {
-        setOrders(data.items);
+        nextOrders = data.items;
+        nextPage = Number(data.page ?? page);
+        nextTotalPages = Number(data.totalPages ?? nextPage);
       } else {
-        setOrders([]);
+        nextOrders = [];
+        nextPage = page;
+        nextTotalPages = page;
       }
+
+      setOrders((prev) => (append ? [...prev, ...nextOrders] : nextOrders));
+      setCurrentPage(nextPage);
+      setTotalPages(Math.max(nextTotalPages, nextPage));
     } catch (err) {
       setError('Unable to load orders.');
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
     }
-  }, [accountId]);
+  }, [accountId, selectedStatus]);
 
   useFocusEffect(
     useCallback(() => {
-      loadOrders();
+      loadOrders({ page: 1, append: false, statusKey: selectedStatus });
     }, [loadOrders])
   );
 
   const onRefresh = useCallback(() => {
-    setVisibleCount(4);
-    loadOrders(true);
-  }, [loadOrders]);
+    loadOrders({ isRefresh: true, page: 1, append: false, statusKey: selectedStatus });
+  }, [loadOrders, selectedStatus]);
 
-  // When status changes: reset visible slice
+  // When status changes: request the first page from server with selected orderStatus.
   const handleStatusChange = (key: string) => {
+    if (key === selectedStatus) return;
     setSelectedStatus(key);
-    setVisibleCount(4);
+    setCurrentPage(1);
+    setTotalPages(1);
+    setOrders([]);
+    loadOrders({ page: 1, append: false, statusKey: key });
   };
 
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const status = String(order.status ?? '').toLowerCase();
-      return status === selectedStatus;
-    });
-  }, [orders, selectedStatus]);
+  const hasMore = useMemo(() => currentPage < totalPages, [currentPage, totalPages]);
 
-  const visibleOrders = filteredOrders.slice(0, visibleCount);
-  const hasMore = visibleCount < filteredOrders.length;
+  const handleLoadMore = () => {
+    if (loadingMore || !hasMore) return;
+    loadOrders({ page: currentPage + 1, append: true, statusKey: selectedStatus });
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -205,10 +251,10 @@ export default function OrderScreen() {
             </View>
           ) : error ? (
             <Text style={styles.emptyText}>{error}</Text>
-          ) : visibleOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <Text style={styles.emptyText}>No recent orders.</Text>
           ) : (
-            visibleOrders.map((order) => (
+            orders.map((order) => (
               <TouchableOpacity
                 key={String(order.orderId ?? Math.random())}
                 style={styles.orderCard}
@@ -267,12 +313,17 @@ export default function OrderScreen() {
         {hasMore ? (
           <TouchableOpacity
             style={styles.loadMoreButton}
-            onPress={() => setVisibleCount((c) => c + 4)}
+            onPress={handleLoadMore}
+            disabled={loadingMore}
             activeOpacity={0.7}
           >
-            <Text style={styles.loadMoreText}>Load more</Text>
+            {loadingMore ? (
+              <ActivityIndicator size="small" color={COLORS.white} />
+            ) : (
+              <Text style={styles.loadMoreText}>Load more</Text>
+            )}
           </TouchableOpacity>
-        ) : filteredOrders.length > 0 ? (
+        ) : orders.length > 0 ? (
           <Text style={[styles.loadMoreText, { textAlign: 'center', marginTop: 8 }]}>
             All orders loaded
           </Text>

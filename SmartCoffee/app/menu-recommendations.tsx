@@ -355,12 +355,14 @@ export default function MenuRecommendationsScreen() {
         params: {
           data: responsePayload ? JSON.stringify(responsePayload) : '',
           cacheKey,
+          flow: 'create-menu',
         },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to create menu skeleton.';
       router.back();
       Toast.show({ type: 'error', text1: 'Create menu failed', text2: message });
+      console.log('Error creating menu skeleton:', message);
     } finally {
       setSubmitting(false);
     }

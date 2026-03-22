@@ -55,14 +55,17 @@ const getMenuTitle = (menu: any, index: number) =>
     `Menu ${index + 1}`
   );
 
-const getMenuSubtitle = (menu: any) => {
-  const candidates = [
-    menu?.description,
-    menu?.note,
-    menu?.pricing,
-    menu?.shopStyle,
-    menu?.createdDate,
-  ]
+const getMenuSubtitle = (menu: any, flow?: string) => {
+  const modifiedCount = normalizeModifiedMenuItemIds(menu).length;
+
+  if (flow === 'menu-version-feedback') {
+    if (modifiedCount > 0) {
+      return `Updated ${modifiedCount} item(s) from feedback.`;
+    }
+    return 'AI analyzed feedback. No item updates were suggested.';
+  }
+
+  const candidates = [menu?.pricing, menu?.shopStyle, menu?.createdDate]
     .map((value) => (value ? String(value) : ''))
     .filter(Boolean);
 
@@ -240,9 +243,15 @@ const getGroupNames = (menu: any): string[] => {
 
 export default function MenuResultsScreen() {
   const router = useRouter();
-  const { data, cacheKey } = useLocalSearchParams<{ data?: string; cacheKey?: string }>();
+  const { data, cacheKey, flow } = useLocalSearchParams<{
+    data?: string;
+    cacheKey?: string;
+    flow?: string;
+  }>();
   const [cachedPayload, setCachedPayload] = useState<string>('');
+  const [fullP1Payload, setFullP1Payload] = useState<any>(null);
   const [savingMenuKey, setSavingMenuKey] = useState<string | null>(null);
+  const isCreateMenuFlow = flow === 'create-menu';
 
   useEffect(() => {
     let isActive = true;
@@ -270,6 +279,11 @@ export default function MenuResultsScreen() {
 
   const payloadSource = data || cachedPayload;
   const parsedPayload = useMemo(() => safeParseJson(payloadSource), [payloadSource]);
+
+  useEffect(() => {
+    setFullP1Payload(parsedPayload);
+  }, [parsedPayload]);
+
   const menus = useMemo(() => pickMenus(parsedPayload), [parsedPayload]);
   const baseConfig =
     parsedPayload?.config ??
@@ -279,14 +293,11 @@ export default function MenuResultsScreen() {
     null;
 
   const payloadForDetail = useMemo(() => {
-    if (parsedPayload && Array.isArray((parsedPayload as any)?.menus)) {
-      return parsedPayload;
+    if (fullP1Payload && typeof fullP1Payload === 'object') {
+      return fullP1Payload;
     }
-    return {
-      config: baseConfig,
-      menus,
-    };
-  }, [parsedPayload, baseConfig, menus]);
+    return parsedPayload;
+  }, [fullP1Payload, parsedPayload]);
 
   const handleSaveAiMenu = async (menu: any, menuKey: string) => {
     const menuId = Number(menu?.menuId ?? menu?.id ?? 0);
@@ -399,7 +410,7 @@ export default function MenuResultsScreen() {
         ) : (
           menus.map((menu, index) => {
             const title = getMenuTitle(menu, index);
-            const subtitle = getMenuSubtitle(menu);
+            const subtitle = getMenuSubtitle(menu, flow);
             const groups = getGroupNames(menu);
             const averagePrice = getAveragePrice(menu);
             const visualTheme = getVisualTheme(menu);
@@ -409,7 +420,8 @@ export default function MenuResultsScreen() {
             const canSaveVersion =
               Number.isFinite(Number(menu?.menuId ?? menu?.id ?? 0)) &&
               Number(menu?.menuId ?? menu?.id ?? 0) > 0 &&
-              modifiedMenuItemIds.length > 0;
+              modifiedMenuItemIds.length > 0 &&
+              !isCreateMenuFlow;
 
             const menuWithConfig = {
               ...menu,
@@ -443,6 +455,7 @@ export default function MenuResultsScreen() {
                           payload: JSON.stringify(payloadForDetail),
                           menuIndex: String(index),
                           title,
+                          flow,
                         },
                       });
                     }}
@@ -450,7 +463,9 @@ export default function MenuResultsScreen() {
                     <Ionicons name="pencil" size={16} color="#8B5E3C" />
                   </TouchableOpacity>
                 </View>
-                <Text style={styles.cardSubtitle}>{subtitle}</Text>
+                <Text style={styles.cardSubtitle} numberOfLines={2}>
+                  {subtitle}
+                </Text>
                 <View style={styles.cardBody}>
                   <ResilientMenuImage menu={menu} menuKey={menuKey} />
                   <View style={styles.groupRow}>
@@ -536,6 +551,7 @@ export default function MenuResultsScreen() {
                         payload: JSON.stringify(payloadForDetail),
                         menuIndex: String(index),
                         title,
+                        flow,
                       },
                     });
                   }}

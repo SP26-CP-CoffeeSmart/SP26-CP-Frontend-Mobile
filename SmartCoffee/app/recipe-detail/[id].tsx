@@ -6,11 +6,16 @@ import {
     TouchableOpacity,
     Image,
     ActivityIndicator,
+    RefreshControl,
 } from 'react-native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import Toast from 'react-native-toast-message';
 
 interface RecipeVariant {
     name: string;
@@ -70,6 +75,24 @@ interface Ingredient {
     };
 }
 
+interface SupplierProductApiItem {
+    ingredientId?: number;
+    image?: string | null;
+    ingredient?: {
+        ingredientId?: number;
+        image?: string | null;
+    };
+}
+
+const fallbackIngredientImage =
+    'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
+
+const resolveRemoteImageUrl = (raw?: string | null) => {
+    if (!raw || raw === 'null' || raw === 'undefined') return null;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    return `${AUTH_BASE_URL}${raw.startsWith('/') ? raw : `/images/${raw}`}`;
+};
+
 export default function RecipeDetailScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
@@ -80,8 +103,11 @@ export default function RecipeDetailScreen() {
     const [recipes, setRecipes] = useState<RecipeData[]>([]);
     const [activeRecipeIndex, setActiveRecipeIndex] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+    const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
+    const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
 
     const handleOpenPublish = () => {
         if (!recipeData) return;
@@ -97,78 +123,130 @@ export default function RecipeDetailScreen() {
     };
 
     useEffect(() => {
-        const safeParseJson = (value?: string) => {
-            if (!value) return null;
+        const fetchSupplierProductImages = async () => {
             try {
-                return JSON.parse(value);
+                const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
+                    headers: {
+                        Accept: '*/*',
+                    },
+                });
+
+                if (!response.ok) {
+                    return;
+                }
+
+                const payload = (await response.json()) as
+                    | SupplierProductApiItem[]
+                    | { items?: SupplierProductApiItem[] };
+
+                const items = Array.isArray(payload)
+                    ? payload
+                    : Array.isArray(payload?.items)
+                        ? payload.items
+                        : [];
+
+                const nextMap: Record<number, string> = {};
+                items.forEach((product) => {
+                    const ingredientId = Number(product?.ingredientId ?? product?.ingredient?.ingredientId ?? 0);
+                    if (!Number.isFinite(ingredientId) || ingredientId <= 0) return;
+
+                    const image = resolveRemoteImageUrl(product?.image ?? product?.ingredient?.image ?? null);
+                    if (image) {
+                        nextMap[ingredientId] = image;
+                    }
+                });
+
+                setIngredientImageById(nextMap);
             } catch {
-                return null;
+                // Keep fallback rendering when supplier product image lookup fails.
             }
         };
 
-        const fetchRecipe = async () => {
-            try {
+        fetchSupplierProductImages();
+    }, []);
+
+    const safeParseJson = (value?: string) => {
+        if (!value) return null;
+        try {
+            return JSON.parse(value);
+        } catch {
+            return null;
+        }
+    };
+
+    const fetchRecipe = async (options?: { isRefresh?: boolean; forceApi?: boolean }) => {
+        const isRefresh = Boolean(options?.isRefresh);
+        const forceApi = Boolean(options?.forceApi);
+
+        try {
+            if (isRefresh) {
+                setRefreshing(true);
+            } else {
                 setLoading(true);
-
-                const parsedRecipes = safeParseJson(recipesParam as string);
-                
-                if (recipeParam || parsedRecipes) {
-                    let defaultRecipe = null;
-                    let parsedRecipeList: RecipeData[] = [];
-
-                    if (Array.isArray(parsedRecipes) && parsedRecipes.length > 0) {
-                        parsedRecipeList = parsedRecipes;
-                        defaultRecipe = parsedRecipes[0];
-                    }
-
-                    const parsedSingleRecipe = safeParseJson(recipeParam as string);
-                    if (parsedSingleRecipe) {
-                         defaultRecipe = parsedSingleRecipe;
-                         if (parsedRecipeList.length === 0) {
-                             parsedRecipeList = [parsedSingleRecipe];
-                         }
-                    }
-
-                    if (defaultRecipe) {
-                        setRecipeData(defaultRecipe);
-                        setRecipes(parsedRecipeList);
-                        setActiveRecipeIndex(0);
-
-                        // Nếu có ingredients từ params, dùng luôn
-                        const parsedIngredients = safeParseJson(ingredientsParam as string);
-                        if (Array.isArray(parsedIngredients) && parsedIngredients.length > 0) {
-                            setIngredients(parsedIngredients);
-                        } else if (Array.isArray(defaultRecipe?.ingredients) && defaultRecipe.ingredients.length > 0) {
-                            setIngredients(defaultRecipe.ingredients);
-                        }
-                        setError(null);
-                        setLoading(false);
-                        return;
-                    }
-                }
-
-                // Nếu không có params, gọi API
-                const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${id}`);
-                const data = await response.json();
-
-                if (Array.isArray(data) && data.length > 0) {
-                    setRecipes(data);
-                    setRecipeData(data[0]);
-                    setActiveRecipeIndex(0);
-                } else if (data) {
-                    setRecipes([data]);
-                    setRecipeData(data);
-                    setActiveRecipeIndex(0);
-                }
-                setError(null);
-            } catch (err) {
-                setError('Failed to load recipe details');
-                console.error('Recipe fetch error:', err);
-            } finally {
-                setLoading(false);
             }
-        };
 
+            const parsedRecipes = safeParseJson(recipesParam as string);
+
+            if (!forceApi && (recipeParam || parsedRecipes)) {
+                let defaultRecipe = null;
+                let parsedRecipeList: RecipeData[] = [];
+
+                if (Array.isArray(parsedRecipes) && parsedRecipes.length > 0) {
+                    parsedRecipeList = parsedRecipes;
+                    defaultRecipe = parsedRecipes[0];
+                }
+
+                const parsedSingleRecipe = safeParseJson(recipeParam as string);
+                if (parsedSingleRecipe) {
+                    defaultRecipe = parsedSingleRecipe;
+                    if (parsedRecipeList.length === 0) {
+                        parsedRecipeList = [parsedSingleRecipe];
+                    }
+                }
+
+                if (defaultRecipe) {
+                    setRecipeData(defaultRecipe);
+                    setRecipes(parsedRecipeList);
+                    setActiveRecipeIndex(0);
+
+                    const parsedIngredients = safeParseJson(ingredientsParam as string);
+                    if (Array.isArray(parsedIngredients) && parsedIngredients.length > 0) {
+                        setIngredients(parsedIngredients);
+                    } else if (Array.isArray(defaultRecipe?.ingredients) && defaultRecipe.ingredients.length > 0) {
+                        setIngredients(defaultRecipe.ingredients);
+                    }
+                    setError(null);
+                    return;
+                }
+            }
+
+            // Nếu không có params hoặc cần làm mới dữ liệu, gọi API
+            const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${id}`);
+            const data = await response.json();
+
+            if (Array.isArray(data) && data.length > 0) {
+                setRecipes(data);
+                setRecipeData(data[0]);
+                setActiveRecipeIndex(0);
+            } else if (data) {
+                setRecipes([data]);
+                setRecipeData(data);
+                setActiveRecipeIndex(0);
+            } else {
+                setRecipes([]);
+                setRecipeData(null);
+            }
+            setError(null);
+        } catch (err) {
+            setError('Failed to load recipe details');
+            console.error('Recipe fetch error:', err);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    useEffect(() => {
         if (id || recipeParam) {
             fetchRecipe();
         }
@@ -334,6 +412,22 @@ export default function RecipeDetailScreen() {
         return parsed || null;
     };
 
+    const getOccasionList = () => {
+        if (!variant.occasions) return [] as string[];
+        const parsed = parseJSON(variant.occasions);
+        if (Array.isArray(parsed)) {
+            return parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+        if (typeof variant.occasions === 'string') {
+            return variant.occasions
+                .replace(/[\[\]"]+/g, '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+        }
+        return [] as string[];
+    };
+
     const getFallbackImage = () => require('../../assets/1.jpg');
 
     const getRecipeImageSource = () => {
@@ -360,19 +454,153 @@ export default function RecipeDetailScreen() {
         return `${AUTH_BASE_URL}${recipeData.image.startsWith('/') ? recipeData.image : '/images/' + recipeData.image}`;
     };
 
+    const hasRealRecipeImage = () => {
+        const raw = String(recipeData?.image ?? '').trim();
+        if (!raw || raw === 'null' || raw === 'undefined') return false;
+
+        const normalized = raw.toLowerCase();
+        if (normalized.includes('aida-public') || normalized.includes('unsplash.com')) {
+            return false;
+        }
+
+        return true;
+    };
+
+    const getUploadFileInfo = (uri: string) => {
+        const cleanUri = uri.split('?')[0];
+        const namePart = cleanUri.split('/').pop() || `recipe_${Date.now()}`;
+        const ext = namePart.includes('.') ? namePart.split('.').pop() : '';
+        const lowerExt = String(ext).toLowerCase();
+        const mimeType =
+            lowerExt === 'jpg' || lowerExt === 'jpeg'
+                ? 'image/jpeg'
+                : lowerExt === 'png'
+                    ? 'image/png'
+                    : lowerExt === 'webp'
+                        ? 'image/webp'
+                        : 'image/jpeg';
+        const fileName = namePart.includes('.') ? namePart : `${namePart}.jpg`;
+        return { fileName, mimeType };
+    };
+
+    const handleUploadRecipeImage = async () => {
+        if (!recipeData?.recipeId || uploadingRecipeImage) {
+            return;
+        }
+
+        try {
+            setUploadingRecipeImage(true);
+
+            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (!permission.granted) {
+                Toast.show({
+                    type: 'info',
+                    text1: 'Permission required',
+                    text2: 'Please allow photo access to upload recipe image.',
+                });
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: false,
+                quality: 0.85,
+            });
+
+            if (result.canceled || !result.assets?.length) {
+                return;
+            }
+
+            const asset = result.assets[0];
+            const { fileName, mimeType } = getUploadFileInfo(asset.uri);
+            const formData = new FormData();
+            formData.append('file', {
+                uri: asset.uri,
+                name: fileName,
+                type: mimeType,
+            } as any);
+
+            const response = await authorizedFetch(
+                `${AUTH_BASE_URL}/ShopRecipe/upload-image?id=${recipeData.recipeId}`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Accept: '*/*',
+                    },
+                    body: formData,
+                }
+            );
+
+            if (!response.ok) {
+                const body = await response.text();
+                console.log('[Upload Recipe Image] status:', response.status);
+                console.log('[Upload Recipe Image] body:', body);
+                throw new Error(`Request failed: ${response.status}`);
+            }
+
+            const uploadPayload = await response.json();
+            const uploadedUrl = resolveRemoteImageUrl(
+                uploadPayload?.imageUrl ??
+                uploadPayload?.url ??
+                uploadPayload?.data?.imageUrl ??
+                uploadPayload?.data?.url ??
+                null
+            );
+
+            if (uploadedUrl) {
+                setRecipeData((prev) => (prev ? { ...prev, image: uploadedUrl } : prev));
+            }
+
+            // Always refresh from source of truth so the upload button auto-hides when backend has real image.
+            await fetchRecipe({ isRefresh: true, forceApi: true });
+            Toast.show({
+                type: 'success',
+                text1: 'Success',
+                text2: 'Recipe image uploaded successfully.',
+            });
+        } catch (err) {
+            Toast.show({
+                type: 'error',
+                text1: 'Upload failed',
+                text2: 'Unable to upload recipe image. Please try again.',
+            });
+        } finally {
+            setUploadingRecipeImage(false);
+        }
+    };
+
+    const getIngredientImageSource = (item: Ingredient) => {
+        const ingredientId = Number(item?.ingredient?.ingredientId ?? item?.ingredient_id ?? 0);
+        const imageFromProduct =
+            Number.isFinite(ingredientId) && ingredientId > 0
+                ? ingredientImageById[ingredientId]
+                : null;
+
+        const resolved =
+            imageFromProduct ?? resolveRemoteImageUrl(item?.ingredient?.image ?? null) ?? fallbackIngredientImage;
+
+        return { uri: resolved };
+    };
+
     const variant = getVariantFromRecipe();
 
     return (
-        <View className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-background-light'}`}>
+        <SafeAreaView edges={['top', 'bottom']} className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-[#F7F3EF]'}`}>
+            <Stack.Screen options={{ headerShown: false }} />
+
             {/* Header */}
-            <View className={`mt-8 px-6 py-4 flex-row justify-between items-center border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-                <TouchableOpacity className="p-2 -ml-2" onPress={() => router.back()}>
-                    <Text className="text-2xl">←</Text>
+            <View className={`px-5 pt-2 pb-3 flex-row items-center justify-between border-b ${isDark ? 'border-gray-700' : 'border-[#E8E1D9]'}`}>
+                <TouchableOpacity
+                    className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-gray-800' : 'bg-[#F2E9E1]'}`}
+                    onPress={() => router.back()}
+                    activeOpacity={0.8}
+                >
+                    <Ionicons name="arrow-back" size={20} color={isDark ? '#F7F3EF' : '#3C2A21'} />
                 </TouchableOpacity>
-                <Text className="text-3xl font-bold italic text-primary">Recipe Details</Text>
-                <TouchableOpacity className="p-2 -mr-2">
-                    <Text className="text-2xl">⋯</Text>
-                </TouchableOpacity>
+                <Text className={`text-[28px] font-bold italic ${isDark ? 'text-text-dark' : 'text-[#3C2A21]'}`}>
+                    Recipe Details
+                </Text>
+                <View className="w-10 h-10" />
             </View>
 
             {loading ? (
@@ -394,29 +622,69 @@ export default function RecipeDetailScreen() {
             ) : (
                 <ScrollView
                     showsVerticalScrollIndicator={false}
-                    className="px-6"
-                    contentContainerStyle={{ paddingBottom: 200 }}>
+                    className="px-4"
+                    contentContainerStyle={{ paddingBottom: 120 }}
+                    refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={() => fetchRecipe({ isRefresh: true, forceApi: true })}
+                            tintColor="#D9A05B"
+                            colors={['#D9A05B']}
+                        />
+                    }>
                     {/* Variant Selector - Only show if multiple recipes and user pressed Change Recipe */}
 
-                    {/* Recipe Image */}
-                    <View className="items-center mt-8 mb-4">
-                        <Image
-                            source={getRecipeImageSource()}
-                            className={`w-32 h-44 rounded-2xl border-2 ${isDark ? 'border-gray-700' : 'border-secondary'}`}
-                        />
-                        <TouchableOpacity
-                            className="mt-4 bg-primary rounded-full py-3 px-6"
-                            onPress={handleOpenPublish}
-                        >
-                            <Text className="text-white text-sm font-semibold">Publish Recipe</Text>
-                        </TouchableOpacity>
-                    </View>
+                    {/* Hero */}
+                    <View className="mt-5 mb-4">
+                        <View className={`rounded-[28px] overflow-hidden border ${isDark ? 'border-gray-700 bg-gray-800' : 'border-[#E8E1D9] bg-white'}`}>
+                            <Image
+                                source={getRecipeImageSource()}
+                                className="w-full h-56"
+                                resizeMode="cover"
+                            />
 
+                            <TouchableOpacity
+                                className="absolute top-3 right-3 bg-black/65 rounded-full px-4 py-2 flex-row items-center"
+                                onPress={handleOpenPublish}
+                                activeOpacity={0.85}
+                            >
+                                <Text className="text-white text-xs font-semibold">Publish Recipe</Text>
+                            </TouchableOpacity>
+
+                            {!hasRealRecipeImage() && (
+                                <TouchableOpacity
+                                    className="absolute right-3 bottom-3 bg-black/70 rounded-full px-4 py-2 flex-row items-center"
+                                    onPress={handleUploadRecipeImage}
+                                    activeOpacity={0.85}
+                                    disabled={uploadingRecipeImage}
+                                >
+                                    {uploadingRecipeImage ? (
+                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                    ) : (
+                                        <>
+                                            <Ionicons name="camera-outline" size={14} color="#FFFFFF" />
+                                            <Text className="text-white text-xs font-semibold ml-1.5">Set recipe image</Text>
+                                        </>
+                                    )}
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    </View>
                     {/* Title & Description */}
-                    <Text className={`text-2xl font-semibold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.name || ''}</Text>
-                    <Text className={`text-sm text-center mb-6 leading-5 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                    <Text className={`text-[44px] font-bold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-[#2E2220]'}`}>{variant.name || ''}</Text>
+                    <Text className={`text-base text-center mb-4 leading-6 ${isDark ? 'text-gray-400' : 'text-[#5F5A57]'}`}>
                         {variant.flavor || ''}
                     </Text>
+
+                    {/* Tags */}
+                    <View className="flex-row flex-wrap gap-2 justify-center mb-5">
+                        {variant.tags.map((tag, index) => (
+                            <View key={index} className={`px-3.5 py-2 rounded-full ${isDark ? 'bg-gray-800' : 'bg-[#ECE3DB]'}`}>
+                                <Text className={`text-xs font-semibold ${isDark ? 'text-gray-200' : 'text-[#6F5547]'}`}>{tag || ''}</Text>
+                            </View>
+                        ))}
+                    </View>
+
                     {recipes.length > 1 && showChipsSelector && (
                         <ScrollView
                             horizontal
@@ -446,35 +714,26 @@ export default function RecipeDetailScreen() {
                     )}
 
                     {/* Recipe Content Card */}
-                    <View className="relative mb-10">
-                        <View className={`rounded-[2rem] overflow-hidden ${isDark ? 'bg-surface-dark/40' : 'bg-white/40'}`}>
-                            {/* Tags */}
-                            <View className="flex-row flex-wrap gap-2 justify-center mb-6 mt-4">
-                                {variant.tags.map((tag, index) => (
-                                    <View key={index} className="px-3 py-1.5 bg-secondary rounded-full">
-                                        <Text className="text-xs font-medium text-primary">{tag || ''}</Text>
-                                    </View>
-                                ))}
-                            </View>
-
+                    <View className="mb-10 gap-4">
+                        <View className="gap-4">
                             {/* Info Grid */}
-                            <View className="flex-row flex-wrap gap-3 mb-6">
-                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                            <View className="flex-row flex-wrap gap-3">
+                                <View className={`w-[48%] rounded-2xl border p-4 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-2xl mb-2">⏱️</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>PREP TIME</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.prepTime || ''}</Text>
                                 </View>
-                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`w-[48%] rounded-2xl border p-4 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-2xl mb-2">📊</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>METHOD</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.method || ''}</Text>
                                 </View>
-                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`w-[48%] rounded-2xl border p-4 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-2xl mb-2">🏋️</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>DIFFICULTY</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.difficulty || ''}</Text>
                                 </View>
-                                <View className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`w-[48%] rounded-2xl border p-4 items-center justify-center ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-2xl mb-2">⚡</Text>
                                     <Text className={`text-xs font-bold tracking-widest ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>CAFFEINE</Text>
                                     <Text className={`text-sm font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{variant.caffeine || ''}</Text>
@@ -482,7 +741,7 @@ export default function RecipeDetailScreen() {
                             </View>
 
                             {/* Flavor Profile */}
-                            <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                            <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                 <Text className="text-xl font-bold italic text-primary mb-4">Flavor Profile</Text>
                                 <View className="flex-row justify-between py-2">
                                     <Text className={`text-sm font-medium ${isDark ? 'text-text-dark' : 'text-text-light'}`}>Description</Text>
@@ -501,17 +760,26 @@ export default function RecipeDetailScreen() {
 
                             {/* Suggested Occasions */}
                             {variant.occasions && (
-                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Suggested Occasions</Text>
-                                    <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                        {variant.occasions}
-                                    </Text>
+                                    <View className="flex-row flex-wrap gap-2">
+                                        {getOccasionList().map((occasion, idx) => (
+                                            <View
+                                                key={`${occasion}-${idx}`}
+                                                className={`px-3 py-2 rounded-full ${isDark ? 'bg-gray-800' : 'bg-[#F2E9E1]'}`}
+                                            >
+                                                <Text className={`text-xs font-medium ${isDark ? 'text-gray-200' : 'text-[#6F5547]'}`}>
+                                                    {occasion}
+                                                </Text>
+                                            </View>
+                                        ))}
+                                    </View>
                                 </View>
                             )}
 
                             {/* Brewing Variables */}
                             {getBrewingVariables() && (
-                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Brewing Variables</Text>
                                     <View className="flex-row flex-wrap justify-between">
                                         {Object.entries(getBrewingVariables() || {}).map(([key, value]) => (
@@ -526,7 +794,7 @@ export default function RecipeDetailScreen() {
 
                             {/* Brewing Steps */}
                             {getBrewingSteps().length > 0 && (
-                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Steps</Text>
                                     <View className="gap-4">
                                         {getBrewingSteps().map((step: any, index: number) => {
@@ -557,17 +825,21 @@ export default function RecipeDetailScreen() {
 
                             {/* Ingredients */}
                             {ingredients.length > 0 && (
-                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Ingredients</Text>
                                     <View className="flex-row flex-wrap gap-3">
                                         {ingredients.map((item, index) => (
-                                            <View key={index} className={`w-[48%] rounded-2xl border p-3 items-center justify-center ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-100 border-gray-200'}`}>
-                                                <Text className="text-3xl mb-1">{getEmojiForIngredient(item.ingredient?.category || '', item.ingredient?.name || '')}</Text>
-                                                <Text className={`text-xs font-bold text-center ${isDark ? 'text-text-dark' : 'text-text-light'}`}>{item.ingredient?.name || 'empty name'}</Text>
-                                                <Text className={`text-xs mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                            <View key={index} className={`w-[48%] rounded-2xl border p-3 ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-[#F8F7FB] border-[#E3DFE9]'}`}>
+                                                <Image
+                                                    source={getIngredientImageSource(item)}
+                                                    className={`w-full h-24 rounded-xl mb-3 ${isDark ? 'bg-gray-700' : 'bg-gray-200'}`}
+                                                    resizeMode="cover"
+                                                />
+                                                <Text numberOfLines={2} className={`text-base font-semibold text-center ${isDark ? 'text-text-dark' : 'text-[#2E2220]'}`}>{item.ingredient?.name || 'Unnamed ingredient'}</Text>
+                                                <Text className={`text-sm mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-[#6A6764]'}`}>
                                                     {item.quantity}{item.measurement ? ` ${item.measurement}` : ''}
                                                 </Text>
-                                                <Text className={`text-xs mt-1 font-semibold text-orange-400`}>{item.cost?.toLocaleString()} VNĐ</Text>
+                                                <Text className={`text-[24px] mt-1 font-bold text-center ${isDark ? 'text-[#F3AA4F]' : 'text-[#D38B2A]'}`}>{item.cost?.toLocaleString()} VNĐ</Text>
                                             </View>
                                         ))}
                                     </View>
@@ -576,7 +848,7 @@ export default function RecipeDetailScreen() {
 
                             {/* Presentation */}
                             {getPresentationData() && (
-                                <View className={`rounded-2xl border p-5 mb-4 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                                <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                     <Text className="text-xl font-bold italic text-primary mb-4">Presentation</Text>
                                     <View className="gap-3">
                                         {Object.entries(getPresentationData() || {}).map(([key, value]) => (
@@ -590,7 +862,7 @@ export default function RecipeDetailScreen() {
                             )}
 
                             {/* Recipe Economics */}
-                            <View className={`rounded-2xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-surface-light border-gray-200'}`}>
+                            <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                 <Text className="text-xl font-bold italic text-primary mb-4">Recipe Economics</Text>
                                 <View className="flex-row justify-between items-center mb-4">
                                     <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Selling Price</Text>
@@ -616,6 +888,6 @@ export default function RecipeDetailScreen() {
                     </View>
                 </ScrollView>
             )}
-        </View>
+        </SafeAreaView>
     );
 }
