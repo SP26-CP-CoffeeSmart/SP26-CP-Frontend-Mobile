@@ -55,6 +55,7 @@ type RecipeDetail = {
   flavorNote?: string | null;
   brewingMethod?: string | null;
   prepTimeRange?: string | null;
+  brewingSteps?: string | string[] | null;
   suggestedOccasions?: string | null;
   difficultyLevel?: string | null;
   caffeineStrength?: number | null;
@@ -81,6 +82,23 @@ const COLORS = {
   accent: '#9B5D2E',
   accentSoft: '#E8D7C8',
   border: '#E3D7CD',
+};
+
+const parseJSON = (value: any) => {
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return null;
+  }
+};
+
+const getBrewingSteps = (rawSteps?: string | string[] | null): string[] => {
+  if (!rawSteps) return [];
+  if (Array.isArray(rawSteps)) return rawSteps;
+  const parsed = parseJSON(rawSteps);
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof rawSteps === 'string' && rawSteps.trim()) return [rawSteps.trim()];
+  return [];
 };
 
 const formatDate = (value?: string | null) => {
@@ -688,6 +706,30 @@ export default function PostDetailScreen() {
                     })}
                   </View>
                 ) : null}
+
+                {getBrewingSteps(recipe?.brewingSteps).length > 0 ? (
+                  <View style={styles.stepsBlock}>
+                    <Text style={styles.stepsTitle}>Steps</Text>
+                    {getBrewingSteps(recipe?.brewingSteps).map((step: any, index: number) => {
+                      const stepNumber =
+                        typeof step === 'object' && step !== null && step.step
+                          ? step.step
+                          : index + 1;
+                      const stepText =
+                        typeof step === 'string'
+                          ? step
+                          : step.title || step.desc || '';
+                      return (
+                        <View key={index} style={styles.stepRow}>
+                          <View style={styles.stepBadge}>
+                            <Text style={styles.stepBadgeText}>{stepNumber}</Text>
+                          </View>
+                          <Text style={styles.stepText}>{stepText || ''}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
               </View>
             ) : (
               <Text style={styles.metaText}>No recipe details available.</Text>
@@ -1098,5 +1140,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 8,
+  },
+  stepsBlock: {
+    marginTop: 16,
+    gap: 12,
+  },
+  stepsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginBottom: 4,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  stepBadgeText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.ink,
+    fontWeight: '500',
   },
 });
