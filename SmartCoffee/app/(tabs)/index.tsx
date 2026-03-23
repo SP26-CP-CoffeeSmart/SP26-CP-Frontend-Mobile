@@ -105,7 +105,7 @@ export default function HomeScreen() {
 
   const loadPosts = useCallback(
     async (page: number, mode: 'replace' | 'append') => {
-      const statusFilter = canSeeDisabled ? null : 'Active';
+      const statusFilter = canSeeDisabled ? null : 'Public';
       const response = await authorizedFetch(buildPostUrl(page, statusFilter), {
         headers: { Accept: 'application/json' },
       });
@@ -118,7 +118,7 @@ export default function HomeScreen() {
       const rawItems = Array.isArray(payload?.items) ? payload.items : [];
       const items = rawItems.filter((item) => {
         const status = String(item.status ?? '').trim().toLowerCase();
-        const isPublic = status === 'public' || status === 'active';
+        const isPublic = status === 'public';
         const isPending = status === 'pending';
         const isHidden = status === 'hidden';
         const isOwner = Boolean(coffeeShopId && item.coffeeShopId === coffeeShopId);
@@ -157,11 +157,11 @@ export default function HomeScreen() {
     const data = (await response.json()) as CoffeeShopItem[];
     const map = Array.isArray(data)
       ? data.reduce<Record<number, string>>((acc, item) => {
-          if (item?.coffeeShopId && item?.shopName) {
-            acc[item.coffeeShopId] = item.shopName;
-          }
-          return acc;
-        }, {})
+        if (item?.coffeeShopId && item?.shopName) {
+          acc[item.coffeeShopId] = item.shopName;
+        }
+        return acc;
+      }, {})
       : {};
     setShopNames(map);
   }, []);
