@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  Image,
+  ImageBackground,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -18,9 +20,13 @@ const COLORS = {
   text: '#3C2A21',
   muted: '#8E7B6F',
   border: '#B08B61',
-  accent: '#9C7A4B',
+  accent: '#5B3216',
+  accentSoft: '#EFE6DE',
   white: '#FFFFFF',
+  shadow: 'rgba(0,0,0,0.08)',
 };
+
+const BACKGROUND_IMAGE = require('../assets/background.png');
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -34,7 +40,10 @@ export default function SignUpScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const handleRegister = async () => {
-    if (!email || !password) {
+    const trimmedEmail = email.trim();
+    const trimmedPhone = phone.trim();
+
+    if (!trimmedEmail || !password) {
       Toast.show({ type: 'error', text1: 'Registration failed', text2: 'Email and password are required.' });
       return;
     }
@@ -51,9 +60,9 @@ export default function SignUpScreen() {
 
     try {
       setSubmitting(true);
-      const message = await registerAccount(email, password);
+      const message = await registerAccount(trimmedEmail, password, trimmedPhone || undefined);
       Toast.show({ type: 'success', text1: 'Registration successful', text2: message || 'OTP sent to your email.' });
-      router.push({ pathname: '/otp', params: { email } });
+      router.push({ pathname: '/otp', params: { email: trimmedEmail } });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Register failed.';
       Toast.show({ type: 'error', text1: 'Registration failed', text2: message });
@@ -63,16 +72,19 @@ export default function SignUpScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-        </Pressable>
+    <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.card}>
+            <Pressable style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={20} color={COLORS.text} />
+            </Pressable>
 
-        <View style={styles.headerBlock}>
-          <Text style={styles.title}>SmartCoffee</Text>
-          <Text style={styles.subtitle}>Please enter your email, password, or social account to continue.</Text>
-        </View>
+            <View style={styles.heroBlock}>
+              <Image source={BACKGROUND_IMAGE} style={styles.heroImage} resizeMode="contain" />
+              <Text style={styles.title}>Welcome To Coffee Hearts</Text>
+              <Text style={styles.subtitle}>Sign up to get your day started</Text>
+            </View>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email Address</Text>
@@ -140,24 +152,50 @@ export default function SignUpScreen() {
           <Text style={styles.checkboxText}>I agree to the Terms of Service</Text>
         </Pressable>
 
-        <Pressable style={styles.primaryButton} onPress={handleRegister} disabled={submitting}>
-          <Text style={styles.primaryButtonText}>{submitting ? 'Signing Up...' : 'Sign Up'}</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+            <Pressable style={styles.primaryButton} onPress={handleRegister} disabled={submitting}>
+              <Text style={styles.primaryButtonText}>{submitting ? 'Signing Up...' : 'Sign Up'}</Text>
+            </Pressable>
+
+            <View style={styles.footerRow}>
+              <Text style={styles.footerText}>Already have an account?</Text>
+              <Pressable onPress={() => router.push('/sign-in')}>
+                <Text style={styles.footerLink}> Sign In Here</Text>
+              </Pressable>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  background: {
     flex: 1,
     backgroundColor: COLORS.bg,
   },
+  backgroundImage: {
+    opacity: 0.18,
+  },
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flexGrow: 1,
-    paddingHorizontal: 28,
-    paddingVertical: 36,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
     justifyContent: 'center',
+  },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   backButton: {
     width: 36,
@@ -165,17 +203,23 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
   },
-  headerBlock: {
+  heroBlock: {
     alignItems: 'center',
-    marginBottom: 26,
+    marginBottom: 18,
     gap: 8,
   },
+  heroImage: {
+    width: 130,
+    height: 130,
+  },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
+    textAlign: 'center',
   },
   subtitle: {
     fontSize: 12,
@@ -251,6 +295,20 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: COLORS.white,
     fontSize: 15,
+    fontWeight: '600',
+  },
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  footerText: {
+    fontSize: 12,
+    color: COLORS.text,
+  },
+  footerLink: {
+    fontSize: 12,
+    color: COLORS.accent,
     fontWeight: '600',
   },
 });

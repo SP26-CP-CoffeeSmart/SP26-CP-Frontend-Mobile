@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  ImageBackground,
   Dimensions,
   FlatList,
   RefreshControl,
@@ -21,7 +22,8 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { AUTH_BASE_URL } from '@/services/api';
+import { WebView } from 'react-native-webview';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 import { BeverageCategory, useBeverageCategories } from '@/context/beverage-category-context';
@@ -75,6 +77,38 @@ const fallbackBeverageImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
 
 const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
+const ONBOARDING_COMPLETE_KEY = 'onboarding:complete';
+const SUBSCRIPTION_SKIP_ONCE_KEY = 'subscription:skip-once';
+const SUBSCRIPTION_BG_IMAGE = require('../../assets/background.png');
+
+type SubscriptionPackage = {
+  subscriptionPackageId?: number;
+  id?: number;
+  name?: string;
+  tier?: string;
+  price?: number | string;
+  duration?: number | string;
+  description?: string;
+};
+
+const getSubscriptionPackageId = (item: SubscriptionPackage) =>
+  item.subscriptionPackageId ?? item.id ?? null;
+
+const formatSubscriptionPrice = (value: unknown) => {
+  if (value === null || value === undefined) return null;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(numeric)) {
+    return `${numeric.toLocaleString()} VND`;
+  }
+  return String(value);
+};
+
+const isTrialSubscription = (item: SubscriptionPackage) => {
+  const name = String(item.name ?? item.tier ?? '').toLowerCase();
+  if (name.includes('trial')) return true;
+  const numeric = typeof item.price === 'number' ? item.price : Number(item.price);
+  return Number.isFinite(numeric) && numeric <= 0;
+};
 
 const resolveImageUrl = (baseUrl: string, image?: string) => {
   if (!image) return null;
@@ -100,7 +134,7 @@ const hasRealBeverageImage = (raw?: string | null) => {
 
 export default function MenuScreen() {
   const router = useRouter();
-  const { coffeeShopId, loading: authLoading, profile } = useAuth();
+  const { coffeeShopId, loading: authLoading, profile, accountId } = useAuth();
   const {
     categories: beverageCategories,
     loading: categoriesLoading,
@@ -128,6 +162,15 @@ export default function MenuScreen() {
   const [createImageUploading, setCreateImageUploading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [uploadingBeverageId, setUploadingBeverageId] = useState<string | null>(null);
+  const [subscriptionGateVisible, setSubscriptionGateVisible] = useState(false);
+  const [subscriptionGateShown, setSubscriptionGateShown] = useState(false);
+  const [subscriptionPackages, setSubscriptionPackages] = useState<SubscriptionPackage[]>([]);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscribeSubmitting, setSubscribeSubmitting] = useState(false);
+  const [payosUrl, setPayosUrl] = useState<string | null>(null);
+  const [showPayosModal, setShowPayosModal] = useState(false);
+  const subscriptionSuccessRef = useRef(false);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const [scrollY, setScrollY] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -136,6 +179,158 @@ export default function MenuScreen() {
   const [beverageLooping, setBeverageLooping] = useState(false);
 
   const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
+
+  const loadSubscriptionPackages = useCallback(async () => {
+    try {
+      setSubscriptionLoading(true);
+      setSubscriptionError(null);
+      const response = await authorizedFetch(API_ENDPOINTS.subscriptionPackage.list(), {
+        headers: { Accept: '*/*' },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const payload = await response.json();
+      const items: SubscriptionPackage[] = Array.isArray(payload)
+        ? payload
+        : payload?.items ?? payload?.data ?? [];
+      setSubscriptionPackages(items);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load packages.';
+      setSubscriptionError(message);
+    } finally {
+      setSubscriptionLoading(false);
+    }
+  }, []);
+
+  const handleSubscribePackage = useCallback(
+    async (item: SubscriptionPackage) => {
+      if (subscribeSubmitting) return;
+
+      const isTrial = isTrialSubscription(item);
+      const packageId = getSubscriptionPackageId(item);
+
+      try {
+        setSubscribeSubmitting(true);
+
+        if (isTrial) {
+          if (!accountId) {
+            throw new Error('Missing account id.');
+          }
+          const trialUrl = `${API_ENDPOINTS.subscription.trial()}?ownerId=${accountId}`;
+          const response = await authorizedFetch(trialUrl, {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+
+          Toast.show({ type: 'success', text1: 'Trial activated' });
+          return;
+        }
+
+        if (!packageId) {
+          throw new Error('Missing package id.');
+        }
+
+        const response = await authorizedFetch(API_ENDPOINTS.subscription.subscribe(packageId, true), {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const checkoutUrl = String(data?.checkoutUrl ?? data?.url ?? '').trim();
+        if (!checkoutUrl) {
+          throw new Error('Missing checkout url');
+        }
+
+        subscriptionSuccessRef.current = false;
+        setPayosUrl(checkoutUrl);
+        setShowPayosModal(true);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to subscribe.';
+        Toast.show({ type: 'error', text1: 'Subscription failed', text2: message });
+      } finally {
+        setSubscribeSubmitting(false);
+      }
+    },
+    [accountId, subscribeSubmitting]
+  );
+
+  const handlePayosShouldStart = useCallback((event: { url?: string }) => {
+    const rawUrl = String(event?.url ?? '');
+    const url = rawUrl.toLowerCase();
+
+    if (!url) {
+      return true;
+    }
+
+    const isCancelRoute = url.includes('cancel=true') || url.includes('status=cancelled');
+    const isPaidStatus = url.includes('status=paid');
+
+    if (isCancelRoute) {
+      setShowPayosModal(false);
+      setPayosUrl(null);
+      subscriptionSuccessRef.current = false;
+      return false;
+    }
+
+    if (isPaidStatus) {
+      if (!subscriptionSuccessRef.current) {
+        subscriptionSuccessRef.current = true;
+        Toast.show({ type: 'success', text1: 'Subscription activated' });
+        setShowPayosModal(false);
+        setPayosUrl(null);
+      }
+      return false;
+    }
+
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || subscriptionGateShown) {
+      return;
+    }
+
+    const checkGate = async () => {
+      try {
+        const onboardingDone = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
+        if (onboardingDone !== 'true') {
+          return;
+        }
+
+        const skipOnce = await AsyncStorage.getItem(SUBSCRIPTION_SKIP_ONCE_KEY);
+        if (skipOnce === 'true') {
+          await AsyncStorage.removeItem(SUBSCRIPTION_SKIP_ONCE_KEY);
+          return;
+        }
+
+        setSubscriptionGateVisible(true);
+        setSubscriptionGateShown(true);
+      } catch {
+        // Ignore storage errors.
+      }
+    };
+
+    checkGate();
+  }, [authLoading, subscriptionGateShown]);
+
+  useEffect(() => {
+    if (subscriptionGateVisible && subscriptionPackages.length === 0 && !subscriptionLoading) {
+      loadSubscriptionPackages();
+    }
+  }, [loadSubscriptionPackages, subscriptionGateVisible, subscriptionLoading, subscriptionPackages.length]);
 
   const fetchMenus = useCallback(async () => {
     if (authLoading) {
@@ -853,6 +1048,124 @@ export default function MenuScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <Modal
+        visible={subscriptionGateVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSubscriptionGateVisible(false)}
+      >
+        <ImageBackground
+          source={SUBSCRIPTION_BG_IMAGE}
+          style={styles.subscriptionOverlay}
+          imageStyle={styles.subscriptionOverlayImage}
+        >
+          <View style={styles.subscriptionCard}>
+            <View style={styles.subscriptionHeader}>
+              <View>
+                <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
+                <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.subscriptionClose}
+                onPress={() => setSubscriptionGateVisible(false)}
+              >
+                <Ionicons name="close" size={18} color={stylesVars.espresso} />
+              </TouchableOpacity>
+            </View>
+
+            {subscriptionLoading ? (
+              <ActivityIndicator size="small" color={stylesVars.espresso} />
+            ) : subscriptionError ? (
+              <Text style={styles.subscriptionError}>{subscriptionError}</Text>
+            ) : (
+              <ScrollView
+                style={styles.subscriptionList}
+                contentContainerStyle={styles.subscriptionListContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {subscriptionPackages.map((item) => {
+                  const price = formatSubscriptionPrice(item.price);
+                  const isTrial = isTrialSubscription(item);
+                  return (
+                    <View
+                      key={String(getSubscriptionPackageId(item) ?? item.name)}
+                      style={styles.subscriptionPackageCard}
+                    >
+                      <Text style={styles.subscriptionPackageName}>
+                        {item.name ?? 'Subscription'}
+                      </Text>
+                      {item.tier ? (
+                        <Text style={styles.subscriptionPackageTier}>{item.tier}</Text>
+                      ) : null}
+                      {price ? (
+                        <Text style={styles.subscriptionPackagePrice}>{price}</Text>
+                      ) : null}
+                      {item.description ? (
+                        <Text style={styles.subscriptionPackageDesc}>{item.description}</Text>
+                      ) : null}
+                      {item.duration ? (
+                        <Text style={styles.subscriptionPackageMeta}>
+                          Duration: {item.duration}
+                        </Text>
+                      ) : null}
+                      <TouchableOpacity
+                        style={styles.subscriptionPackageAction}
+                        onPress={() => handleSubscribePackage(item)}
+                        disabled={subscribeSubmitting}
+                      >
+                        <Text style={styles.subscriptionPackageActionText}>
+                          {subscribeSubmitting
+                            ? 'Processing...'
+                            : isTrial
+                              ? 'Start Trial'
+                              : 'Subscribe'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={styles.subscriptionPrimaryButton}
+              onPress={() => setSubscriptionGateVisible(false)}
+            >
+              <Text style={styles.subscriptionPrimaryText}>Continue to app</Text>
+            </TouchableOpacity>
+          </View>
+        </ImageBackground>
+      </Modal>
+      <Modal
+        visible={showPayosModal}
+        animationType="slide"
+        onRequestClose={() => {
+          setShowPayosModal(false);
+          setPayosUrl(null);
+        }}
+      >
+        <SafeAreaView style={styles.payosContainer} edges={['top']}>
+          <View style={styles.payosHeader}>
+            <Text style={styles.payosTitle}>PayOS Checkout</Text>
+            <TouchableOpacity
+              style={styles.payosClose}
+              onPress={() => {
+                setShowPayosModal(false);
+                setPayosUrl(null);
+              }}
+            >
+              <Ionicons name="close" size={18} color={stylesVars.espresso} />
+            </TouchableOpacity>
+          </View>
+          {payosUrl ? (
+            <WebView
+              source={{ uri: payosUrl }}
+              style={styles.payosWebview}
+              onShouldStartLoadWithRequest={handlePayosShouldStart}
+            />
+          ) : null}
+        </SafeAreaView>
+      </Modal>
       <ScrollView
         ref={scrollViewRef}
         contentContainerStyle={styles.container}
@@ -2261,5 +2574,146 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: stylesVars.espresso,
+  },
+  subscriptionOverlay: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.12)',
+  },
+  subscriptionOverlayImage: {
+    opacity: 0.18,
+  },
+  subscriptionCard: {
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 26,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  subscriptionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  subscriptionSubtitle: {
+    fontSize: 12,
+    color: stylesVars.muted,
+    marginTop: 4,
+  },
+  subscriptionClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1E7D8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subscriptionList: {
+    maxHeight: 260,
+  },
+  subscriptionListContent: {
+    gap: 12,
+    paddingBottom: 8,
+  },
+  subscriptionPackageCard: {
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(62,39,35,0.15)',
+    backgroundColor: '#FFF',
+  },
+  subscriptionPackageName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  subscriptionPackageTier: {
+    fontSize: 12,
+    color: stylesVars.muted,
+    marginTop: 4,
+  },
+  subscriptionPackagePrice: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: stylesVars.primary,
+    marginTop: 6,
+  },
+  subscriptionPackageDesc: {
+    fontSize: 12,
+    color: stylesVars.espresso,
+    marginTop: 6,
+  },
+  subscriptionPackageMeta: {
+    fontSize: 11,
+    color: stylesVars.muted,
+    marginTop: 6,
+  },
+  subscriptionPackageAction: {
+    marginTop: 10,
+    backgroundColor: stylesVars.espresso,
+    borderRadius: 18,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  subscriptionPackageActionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  subscriptionError: {
+    fontSize: 12,
+    color: '#B22222',
+    textAlign: 'center',
+  },
+  subscriptionPrimaryButton: {
+    marginTop: 16,
+    backgroundColor: stylesVars.espresso,
+    borderRadius: 24,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  subscriptionPrimaryText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  payosContainer: {
+    flex: 1,
+    backgroundColor: '#FFF',
+  },
+  payosHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E6E0DA',
+  },
+  payosTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  payosClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1E7D8',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  payosWebview: {
+    flex: 1,
   },
 });

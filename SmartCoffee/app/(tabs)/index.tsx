@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -14,9 +14,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast from 'react-native-toast-message';
 
 import { API_ENDPOINTS } from '@/services/api';
-import { authorizedFetch } from '@/services/authService';
+import { authorizedFetch, logoutAccount } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 
 type PostItem = {
@@ -91,6 +92,7 @@ const isHiddenStatus = (status?: string | null) =>
 export default function HomeScreen() {
   const router = useRouter();
   const { role, coffeeShopId } = useAuth();
+  const unauthorizedNotifiedRef = useRef(false);
   const [posts, setPosts] = useState<PostItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [pageNo, setPageNo] = useState(1);
@@ -103,12 +105,31 @@ export default function HomeScreen() {
   const hasMore = posts.length < totalCount;
   const canSeeDisabled = role && role !== 'Staff';
 
+  const handleUnauthorized = useCallback(() => {
+    if (unauthorizedNotifiedRef.current) return;
+    unauthorizedNotifiedRef.current = true;
+    Toast.show({
+      type: 'error',
+      text1: 'Session expired',
+      text2: 'Please sign in again.',
+    });
+    void logoutAccount();
+    router.replace('/sign-in');
+  }, [router]);
+
   const loadPosts = useCallback(
     async (page: number, mode: 'replace' | 'append') => {
       const statusFilter = canSeeDisabled ? null : 'Active';
       const response = await authorizedFetch(buildPostUrl(page, statusFilter), {
         headers: { Accept: 'application/json' },
       });
+
+      if (response.status === 401) {
+        setPosts([]);
+        setTotalCount(0);
+        handleUnauthorized();
+        return;
+      }
 
       if (!response.ok) {
         throw new Error(`Request failed (${response.status})`);
@@ -126,7 +147,7 @@ export default function HomeScreen() {
       setPageNo(page);
       setPosts((prev) => (mode === 'replace' ? items : [...prev, ...items]));
     },
-    [canSeeDisabled, coffeeShopId]
+    [canSeeDisabled, coffeeShopId, handleUnauthorized]
   );
 
   const fetchFirstPage = useCallback(async () => {
@@ -142,6 +163,11 @@ export default function HomeScreen() {
     const response = await authorizedFetch(API_ENDPOINTS.coffeeShop.list(), {
       headers: { Accept: 'application/json' },
     });
+    if (response.status === 401) {
+      setShopNames({});
+      handleUnauthorized();
+      return;
+    }
     if (!response.ok) {
       throw new Error(`Request failed (${response.status})`);
     }
@@ -156,12 +182,18 @@ export default function HomeScreen() {
         }, {})
       : {};
     setShopNames(map);
-  }, []);
+  }, [handleUnauthorized]);
 
   const loadPostCategories = useCallback(async () => {
     const response = await authorizedFetch(API_ENDPOINTS.postCategory.list(), {
       headers: { Accept: 'application/json' },
     });
+
+    if (response.status === 401) {
+      setCategoryMap({});
+      handleUnauthorized();
+      return;
+    }
 
     if (!response.ok) {
       throw new Error(`Request failed (${response.status})`);
@@ -179,7 +211,7 @@ export default function HomeScreen() {
       return acc;
     }, {});
     setCategoryMap(map);
-  }, []);
+  }, [handleUnauthorized]);
 
   const onRefresh = useCallback(async () => {
     try {

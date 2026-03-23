@@ -67,6 +67,7 @@ function RootLayoutNav() {
         <Stack.Screen name="daily-sale-item/[menuItemId]" options={{ headerShown: false }} />
         <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
         <Stack.Screen name="otp" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
         <Stack.Screen name="reset-password" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs-staff)" options={{ headerShown: false }} />

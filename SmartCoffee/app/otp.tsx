@@ -1,5 +1,7 @@
 import React, { useRef, useState } from 'react';
 import {
+  Image,
+  ImageBackground,
   SafeAreaView,
   StyleSheet,
   Text,
@@ -19,9 +21,13 @@ const COLORS = {
   text: '#3C2A21',
   muted: '#8E7B6F',
   border: '#B08B61',
-  accent: '#9C7A4B',
+  accent: '#5B3216',
+  accentSoft: '#EFE6DE',
   white: '#FFFFFF',
+  shadow: 'rgba(0,0,0,0.08)',
 };
+
+const BACKGROUND_IMAGE = require('../assets/background.png');
 
 export default function OtpScreen() {
   const router = useRouter();
@@ -63,7 +69,7 @@ export default function OtpScreen() {
       ]);
       await refreshProfile();
       Toast.show({ type: 'success', text1: 'Verified and logged in' });
-      router.replace('/(tabs)/menu');
+      router.replace('/onboarding');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Verify failed.';
       Toast.show({ type: 'error', text1: 'Verification failed', text2: message });
@@ -73,59 +79,80 @@ export default function OtpScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-        </Pressable>
+    <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
+          <View style={styles.card}>
+            <Pressable style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={20} color={COLORS.text} />
+            </Pressable>
 
-        <View style={styles.headerBlock}>
-          <Text style={styles.title}>SmartCoffee</Text>
+            <View style={styles.heroBlock}>
+              <Image source={BACKGROUND_IMAGE} style={styles.heroImage} resizeMode="contain" />
+              <Text style={styles.title}>SmartCoffee</Text>
+              <Text style={styles.subtitle}>Input your OTP</Text>
+            </View>
+
+            <View style={styles.otpRow}>
+              {code.map((digit, index) => (
+                <TextInput
+                  key={`otp-${index}`}
+                  ref={(ref) => {
+                    inputsRef.current[index] = ref;
+                  }}
+                  style={styles.otpInput}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  value={digit}
+                  onChangeText={(value) => handleChange(value, index)}
+                />
+              ))}
+            </View>
+
+            <View style={styles.resendRow}>
+              <Text style={styles.resendText}>Didn't receive the code?</Text>
+              <Pressable>
+                <Text style={styles.resendLink}> Resend</Text>
+              </Pressable>
+            </View>
+
+            <Pressable style={styles.primaryButton} onPress={handleVerify} disabled={submitting}>
+              <Text style={styles.primaryButtonText}>{submitting ? 'Verifying...' : 'Verify'}</Text>
+            </Pressable>
+          </View>
         </View>
-
-        <Text style={styles.label}>Input your OTP</Text>
-
-        <View style={styles.otpRow}>
-          {code.map((digit, index) => (
-            <TextInput
-              key={`otp-${index}`}
-              ref={(ref) => {
-                inputsRef.current[index] = ref;
-              }}
-              style={styles.otpInput}
-              keyboardType="number-pad"
-              maxLength={1}
-              value={digit}
-              onChangeText={(value) => handleChange(value, index)}
-            />
-          ))}
-        </View>
-
-        <View style={styles.resendRow}>
-          <Text style={styles.resendText}>Didn't receive the code?</Text>
-          <Pressable>
-            <Text style={styles.resendLink}> Resend</Text>
-          </Pressable>
-        </View>
-
-        <Pressable style={styles.primaryButton} onPress={handleVerify} disabled={submitting}>
-          <Text style={styles.primaryButtonText}>{submitting ? 'Verifying...' : 'Verify'}</Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  background: {
     flex: 1,
     backgroundColor: COLORS.bg,
   },
+  backgroundImage: {
+    opacity: 0.18,
+  },
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    paddingHorizontal: 28,
-    paddingVertical: 36,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     justifyContent: 'center',
+  },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   backButton: {
     width: 36,
@@ -133,22 +160,27 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 40,
+    alignSelf: 'flex-start',
+    marginBottom: 12,
   },
-  headerBlock: {
+  heroBlock: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 18,
+    gap: 6,
+  },
+  heroImage: {
+    width: 120,
+    height: 120,
   },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
+    textAlign: 'center',
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 16,
+  subtitle: {
+    fontSize: 12,
+    color: COLORS.muted,
     textAlign: 'center',
   },
   otpRow: {

@@ -39,6 +39,7 @@ export const API_ENDPOINTS = {
     logout: () => `${AUTH_BASE_URL}/Auth/logout`,
     refreshToken: () => `${AUTH_BASE_URL}/Auth/refresh-token`,
     changePassword: () => `${AUTH_BASE_URL}/Auth/change-password`,
+    updateCoffeeShop: () => `${AUTH_BASE_URL}/Auth/update-coffeeshop`,
   },
   ghn: {
     provinces: () => `${AUTH_BASE_URL}/GHN/provinces`,
@@ -171,6 +172,7 @@ export const API_ENDPOINTS = {
     byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,
     subscribe: (packageId: number, isMobile = true) =>
       `${AUTH_BASE_URL}/Subscription/subscribe?packageId=${packageId}&isMobile=${isMobile}`,
+    trial: () => `${AUTH_BASE_URL}/Subscription/Trials`,
   },
   subscriptionPackage: {
     list: () => `${AUTH_BASE_URL}/SubscriptionPackage`,
