@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   BackHandler,
   KeyboardAvoidingView,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,7 +18,7 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
@@ -118,10 +119,14 @@ export default function AiCreateScreen() {
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
   const [margin, setMargin] = useState(35);
-  const [isUnique, setIsUnique] = useState(true);
+  const [isUnique, setIsUnique] = useState(false);
+  const [subscriptionPackageName, setSubscriptionPackageName] = useState<string | null>(null);
+  const [showUniqueModal, setShowUniqueModal] = useState(false);
   const [numberOption, setNumberOption] = useState(3);
   const [pricingStrategy, setPricingStrategy] = useState(2);
   const [isLoading, setIsLoading] = useState(false);
+
+  const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
 
   useEffect(() => {
     let isMounted = true;
@@ -168,6 +173,47 @@ export default function AiCreateScreen() {
     };
 
     fetchBeverages();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [coffeeShopId]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchSubscription = async () => {
+      if (!coffeeShopId) {
+        if (isMounted) {
+          setSubscriptionPackageName(null);
+        }
+        return;
+      }
+
+      try {
+        const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const data = await response.json();
+        const resolved = Array.isArray(data) ? data[0] : Array.isArray(data?.data) ? data.data[0] : data;
+        const name =
+          resolved?.package?.name ??
+          resolved?.subscriptionPackage?.name ??
+          resolved?.packageName ??
+          resolved?.name ??
+          null;
+        if (isMounted) {
+          setSubscriptionPackageName(typeof name === 'string' ? name : null);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setSubscriptionPackageName(null);
+        }
+      }
+    };
+
+    fetchSubscription();
 
     return () => {
       isMounted = false;
@@ -844,11 +890,39 @@ export default function AiCreateScreen() {
                 </View>
                 <Switch
                   value={isUnique}
-                  onValueChange={setIsUnique}
+                  onValueChange={(value) => {
+                    if (value && !isProPlan) {
+                      setShowUniqueModal(true);
+                      setIsUnique(false);
+                      return;
+                    }
+                    setIsUnique(value);
+                  }}
                   trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
                   thumbColor={isUnique ? '#6B3E1F' : '#A3A3A3'}
                 />
               </View>
+              <Modal
+                transparent
+                visible={showUniqueModal}
+                animationType="fade"
+                onRequestClose={() => setShowUniqueModal(false)}
+              >
+                <View style={styles.upgradeModalBackdrop}>
+                  <View style={styles.upgradeModalCard}>
+                    <ThemedText style={styles.upgradeModalTitle}>Feature locked</ThemedText>
+                    <ThemedText style={styles.upgradeModalText}>
+                      Tinh nang "Cong thuc doc nhat" chi danh cho goi Pro. Vui long nang cap goi de su dung.
+                    </ThemedText>
+                    <Pressable
+                      style={styles.upgradeModalButton}
+                      onPress={() => setShowUniqueModal(false)}
+                    >
+                      <ThemedText style={styles.upgradeModalButtonText}>Got it</ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+              </Modal>
               <Pressable
                 style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
                 onPress={handleSubmit}
@@ -1027,6 +1101,45 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: {
     opacity: 0.7,
+  },
+  upgradeModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 17, 17, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  upgradeModalCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E6D6C8',
+  },
+  upgradeModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#3C2A21',
+    marginBottom: 8,
+  },
+  upgradeModalText: {
+    fontSize: 13,
+    color: '#6B4D35',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  upgradeModalButton: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#6B3E1F',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  upgradeModalButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
   submitButtonText: {
     color: '#FFFFFF',
