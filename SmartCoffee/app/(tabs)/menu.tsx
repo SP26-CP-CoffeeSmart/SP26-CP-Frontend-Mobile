@@ -77,6 +77,7 @@ const fallbackBeverageImage =
   'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
 
 const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
+const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
 const ONBOARDING_COMPLETE_KEY = 'onboarding:complete';
 const SUBSCRIPTION_SKIP_ONCE_KEY = 'subscription:skip-once';
 const SUBSCRIPTION_BG_IMAGE = require('../../assets/background.png');
@@ -92,7 +93,7 @@ type SubscriptionPackage = {
 };
 
 const getSubscriptionPackageId = (item: SubscriptionPackage) =>
-  item.subscriptionPackageId ?? item.id ?? null;
+  item.subscriptionPackageId ?? item.id ?? (item as any).packageId ?? null;
 
 const formatSubscriptionPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
@@ -101,6 +102,24 @@ const formatSubscriptionPrice = (value: unknown) => {
     return `${numeric.toLocaleString()} VND`;
   }
   return String(value);
+};
+
+const getNumericPrice = (value: unknown) => {
+  if (value === null || value === undefined) return null;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getSubscriptionPackageIdFromSubscription = (value: any) => {
+  const raw =
+    value?.packageId ??
+    value?.subscriptionPackageId ??
+    value?.package?.packageId ??
+    value?.package?.subscriptionPackageId ??
+    value?.package?.id ??
+    value?.subscriptionPackage?.id ??
+    value?.subscriptionPackageId;
+  return typeof raw === 'number' ? raw : Number(raw) || null;
 };
 
 const isTrialSubscription = (item: SubscriptionPackage) => {
@@ -167,6 +186,9 @@ export default function MenuScreen() {
   const [subscriptionPackages, setSubscriptionPackages] = useState<SubscriptionPackage[]>([]);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [currentSubscription, setCurrentSubscription] = useState<any | null>(null);
+  const [currentPackageId, setCurrentPackageId] = useState<number | null>(null);
+  const [subscriptionInfoLoading, setSubscriptionInfoLoading] = useState(false);
   const [subscribeSubmitting, setSubscribeSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
@@ -194,7 +216,10 @@ export default function MenuScreen() {
       const items: SubscriptionPackage[] = Array.isArray(payload)
         ? payload
         : payload?.items ?? payload?.data ?? [];
-      setSubscriptionPackages(items);
+      const sorted = [...items].sort(
+        (a, b) => Number(isTrialSubscription(b)) - Number(isTrialSubscription(a))
+      );
+      setSubscriptionPackages(sorted);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load packages.';
       setSubscriptionError(message);
@@ -202,6 +227,37 @@ export default function MenuScreen() {
       setSubscriptionLoading(false);
     }
   }, []);
+
+  const loadCurrentSubscription = useCallback(async () => {
+    if (!coffeeShopId) {
+      setCurrentSubscription(null);
+      setCurrentPackageId(null);
+      return;
+    }
+
+    try {
+      setSubscriptionInfoLoading(true);
+      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId), {
+        headers: { Accept: '*/*' },
+      });
+      if (!response.ok) {
+        setCurrentSubscription(null);
+        setCurrentPackageId(null);
+        return;
+      }
+      const payload = await response.json();
+      const resolved = Array.isArray(payload)
+        ? payload[0]
+        : payload?.data ?? payload?.item ?? payload?.items?.[0] ?? payload ?? null;
+      setCurrentSubscription(resolved);
+      setCurrentPackageId(getSubscriptionPackageIdFromSubscription(resolved));
+    } catch {
+      setCurrentSubscription(null);
+      setCurrentPackageId(null);
+    } finally {
+      setSubscriptionInfoLoading(false);
+    }
+  }, [coffeeShopId]);
 
   const handleSubscribePackage = useCallback(
     async (item: SubscriptionPackage) => {
@@ -230,6 +286,7 @@ export default function MenuScreen() {
           }
 
           Toast.show({ type: 'success', text1: 'Trial activated' });
+          await loadCurrentSubscription();
           return;
         }
 
@@ -264,7 +321,7 @@ export default function MenuScreen() {
         setSubscribeSubmitting(false);
       }
     },
-    [accountId, subscribeSubmitting]
+      [accountId, loadCurrentSubscription, subscribeSubmitting]
   );
 
   const handlePayosShouldStart = useCallback((event: { url?: string }) => {
@@ -289,6 +346,7 @@ export default function MenuScreen() {
       if (!subscriptionSuccessRef.current) {
         subscriptionSuccessRef.current = true;
         Toast.show({ type: 'success', text1: 'Subscription activated' });
+        loadCurrentSubscription();
         setShowPayosModal(false);
         setPayosUrl(null);
       }
@@ -296,7 +354,7 @@ export default function MenuScreen() {
     }
 
     return true;
-  }, []);
+  }, [loadCurrentSubscription]);
 
   useEffect(() => {
     if (authLoading || subscriptionGateShown) {
@@ -331,6 +389,12 @@ export default function MenuScreen() {
       loadSubscriptionPackages();
     }
   }, [loadSubscriptionPackages, subscriptionGateVisible, subscriptionLoading, subscriptionPackages.length]);
+
+  useEffect(() => {
+    if (subscriptionGateVisible && !subscriptionInfoLoading) {
+      loadCurrentSubscription();
+    }
+  }, [loadCurrentSubscription, subscriptionGateVisible, subscriptionInfoLoading]);
 
   const fetchMenus = useCallback(async () => {
     if (authLoading) {
@@ -494,13 +558,20 @@ export default function MenuScreen() {
       const refreshIfNeeded = async () => {
         try {
           const shouldRefresh = await AsyncStorage.getItem(MENU_REFRESH_FLAG_KEY);
-          if (!isActive || shouldRefresh !== '1') {
+          const shouldRefreshBeverages = await AsyncStorage.getItem(BEVERAGE_REFRESH_FLAG_KEY);
+
+          if (!isActive) {
             return;
           }
 
-          await AsyncStorage.removeItem(MENU_REFRESH_FLAG_KEY);
-          if (isActive) {
+          if (shouldRefresh === '1') {
+            await AsyncStorage.removeItem(MENU_REFRESH_FLAG_KEY);
             fetchMenus();
+          }
+
+          if (shouldRefreshBeverages === '1') {
+            await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
+            await Promise.all([fetchBeverages(), fetchBeverageCount(), refreshCategories()]);
           }
         } catch {
           // Ignore storage errors to avoid blocking UI flow.
@@ -757,7 +828,8 @@ export default function MenuScreen() {
   };
 
   const handleNewMenuPress = () => {
-    if (totalBeverages >= 5 || beverages.length >= 5) {
+    // Use loaded beverage list as the source of truth for guard validation.
+    if (beverages.length >= 5) {
       router.push('/menu-recommendations');
       return;
     }
@@ -1035,8 +1107,10 @@ export default function MenuScreen() {
         createDate: String(created?.createDate ?? created?.createdAt ?? new Date().toISOString()),
       };
 
+      setBeveragesError(null);
       setBeverages((prev) => [mapped, ...prev]);
-      await fetchBeverageCount();
+      await AsyncStorage.setItem(BEVERAGE_REFRESH_FLAG_KEY, '1');
+      await Promise.all([fetchBeverages(), fetchBeverageCount(), refreshCategories()]);
       resetCreateForm();
       setShowCreateModal(false);
     } catch (error) {
@@ -1050,18 +1124,23 @@ export default function MenuScreen() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Modal
         visible={subscriptionGateVisible}
-        transparent
         animationType="fade"
         onRequestClose={() => setSubscriptionGateVisible(false)}
       >
-        <ImageBackground
-          source={SUBSCRIPTION_BG_IMAGE}
-          style={styles.subscriptionOverlay}
-          imageStyle={styles.subscriptionOverlayImage}
-        >
-          <View style={styles.subscriptionCard}>
+        <SafeAreaView style={styles.subscriptionOverlay} edges={['top']}>
+          <ImageBackground
+            source={SUBSCRIPTION_BG_IMAGE}
+            style={styles.subscriptionOverlayImageWrapper}
+            imageStyle={styles.subscriptionOverlayImage}
+          >
+            <View style={styles.subscriptionCard}>
+              <Image
+                source={SUBSCRIPTION_BG_IMAGE}
+                style={styles.subscriptionLogo}
+                resizeMode="contain"
+              />
             <View style={styles.subscriptionHeader}>
-              <View>
+              <View style={styles.subscriptionHeaderText}>
                 <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
                 <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
               </View>
@@ -1086,11 +1165,45 @@ export default function MenuScreen() {
                 {subscriptionPackages.map((item) => {
                   const price = formatSubscriptionPrice(item.price);
                   const isTrial = isTrialSubscription(item);
+                  const targetPrice = getNumericPrice(item.price) ?? 0;
+                  const resolvedCurrentPackageId =
+                    currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
+                  const currentPrice = resolvedCurrentPackageId
+                    ? getNumericPrice(
+                        subscriptionPackages.find(
+                          (pkg) => getSubscriptionPackageId(pkg) === resolvedCurrentPackageId
+                        )?.price
+                      )
+                    : null;
+                  const activeNameRaw =
+                    currentSubscription?.package?.name ??
+                    currentSubscription?.subscriptionPackage?.name ??
+                    currentSubscription?.packageName ??
+                    currentSubscription?.name ??
+                    null;
+                  const activeName = activeNameRaw
+                    ? String(activeNameRaw).toLowerCase().trim()
+                    : null;
+                  const itemName = String(item.name ?? item.tier ?? '').toLowerCase().trim();
+                  const isCurrentById =
+                    resolvedCurrentPackageId !== null &&
+                    resolvedCurrentPackageId === getSubscriptionPackageId(item);
+                  const isCurrentByName =
+                    Boolean(activeName && itemName) && activeName === itemName;
+                  const isCurrent = isCurrentById || isCurrentByName;
+                  const isLowerOrEqual =
+                    currentPrice !== null && targetPrice <= currentPrice;
+                  const disableSubscribe = isCurrent || isLowerOrEqual;
                   return (
                     <View
                       key={String(getSubscriptionPackageId(item) ?? item.name)}
                       style={styles.subscriptionPackageCard}
                     >
+                      {isCurrent ? (
+                        <View style={styles.subscriptionActiveBadge}>
+                          <Text style={styles.subscriptionActiveText}>Active</Text>
+                        </View>
+                      ) : null}
                       <Text style={styles.subscriptionPackageName}>
                         {item.name ?? 'Subscription'}
                       </Text>
@@ -1111,11 +1224,15 @@ export default function MenuScreen() {
                       <TouchableOpacity
                         style={styles.subscriptionPackageAction}
                         onPress={() => handleSubscribePackage(item)}
-                        disabled={subscribeSubmitting}
+                        disabled={subscribeSubmitting || disableSubscribe}
                       >
                         <Text style={styles.subscriptionPackageActionText}>
                           {subscribeSubmitting
                             ? 'Processing...'
+                            : isCurrent
+                              ? 'Activated'
+                              : disableSubscribe
+                                ? 'Not available'
                             : isTrial
                               ? 'Start Trial'
                               : 'Subscribe'}
@@ -1126,15 +1243,9 @@ export default function MenuScreen() {
                 })}
               </ScrollView>
             )}
-
-            <TouchableOpacity
-              style={styles.subscriptionPrimaryButton}
-              onPress={() => setSubscriptionGateVisible(false)}
-            >
-              <Text style={styles.subscriptionPrimaryText}>Continue to app</Text>
-            </TouchableOpacity>
-          </View>
-        </ImageBackground>
+            </View>
+          </ImageBackground>
+        </SafeAreaView>
       </Modal>
       <Modal
         visible={showPayosModal}
@@ -2577,9 +2688,12 @@ const styles = StyleSheet.create({
   },
   subscriptionOverlay: {
     flex: 1,
+    backgroundColor: stylesVars.background,
+  },
+  subscriptionOverlayImageWrapper: {
+    flex: 1,
     padding: 24,
     justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.12)',
   },
   subscriptionOverlayImage: {
     opacity: 0.18,
@@ -2593,24 +2707,39 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 6,
+    minHeight: 520,
+  },
+  subscriptionLogo: {
+    width: 90,
+    height: 90,
+    alignSelf: 'center',
+    marginBottom: 12,
   },
   subscriptionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
+    position: 'relative',
+  },
+  subscriptionHeaderText: {
+    alignItems: 'center',
   },
   subscriptionTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: stylesVars.espresso,
+    textAlign: 'center',
   },
   subscriptionSubtitle: {
     fontSize: 12,
     color: stylesVars.muted,
     marginTop: 4,
+    textAlign: 'center',
   },
   subscriptionClose: {
+    position: 'absolute',
+    top: -100,
+    right: -6,
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -2631,6 +2760,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(62,39,35,0.15)',
     backgroundColor: '#FFF',
+  },
+  subscriptionActiveBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(62,39,35,0.12)',
+    marginBottom: 8,
+  },
+  subscriptionActiveText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
   subscriptionPackageName: {
     fontSize: 14,
@@ -2674,18 +2816,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B22222',
     textAlign: 'center',
-  },
-  subscriptionPrimaryButton: {
-    marginTop: 16,
-    backgroundColor: stylesVars.espresso,
-    borderRadius: 24,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  subscriptionPrimaryText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
   },
   payosContainer: {
     flex: 1,

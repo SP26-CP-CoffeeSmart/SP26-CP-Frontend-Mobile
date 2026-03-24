@@ -22,6 +22,7 @@ import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
 const COFFEE_TYPES = ['Robusta', 'Arabica', 'Blend', 'Cherry', 'Culi'];
@@ -71,6 +72,7 @@ const PRICING_STRATEGIES = [
 ];
 
 const SLIDER_KEYS = ['Bitterness', 'Sweetness', 'Body', 'Acidity'] as const;
+const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
 
 const getLevelLabel = (value: number) => {
   if (value <= 2) return 'Very Low';
@@ -128,56 +130,59 @@ export default function AiCreateScreen() {
 
   const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const fetchBeverages = async () => {
-      setBeveragesLoading(true);
-      setBeveragesError(null);
-      try {
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        const result = await response.json();
-        const rawList: Record<string, any>[] = Array.isArray(result)
-          ? result
-          : Array.isArray(result?.data)
-            ? result.data
+  const fetchBeverages = useCallback(async () => {
+    setBeveragesLoading(true);
+    setBeveragesError(null);
+    try {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const result = await response.json();
+      const rawList: Record<string, any>[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.data)
+          ? result.data
+          : Array.isArray(result?.data?.items)
+            ? result.data.items
             : Array.isArray(result?.items)
               ? result.items
-              : [];
+              : Array.isArray(result?.result)
+                ? result.result
+                : [];
 
-        const mapped = rawList.map((item, index) => ({
-          id: String(item?.beverageId ?? item?.id ?? index),
-          name: String(item?.beverageName ?? item?.name ?? 'Unknown'),
-          raw: item ?? {},
-        }));
+      const mapped = rawList.map((item, index) => ({
+        id: String(item?.beverageId ?? item?.id ?? index),
+        name: String(item?.beverageName ?? item?.name ?? 'Unknown'),
+        raw: item ?? {},
+      }));
 
-        if (isMounted) {
-          setBeverages(mapped);
-          if (!selectedBeverageId && mapped.length > 0) {
-            setSelectedBeverageId(mapped[0].id);
-            setSelectedBeverage(mapped[0].raw ?? null);
-          }
+      setBeverages(mapped);
+      setSelectedBeverageId((prev) => {
+        if (prev && mapped.some((item) => item.id === prev)) {
+          const current = mapped.find((item) => item.id === prev);
+          setSelectedBeverage(current?.raw ?? null);
+          return prev;
         }
-      } catch (error) {
-        if (isMounted) {
-          setBeveragesError('Failed to load beverages.');
-        }
-      } finally {
-        if (isMounted) {
-          setBeveragesLoading(false);
-        }
-      }
-    };
 
-    fetchBeverages();
+        if (mapped.length > 0) {
+          setSelectedBeverage(mapped[0].raw ?? null);
+          return mapped[0].id;
+        }
 
-    return () => {
-      isMounted = false;
-    };
+        setSelectedBeverage(null);
+        return null;
+      });
+    } catch (error) {
+      setBeveragesError('Failed to load beverages.');
+    } finally {
+      setBeveragesLoading(false);
+    }
   }, [coffeeShopId]);
+
+  useEffect(() => {
+    fetchBeverages();
+  }, [fetchBeverages]);
 
   useEffect(() => {
     let isMounted = true;
@@ -222,6 +227,21 @@ export default function AiCreateScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      const syncOnFocus = async () => {
+        try {
+          const shouldRefresh = await AsyncStorage.getItem(BEVERAGE_REFRESH_FLAG_KEY);
+          if (shouldRefresh === '1') {
+            await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
+          }
+        } catch {
+          // Ignore storage errors; still refresh from API.
+        }
+
+        fetchBeverages();
+      };
+
+      syncOnFocus();
+
       const onBackPress = () => {
         router.replace('/(tabs)/menu');
         return true;
@@ -229,7 +249,7 @@ export default function AiCreateScreen() {
 
       const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove();
-    }, [router])
+    }, [fetchBeverages, router])
   );
 
   const handleSubmit = async () => {

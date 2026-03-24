@@ -39,6 +39,7 @@ const EDGE_NAV_WIDTH = 44;
 
 type SubscriptionPackage = {
   subscriptionPackageId?: number;
+  packageId?: number;
   id?: number;
   name?: string;
   tier?: string;
@@ -47,8 +48,23 @@ type SubscriptionPackage = {
   description?: string;
 };
 
+type ProvinceItem = {
+  ProvinceID: number;
+  ProvinceName: string;
+};
+
+type DistrictItem = {
+  DistrictID: number;
+  DistrictName: string;
+};
+
+type WardItem = {
+  WardCode: string;
+  WardName: string;
+};
+
 const getPackageId = (item: SubscriptionPackage) =>
-  item.subscriptionPackageId ?? item.id ?? null;
+  item.subscriptionPackageId ?? item.packageId ?? item.id ?? null;
 
 const formatPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
@@ -73,6 +89,19 @@ export default function OnboardingScreen() {
   const [shopNameInput, setShopNameInput] = useState(shopName ?? '');
   const [savingShopName, setSavingShopName] = useState(false);
   const [shopNameError, setShopNameError] = useState<string | null>(null);
+  const [addressInput, setAddressInput] = useState('');
+  const [provinceSearch, setProvinceSearch] = useState('');
+  const [districtSearch, setDistrictSearch] = useState('');
+  const [wardSearch, setWardSearch] = useState('');
+  const [provinces, setProvinces] = useState<ProvinceItem[]>([]);
+  const [districts, setDistricts] = useState<DistrictItem[]>([]);
+  const [wards, setWards] = useState<WardItem[]>([]);
+  const [selectedProvince, setSelectedProvince] = useState<ProvinceItem | null>(null);
+  const [selectedDistrict, setSelectedDistrict] = useState<DistrictItem | null>(null);
+  const [selectedWard, setSelectedWard] = useState<WardItem | null>(null);
+  const [loadingProvinces, setLoadingProvinces] = useState(false);
+  const [loadingDistricts, setLoadingDistricts] = useState(false);
+  const [loadingWards, setLoadingWards] = useState(false);
   const [packages, setPackages] = useState<SubscriptionPackage[]>([]);
   const [packagesLoading, setPackagesLoading] = useState(false);
   const [packagesError, setPackagesError] = useState<string | null>(null);
@@ -80,6 +109,9 @@ export default function OnboardingScreen() {
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
   const [subscriptionActivated, setSubscriptionActivated] = useState(false);
+  const [provinceFocused, setProvinceFocused] = useState(false);
+  const [districtFocused, setDistrictFocused] = useState(false);
+  const [wardFocused, setWardFocused] = useState(false);
   const successTriggeredRef = useRef(false);
 
   useEffect(() => {
@@ -87,7 +119,30 @@ export default function OnboardingScreen() {
       try {
         const stored = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
         if (stored === 'true') {
-          router.replace('/(tabs)/menu');
+          if (!coffeeShopId) {
+            return;
+          }
+          try {
+            const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId), {
+              headers: { Accept: '*/*' },
+            });
+            if (!response.ok) {
+              throw new Error(`Request failed (${response.status})`);
+            }
+            const payload = await response.json();
+            const active = Array.isArray(payload)
+              ? payload.length > 0
+              : Boolean(payload?.data ?? payload?.items ?? payload?.result);
+            if (active) {
+              router.replace('/(tabs)/menu');
+            } else {
+              await AsyncStorage.removeItem(ONBOARDING_COMPLETE_KEY);
+              setActiveTab(2);
+            }
+          } catch {
+            await AsyncStorage.removeItem(ONBOARDING_COMPLETE_KEY);
+            setActiveTab(2);
+          }
         }
       } catch {
         // Ignore storage errors.
@@ -95,22 +150,34 @@ export default function OnboardingScreen() {
     };
 
     checkOnboarding();
-  }, [router]);
+  }, [coffeeShopId, router]);
 
   const loadPackages = useCallback(async () => {
     try {
       setPackagesLoading(true);
       setPackagesError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.subscriptionPackage.list(), {
+      const listUrl = API_ENDPOINTS.subscriptionPackage.list();
+      console.log('[SubscriptionPackage] GET', listUrl);
+      const response = await authorizedFetch(listUrl, {
         headers: { Accept: '*/*' },
       });
+      console.log('[SubscriptionPackage] status', response.status);
       if (!response.ok) {
         throw new Error(`Request failed (${response.status})`);
       }
       const payload = await response.json();
+      console.log('[SubscriptionPackage] payload', payload);
       const items: SubscriptionPackage[] = Array.isArray(payload)
         ? payload
-        : payload?.items ?? payload?.data ?? [];
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.data?.items)
+              ? payload.data.items
+              : Array.isArray(payload?.result)
+                ? payload.result
+                : [];
       const sorted = [...items].sort(
         (a, b) => Number(isTrialPackage(b)) - Number(isTrialPackage(a))
       );
@@ -129,6 +196,75 @@ export default function OnboardingScreen() {
     }
   }, [activeTab, loadPackages, packages.length, packagesLoading]);
 
+  const loadProvinces = useCallback(async () => {
+    try {
+      setLoadingProvinces(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ghn.provinces(), {
+        headers: { Accept: '*/*' },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list: ProvinceItem[] = Array.isArray(payload)
+        ? payload
+        : payload?.data ?? [];
+      setProvinces(list);
+    } catch {
+      Toast.show({ type: 'error', text1: 'Unable to load provinces' });
+    } finally {
+      setLoadingProvinces(false);
+    }
+  }, []);
+
+  const loadDistricts = useCallback(async (provinceId: number) => {
+    try {
+      setLoadingDistricts(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ghn.districts(provinceId), {
+        headers: { Accept: '*/*' },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list: DistrictItem[] = Array.isArray(payload)
+        ? payload
+        : payload?.data ?? [];
+      setDistricts(list);
+    } catch {
+      Toast.show({ type: 'error', text1: 'Unable to load districts' });
+    } finally {
+      setLoadingDistricts(false);
+    }
+  }, []);
+
+  const loadWards = useCallback(async (districtId: number) => {
+    try {
+      setLoadingWards(true);
+      const response = await authorizedFetch(API_ENDPOINTS.ghn.wards(districtId), {
+        headers: { Accept: '*/*' },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      const payload = await response.json();
+      const list: WardItem[] = Array.isArray(payload)
+        ? payload
+        : payload?.data ?? [];
+      setWards(list);
+    } catch {
+      Toast.show({ type: 'error', text1: 'Unable to load wards' });
+    } finally {
+      setLoadingWards(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 1 && provinces.length === 0 && !loadingProvinces) {
+      loadProvinces();
+    }
+  }, [activeTab, loadProvinces, loadingProvinces, provinces.length]);
+
   const goNext = useCallback(() => {
     setActiveTab((prev) => Math.min(prev + 1, 2));
   }, []);
@@ -139,6 +275,7 @@ export default function OnboardingScreen() {
 
   const handleSaveShopName = useCallback(async () => {
     const trimmedName = shopNameInput.trim();
+    const trimmedAddress = addressInput.trim();
     if (!trimmedName) {
       Toast.show({ type: 'error', text1: 'Missing shop name', text2: 'Please enter your shop name.' });
       return;
@@ -154,9 +291,24 @@ export default function OnboardingScreen() {
       return;
     }
 
+    if (!trimmedAddress) {
+      Toast.show({ type: 'error', text1: 'Missing address', text2: 'Please enter shop address.' });
+      return;
+    }
+
+    if (!selectedProvince || !selectedDistrict || !selectedWard) {
+      Toast.show({ type: 'error', text1: 'Missing location', text2: 'Please select province, district, and ward.' });
+      return;
+    }
+
     try {
       setSavingShopName(true);
-      await updateCoffeeShop(coffeeShopId, trimmedName);
+      await updateCoffeeShop(coffeeShopId, trimmedName, {
+        address: trimmedAddress,
+        provinceId: selectedProvince.ProvinceID,
+        districtId: selectedDistrict.DistrictID,
+        wardCode: selectedWard.WardCode,
+      });
       Toast.show({ type: 'success', text1: 'Shop name updated' });
       try {
         await refreshProfile();
@@ -170,7 +322,7 @@ export default function OnboardingScreen() {
     } finally {
       setSavingShopName(false);
     }
-  }, [coffeeShopId, goNext, refreshProfile, shopNameInput]);
+  }, [addressInput, coffeeShopId, goNext, refreshProfile, selectedDistrict, selectedProvince, selectedWard, shopNameInput]);
 
   const handleFinish = useCallback(async () => {
     try {
@@ -295,6 +447,69 @@ export default function OnboardingScreen() {
     );
   }, [packages]);
 
+  const showProvinceList = activeTab === 1 && provinceFocused;
+  const showDistrictList = activeTab === 1 && Boolean(selectedProvince) && districtFocused;
+  const showWardList = activeTab === 1 && Boolean(selectedDistrict) && wardFocused;
+
+  const filteredProvinces = useMemo(() => {
+    const query = provinceSearch.trim().toLowerCase();
+    if (!query) return provinces;
+    return provinces.filter((item) =>
+      item.ProvinceName.toLowerCase().includes(query)
+    );
+  }, [provinceSearch, provinces]);
+
+  const filteredDistricts = useMemo(() => {
+    const query = districtSearch.trim().toLowerCase();
+    if (!query) return districts;
+    return districts.filter((item) =>
+      item.DistrictName.toLowerCase().includes(query)
+    );
+  }, [districtSearch, districts]);
+
+  const filteredWards = useMemo(() => {
+    const query = wardSearch.trim().toLowerCase();
+    if (!query) return wards;
+    return wards.filter((item) =>
+      item.WardName.toLowerCase().includes(query)
+    );
+  }, [wardSearch, wards]);
+
+  const handleSelectProvince = useCallback(
+    (item: ProvinceItem) => {
+      setSelectedProvince(item);
+      setProvinceSearch(item.ProvinceName);
+      setSelectedDistrict(null);
+      setSelectedWard(null);
+      setDistrictSearch('');
+      setWardSearch('');
+      setDistricts([]);
+      setWards([]);
+      setProvinceFocused(false);
+      loadDistricts(item.ProvinceID);
+    },
+    [loadDistricts]
+  );
+
+  const handleSelectDistrict = useCallback(
+    (item: DistrictItem) => {
+      setSelectedDistrict(item);
+      setDistrictSearch(item.DistrictName);
+      setSelectedWard(null);
+      setWardSearch('');
+      setWards([]);
+      setDistrictFocused(false);
+      loadWards(item.DistrictID);
+    },
+    [loadWards]
+  );
+
+  const handleSelectWard = useCallback((item: WardItem) => {
+    setSelectedWard(item);
+    setWardSearch(item.WardName);
+    setWardFocused(false);
+  }, []);
+
   const screenWidth = Dimensions.get('window').width;
 
   return (
@@ -342,30 +557,174 @@ export default function OnboardingScreen() {
               ) : null}
 
               {activeTab === 1 ? (
-                <View style={styles.sectionBlock}>
-                  <Text style={styles.sectionTitle}>Name your coffee shop</Text>
-                  <Text style={styles.sectionText}>
-                    This name will appear on your menu and profile.
-                  </Text>
-                  <TextInput
-                    value={shopNameInput}
-                    onChangeText={(value) => {
-                      if (value.length > 15) {
-                        setShopNameError('Maximum 15 characters.');
-                        return;
-                      }
-                      setShopNameError(null);
-                      setShopNameInput(value);
-                    }}
-                    placeholder="Enter your shop name"
-                    placeholderTextColor={COLORS.muted}
-                    style={styles.input}
-                    autoCapitalize="words"
-                  />
-                  {shopNameError ? (
-                    <Text style={styles.errorText}>{shopNameError}</Text>
-                  ) : null}
-                  <View style={styles.buttonRow}>
+                <View style={styles.sectionShell}>
+                  <ScrollView
+                    style={styles.sectionScroll}
+                    contentContainerStyle={styles.sectionScrollContent}
+                    showsVerticalScrollIndicator={false}
+                    nestedScrollEnabled
+                  >
+                    <Text style={styles.sectionTitle}>Name your coffee shop</Text>
+                    <Text style={styles.sectionText}>
+                      This name will appear on your menu and profile.
+                    </Text>
+                    <Text style={styles.label}>Shop name</Text>
+                    <TextInput
+                      value={shopNameInput}
+                      onChangeText={(value) => {
+                        if (value.length > 15) {
+                          setShopNameError('Maximum 15 characters.');
+                          return;
+                        }
+                        setShopNameError(null);
+                        setShopNameInput(value);
+                      }}
+                      placeholder="Enter your shop name"
+                      placeholderTextColor={COLORS.muted}
+                      style={styles.input}
+                      autoCapitalize="words"
+                    />
+                    {shopNameError ? (
+                      <Text style={styles.errorText}>{shopNameError}</Text>
+                    ) : null}
+
+                    <Text style={styles.label}>Province</Text>
+                    <TextInput
+                      value={provinceSearch}
+                      onChangeText={(value) => {
+                        setProvinceSearch(value);
+                        setSelectedProvince(null);
+                        setSelectedDistrict(null);
+                        setSelectedWard(null);
+                        setDistrictSearch('');
+                        setWardSearch('');
+                        setDistricts([]);
+                        setWards([]);
+                      }}
+                      onFocus={() => setProvinceFocused(true)}
+                      onBlur={() => setProvinceFocused(false)}
+                      placeholder="Search province"
+                      placeholderTextColor={COLORS.muted}
+                      style={styles.input}
+                    />
+                    {loadingProvinces ? (
+                      <ActivityIndicator size="small" color={COLORS.accent} />
+                    ) : showProvinceList ? (
+                      <View style={styles.dropdownList}>
+                        {filteredProvinces.length === 0 ? (
+                          <Text style={styles.dropdownEmpty}>No provinces found.</Text>
+                        ) : (
+                          <ScrollView nestedScrollEnabled>
+                            {filteredProvinces.map((item) => (
+                              <Pressable
+                                key={String(item.ProvinceID)}
+                                style={styles.dropdownItem}
+                                onPress={() => handleSelectProvince(item)}
+                              >
+                                <Text style={styles.dropdownItemText}>{item.ProvinceName}</Text>
+                              </Pressable>
+                            ))}
+                          </ScrollView>
+                        )}
+                      </View>
+                    ) : null}
+
+                    {selectedProvince ? (
+                      <>
+                        <Text style={styles.label}>District</Text>
+                        <TextInput
+                          value={districtSearch}
+                          onChangeText={(value) => {
+                            setDistrictSearch(value);
+                            setSelectedDistrict(null);
+                            setSelectedWard(null);
+                            setWardSearch('');
+                            setWards([]);
+                          }}
+                          onFocus={() => setDistrictFocused(true)}
+                          onBlur={() => setDistrictFocused(false)}
+                          placeholder="Search district"
+                          placeholderTextColor={COLORS.muted}
+                          style={styles.input}
+                        />
+                        {loadingDistricts ? (
+                          <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : showDistrictList ? (
+                          <View style={styles.dropdownList}>
+                            {filteredDistricts.length === 0 ? (
+                              <Text style={styles.dropdownEmpty}>No districts found.</Text>
+                            ) : (
+                              <ScrollView nestedScrollEnabled>
+                                {filteredDistricts.map((item) => (
+                                  <Pressable
+                                    key={String(item.DistrictID)}
+                                    style={styles.dropdownItem}
+                                    onPress={() => handleSelectDistrict(item)}
+                                  >
+                                    <Text style={styles.dropdownItemText}>{item.DistrictName}</Text>
+                                  </Pressable>
+                                ))}
+                              </ScrollView>
+                            )}
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
+
+                    {selectedDistrict ? (
+                      <>
+                        <Text style={styles.label}>Ward</Text>
+                        <TextInput
+                          value={wardSearch}
+                          onChangeText={(value) => {
+                            setWardSearch(value);
+                            setSelectedWard(null);
+                          }}
+                          onFocus={() => setWardFocused(true)}
+                          onBlur={() => setWardFocused(false)}
+                          placeholder="Search ward"
+                          placeholderTextColor={COLORS.muted}
+                          style={styles.input}
+                        />
+                        {loadingWards ? (
+                          <ActivityIndicator size="small" color={COLORS.accent} />
+                        ) : showWardList ? (
+                          <View style={styles.dropdownList}>
+                            {filteredWards.length === 0 ? (
+                              <Text style={styles.dropdownEmpty}>No wards found.</Text>
+                            ) : (
+                              <ScrollView nestedScrollEnabled>
+                                {filteredWards.map((item) => (
+                                  <Pressable
+                                    key={String(item.WardCode)}
+                                    style={styles.dropdownItem}
+                                    onPress={() => handleSelectWard(item)}
+                                  >
+                                    <Text style={styles.dropdownItemText}>{item.WardName}</Text>
+                                  </Pressable>
+                                ))}
+                              </ScrollView>
+                            )}
+                          </View>
+                        ) : null}
+                      </>
+                    ) : null}
+
+                    {selectedWard ? (
+                      <>
+                        <Text style={styles.label}>Address</Text>
+                        <TextInput
+                          value={addressInput}
+                          onChangeText={setAddressInput}
+                          placeholder="House number, street name"
+                          placeholderTextColor={COLORS.muted}
+                          style={styles.input}
+                        />
+                      </>
+                    ) : null}
+                    <View style={styles.sectionSpacer} />
+                  </ScrollView>
+                  <View style={styles.sectionFooter}>
                     <Pressable style={styles.secondaryButton} onPress={goPrev}>
                       <Text style={styles.secondaryButtonText}>Back</Text>
                     </Pressable>
@@ -385,7 +744,7 @@ export default function OnboardingScreen() {
               ) : null}
 
               {activeTab === 2 ? (
-                <View style={styles.sectionBlock}>
+                <View style={styles.sectionBlockFill}>
                   <Text style={styles.sectionTitle}>Choose your subscription</Text>
                   <Text style={styles.sectionText}>
                     Pick a plan that fits your shop size and features.
@@ -394,6 +753,8 @@ export default function OnboardingScreen() {
                     <ActivityIndicator size="small" color={COLORS.accent} />
                   ) : packagesError ? (
                     <Text style={styles.errorText}>{packagesError}</Text>
+                  ) : sortedPackages.length === 0 ? (
+                    <Text style={styles.emptyText}>No subscription packages available.</Text>
                   ) : (
                     <ScrollView
                       style={styles.packageList}
@@ -403,6 +764,7 @@ export default function OnboardingScreen() {
                       {sortedPackages.map((item) => {
                         const price = formatPrice(item.price);
                         const isTrial = isTrialPackage(item);
+                        const isTrialActivated = isTrial && subscriptionActivated;
                         return (
                           <View key={String(getPackageId(item) ?? item.name)} style={styles.packageCard}>
                             <Text style={styles.packageName}>{item.name ?? 'Subscription'}</Text>
@@ -419,12 +781,22 @@ export default function OnboardingScreen() {
                               <Text style={styles.packageMeta}>Duration: {item.duration}</Text>
                             ) : null}
                             <Pressable
-                              style={styles.packageAction}
+                              style={[
+                                styles.packageAction,
+                                isTrialActivated && styles.packageActionDisabled,
+                              ]}
                               onPress={() => handleSubscribePackage(item)}
-                              disabled={subscribeSubmitting}
+                              disabled={subscribeSubmitting || isTrialActivated}
                             >
-                              <Text style={styles.packageActionText}>
-                                {subscribeSubmitting
+                              <Text
+                                style={[
+                                  styles.packageActionText,
+                                  isTrialActivated && styles.packageActionTextDisabled,
+                                ]}
+                              >
+                                {isTrialActivated
+                                  ? 'Activated'
+                                  : subscribeSubmitting
                                   ? 'Processing...'
                                   : isTrial
                                     ? 'Start Trial'
@@ -575,11 +947,38 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   contentArea: {
-    height: 320,
+    flex: 1,
+    minHeight: 320,
   },
   sectionBlock: {
+    gap: 14,
+  },
+  sectionBlockFill: {
     flex: 1,
     gap: 14,
+  },
+  sectionScroll: {
+    flex: 1,
+  },
+  sectionScrollContent: {
+    gap: 14,
+    paddingBottom: 72,
+  },
+  sectionShell: {
+    flex: 1,
+  },
+  sectionFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingTop: 10,
+  },
+  sectionSpacer: {
+    height: 8,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.text,
   },
   sectionTitle: {
     fontSize: 18,
@@ -616,6 +1015,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     backgroundColor: COLORS.white,
     color: COLORS.text,
+  },
+  dropdownList: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    paddingVertical: 4,
+    maxHeight: 140,
+  },
+  dropdownItem: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  dropdownItemText: {
+    fontSize: 12,
+    color: COLORS.text,
+  },
+  dropdownEmpty: {
+    fontSize: 12,
+    color: COLORS.muted,
+    textAlign: 'center',
+    paddingVertical: 8,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -662,6 +1083,7 @@ const styles = StyleSheet.create({
   },
   packageList: {
     flex: 1,
+    minHeight: 160,
   },
   packageListContent: {
     gap: 12,
@@ -712,6 +1134,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.white,
   },
+  packageActionDisabled: {
+    backgroundColor: '#C6C6C6',
+  },
+  packageActionTextDisabled: {
+    color: '#FFFFFF',
+  },
   errorText: {
     fontSize: 12,
     color: '#B22222',
@@ -722,6 +1150,12 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     textAlign: 'center',
     marginTop: 8,
+  },
+  emptyText: {
+    fontSize: 12,
+    color: COLORS.muted,
+    textAlign: 'center',
+    paddingVertical: 12,
   },
   edgeNav: {
     position: 'absolute',

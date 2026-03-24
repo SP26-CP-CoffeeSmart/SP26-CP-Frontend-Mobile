@@ -214,7 +214,12 @@ export const logoutAccount = async (): Promise<void> => {
   }
 
   // Always clear tokens from storage regardless of API response
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'coffeeShopId']);
+  await AsyncStorage.multiRemove([
+    'accessToken',
+    'refreshToken',
+    'coffeeShopId',
+    'onboarding:complete',
+  ]);
 };
 
 export const changePassword = async (oldPassword: string, newPassword: string): Promise<void> => {
@@ -234,7 +239,13 @@ export const changePassword = async (oldPassword: string, newPassword: string): 
 
 export const updateCoffeeShop = async (
   coffeeShopId: number,
-  shopName: string
+  shopName: string,
+  details?: {
+    address?: string | null;
+    provinceId?: number | null;
+    districtId?: number | null;
+    wardCode?: string | null;
+  }
 ): Promise<void> => {
   const response = await authorizedFetch(API_ENDPOINTS.auth.updateCoffeeShop(), {
     method: 'PUT',
@@ -242,7 +253,14 @@ export const updateCoffeeShop = async (
       Accept: '*/*',
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ coffeeShopId, shopName }),
+    body: JSON.stringify({
+      coffeeShopId,
+      shopName,
+      address: details?.address ?? null,
+      provinceId: details?.provinceId ?? null,
+      districtId: details?.districtId ?? null,
+      wardCode: details?.wardCode ?? null,
+    }),
   });
 
   if (!response.ok) {
