@@ -119,7 +119,7 @@ export default function HomeScreen() {
 
   const loadPosts = useCallback(
     async (page: number, mode: 'replace' | 'append') => {
-      const statusFilter = canSeeDisabled ? null : 'Active';
+      const statusFilter = canSeeDisabled ? null : 'Public';
       const response = await authorizedFetch(buildPostUrl(page, statusFilter), {
         headers: { Accept: 'application/json' },
       });
@@ -137,10 +137,18 @@ export default function HomeScreen() {
 
       const payload = (await response.json()) as PostApiResponse;
       const rawItems = Array.isArray(payload?.items) ? payload.items : [];
-      const publicItems = rawItems.filter(
-        (item) => item.status?.toLowerCase() === 'public'
-      );
-      const items = publicItems;
+      const items = rawItems.filter((item) => {
+        const status = String(item.status ?? '').trim().toLowerCase();
+        const isPublic = status === 'public';
+        const isPending = status === 'pending';
+        const isHidden = status === 'hidden';
+        const isOwner = Boolean(coffeeShopId && item.coffeeShopId === coffeeShopId);
+
+        if (isPublic) return true;
+        if (isOwner && isPending) return true;
+        if (isOwner && canSeeDisabled && isHidden) return true;
+        return false;
+      });
       const count = Number(payload?.totalCount ?? items.length);
 
       setTotalCount(count);
@@ -175,11 +183,11 @@ export default function HomeScreen() {
     const data = (await response.json()) as CoffeeShopItem[];
     const map = Array.isArray(data)
       ? data.reduce<Record<number, string>>((acc, item) => {
-          if (item?.coffeeShopId && item?.shopName) {
-            acc[item.coffeeShopId] = item.shopName;
-          }
-          return acc;
-        }, {})
+        if (item?.coffeeShopId && item?.shopName) {
+          acc[item.coffeeShopId] = item.shopName;
+        }
+        return acc;
+      }, {})
       : {};
     setShopNames(map);
   }, [handleUnauthorized]);
@@ -292,8 +300,12 @@ export default function HomeScreen() {
     const dateLabel = formatDate(item.publishedAt ?? item.createdAt);
     const shopName = item.coffeeShopId ? shopNames[item.coffeeShopId] : undefined;
     const isDisabled = isHiddenStatus(item.status);
+    const isPending = String(item.status ?? '').trim().toLowerCase() === 'pending';
     const showDisabled = Boolean(
       canSeeDisabled && coffeeShopId && isDisabled && item.coffeeShopId === coffeeShopId
+    );
+    const showPending = Boolean(
+      isPending && coffeeShopId && item.coffeeShopId === coffeeShopId
     );
     const categoryLabel = item.postCategoryId
       ? categoryMap[item.postCategoryId] ?? `#${item.postCategoryId}`
@@ -302,7 +314,7 @@ export default function HomeScreen() {
     return (
       <TouchableOpacity
         activeOpacity={0.9}
-        style={[styles.card, showDisabled && styles.cardDisabled]}
+        style={[styles.card, showDisabled && styles.cardDisabled, showPending && styles.cardPending]}
         onPress={() => router.push(`/post-detail/${item.postId}`)}
       >
         {item.recipeImageUrl ? (
@@ -320,6 +332,11 @@ export default function HomeScreen() {
               <Text style={styles.tagText}>{categoryLabel}</Text>
             </View>
             <View style={styles.tagMetaRow}>
+              {showPending ? (
+                <View style={styles.statusPendingPill}>
+                  <Text style={styles.statusPendingText}>Pending</Text>
+                </View>
+              ) : null}
               {showDisabled ? (
                 <View style={styles.statusPill}>
                   <Text style={styles.statusText}>Disabled</Text>
@@ -428,6 +445,9 @@ const styles = StyleSheet.create({
   cardDisabled: {
     opacity: 0.55,
   },
+  cardPending: {
+    opacity: 0.75,
+  },
   cardImage: {
     width: '100%',
     height: 180,
@@ -471,10 +491,23 @@ const styles = StyleSheet.create({
     borderColor: '#B29C8A',
     backgroundColor: '#F2E7DD',
   },
+  statusPendingPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#C9B28E',
+    backgroundColor: '#F7EEDC',
+  },
   statusText: {
     fontSize: 11,
     fontWeight: '700',
     color: '#5E4331',
+  },
+  statusPendingText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#8A6A3E',
   },
   tagText: {
     fontSize: 12,

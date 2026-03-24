@@ -54,6 +54,7 @@ export const API_ENDPOINTS = {
     getByRecipeId: (recipeId: number) => `${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeId}`,
   },
   shopRecipe: {
+    getById: (id: number) => `${AUTH_BASE_URL}/ShopRecipe/${id}`,
     enablePublic: (shopRecipeId: number) => `${AUTH_BASE_URL}/ShopRecipe/${shopRecipeId}/enable-public`,
   },
   postCategory: {
@@ -63,7 +64,7 @@ export const API_ENDPOINTS = {
     list: () => `${AUTH_BASE_URL}/post`,
     getById: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
     update: (id: number) => `${AUTH_BASE_URL}/post/${id}`,
-    disable: (id: number) => `${AUTH_BASE_URL}/post/${id}/disable`,
+    disable: (id: number) => `${AUTH_BASE_URL}/post/${id}/toggle-visibility`,
     toggleVisibility: (id: number) => `${AUTH_BASE_URL}/post/${id}/toggle-visibility`,
   },
   coffeeShop: {
