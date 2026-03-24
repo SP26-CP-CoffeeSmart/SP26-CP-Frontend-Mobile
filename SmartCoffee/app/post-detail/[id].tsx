@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { API_ENDPOINTS } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 
@@ -47,6 +47,33 @@ type PostCategory = {
   categoryName?: string | null;
 };
 
+type RecipeDetail = {
+  shopRecipeId?: number | null;
+  recipeId?: number | null;
+  recipeName?: string | null;
+  image?: string | null;
+  flavorNote?: string | null;
+  brewingMethod?: string | null;
+  prepTimeRange?: string | null;
+  brewingSteps?: string | string[] | null;
+  suggestedOccasions?: string | null;
+  difficultyLevel?: string | null;
+  caffeineStrength?: number | null;
+  containsMilk?: boolean | null;
+  hasIce?: boolean | null;
+  proposedSellingPrice?: number | null;
+  profitMarginPercent?: number | null;
+  ingredients?: RecipeIngredient[] | null;
+};
+
+type RecipeIngredient = {
+  quantity?: number | null;
+  measurement?: string | null;
+  ingredient?: {
+    name?: string | null;
+  } | null;
+};
+
 const COLORS = {
   bg: '#F6EFE8',
   card: '#FFFFFF',
@@ -55,6 +82,23 @@ const COLORS = {
   accent: '#9B5D2E',
   accentSoft: '#E8D7C8',
   border: '#E3D7CD',
+};
+
+const parseJSON = (value: any) => {
+  try {
+    return typeof value === 'string' ? JSON.parse(value) : value;
+  } catch {
+    return null;
+  }
+};
+
+const getBrewingSteps = (rawSteps?: string | string[] | null): string[] => {
+  if (!rawSteps) return [];
+  if (Array.isArray(rawSteps)) return rawSteps;
+  const parsed = parseJSON(rawSteps);
+  if (Array.isArray(parsed)) return parsed;
+  if (typeof rawSteps === 'string' && rawSteps.trim()) return [rawSteps.trim()];
+  return [];
 };
 
 const formatDate = (value?: string | null) => {
@@ -69,6 +113,30 @@ const splitLines = (text?: string | null) => {
   return text.split(/\r?\n/).filter((line) => line.trim().length > 0);
 };
 
+const parseOccasions = (value?: string | null) => {
+  if (!value) return [] as string[];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item).trim()).filter(Boolean);
+    }
+  } catch {
+    // Ignore parsing errors and fall back to string parsing.
+  }
+
+  return value
+    .replace(/[\[\]"]+/g, '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+const resolveRecipeImageUrl = (raw?: string | null) => {
+  if (!raw || raw === 'null' || raw === 'undefined') return null;
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+  return `${AUTH_BASE_URL}${raw.startsWith('/') ? raw : `/images/${raw}`}`;
+};
+
 export default function PostDetailScreen() {
   const router = useRouter();
   const { coffeeShopId } = useAuth();
@@ -79,6 +147,10 @@ export default function PostDetailScreen() {
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recipe, setRecipe] = useState<RecipeDetail | null>(null);
+  const [recipeIngredients, setRecipeIngredients] = useState<RecipeIngredient[]>([]);
+  const [loadingRecipe, setLoadingRecipe] = useState(false);
+  const [recipeError, setRecipeError] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
@@ -151,6 +223,62 @@ export default function PostDetailScreen() {
     }
   }, []);
 
+  const loadRecipe = useCallback(async (recipeId?: number | null) => {
+    if (!recipeId) {
+      setRecipe(null);
+      setRecipeIngredients([]);
+      setRecipeError(null);
+      return;
+    }
+
+    try {
+      setLoadingRecipe(true);
+      setRecipeError(null);
+
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipe.getById(recipeId), {
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const data = (await response.json()) as RecipeDetail;
+      setRecipe(data);
+
+      if (Array.isArray(data?.ingredients) && data.ingredients.length > 0) {
+        setRecipeIngredients(data.ingredients);
+        return;
+      }
+
+      const resolvedRecipeId = Number(data?.recipeId ?? recipeId);
+      if (!resolvedRecipeId) {
+        setRecipeIngredients([]);
+        return;
+      }
+
+      const ingredientResponse = await authorizedFetch(
+        API_ENDPOINTS.shopRecipeIngredients.getByRecipeId(resolvedRecipeId),
+        { headers: { Accept: 'application/json' } }
+      );
+
+      if (!ingredientResponse.ok) {
+        setRecipeIngredients([]);
+        return;
+      }
+
+      const ingredientPayload = (await ingredientResponse.json()) as RecipeIngredient[];
+      setRecipeIngredients(Array.isArray(ingredientPayload) ? ingredientPayload : []);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to load recipe details.';
+      setRecipeError(message);
+      setRecipe(null);
+      setRecipeIngredients([]);
+    } finally {
+      setLoadingRecipe(false);
+    }
+  }, []);
+
   const handleSave = useCallback(async () => {
     if (!post) return;
     if (!editTitle.trim()) {
@@ -198,7 +326,7 @@ export default function PostDetailScreen() {
     if (!post) return;
     try {
       setDisabling(true);
-      const response = await authorizedFetch(API_ENDPOINTS.post.disable(post.postId), {
+      const response = await authorizedFetch(API_ENDPOINTS.post.toggleVisibility(post.postId), {
         method: 'PUT',
         headers: { Accept: 'application/json' },
       });
@@ -223,18 +351,9 @@ export default function PostDetailScreen() {
     if (!post) return;
     try {
       setEnabling(true);
-      const response = await authorizedFetch(API_ENDPOINTS.post.update(post.postId), {
+      const response = await authorizedFetch(API_ENDPOINTS.post.toggleVisibility(post.postId), {
         method: 'PUT',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: post.title,
-          content: post.content,
-          postCategoryId: post.postCategoryId,
-          status: 'Active',
-        }),
+        headers: { Accept: 'application/json' },
       });
 
       if (!response.ok) {
@@ -257,6 +376,10 @@ export default function PostDetailScreen() {
     loadPost();
     loadCategories();
   }, [loadPost, loadCategories]);
+
+  useEffect(() => {
+    loadRecipe(post?.recipeId ?? null);
+  }, [loadRecipe, post?.recipeId]);
 
   useEffect(() => {
     if (!post?.postId) return;
@@ -288,6 +411,47 @@ export default function PostDetailScreen() {
     : 'General';
   const canManagePost = Boolean(
     coffeeShopId && post?.coffeeShopId && coffeeShopId === post.coffeeShopId
+  );
+  const postStatus = String(post?.status ?? '').trim().toLowerCase();
+  const isPublicPost = postStatus === 'public' || postStatus === 'active';
+  const isPendingPost = postStatus === 'pending';
+  const canEditPost = canManagePost && !isPublicPost;
+  const showManageButtons = canManagePost && !isPendingPost;
+  const recipeImage = resolveRecipeImageUrl(recipe?.image ?? null);
+  const occasionList = useMemo(
+    () => parseOccasions(recipe?.suggestedOccasions ?? null),
+    [recipe?.suggestedOccasions]
+  );
+  const recipeInfoItems = useMemo(
+    () =>
+      [
+        { label: 'Method', value: recipe?.brewingMethod || 'Not set' },
+        { label: 'Prep time', value: recipe?.prepTimeRange || 'Not set' },
+        { label: 'Difficulty', value: recipe?.difficultyLevel || 'Not set' },
+        {
+          label: 'Caffeine',
+          value: recipe?.caffeineStrength != null ? String(recipe.caffeineStrength) : 'Not set',
+        },
+        {
+          label: 'Milk / Ice',
+          value: `${recipe?.containsMilk ? 'Milk' : 'No milk'} · ${recipe?.hasIce ? 'Ice' : 'No ice'}`,
+        },
+        {
+          label: 'Price',
+          value:
+            recipe?.proposedSellingPrice != null
+              ? `${recipe.proposedSellingPrice.toLocaleString()} VND`
+              : 'Not set',
+        },
+        {
+          label: 'Margin',
+          value:
+            recipe?.profitMarginPercent != null
+              ? `${recipe.profitMarginPercent}%`
+              : 'Not set',
+        },
+      ] as Array<{ label: string; value: string }>,
+    [recipe]
   );
 
   if (loading) {
@@ -417,7 +581,7 @@ export default function PostDetailScreen() {
             </View>
           )}
 
-          {canManagePost && (
+          {showManageButtons && (
             <View style={styles.actionRow}>
               {isEditing ? (
                 <>
@@ -438,12 +602,7 @@ export default function PostDetailScreen() {
                 </>
               ) : (
                 <>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.secondaryButton]}
-                    onPress={() => setIsEditing(true)}
-                  >
-                    <Text style={styles.secondaryText}>Edit</Text>
-                  </TouchableOpacity>
+                  
                   {post?.status?.toLowerCase() === 'hidden' ? (
                     <TouchableOpacity
                       style={[styles.actionButton, styles.primaryButton]}
@@ -455,21 +614,128 @@ export default function PostDetailScreen() {
                       </Text>
                     </TouchableOpacity>
                   ) : (
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.dangerButton]}
-                      onPress={() => setShowDisableModal(true)}
-                      disabled={disabling}
-                    >
-                      <Text style={styles.dangerText}>
-                        {disabling ? 'Disabling...' : 'Disable'}
-                      </Text>
-                    </TouchableOpacity>
+                    <>
+                      {canEditPost && (
+                        <TouchableOpacity
+                          style={[styles.actionButton, styles.secondaryButton]}
+                          onPress={() => setIsEditing(true)}
+                        >
+                          <Text style={styles.secondaryText}>Edit</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={[styles.actionButton, styles.dangerButton]}
+                        onPress={() => setShowDisableModal(true)}
+                        disabled={disabling}
+                      >
+                        <Text style={styles.dangerText}>
+                          {disabling ? 'Disabling...' : 'Disable'}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
                   )}
                 </>
               )}
             </View>
           )}
+          {isPendingPost && canManagePost && !isEditing && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.secondaryButton]}
+                onPress={() => setIsEditing(true)}
+              >
+                <Text style={styles.secondaryText}>Edit</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
+
+        {post?.recipeId ? (
+          <View style={styles.card}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Recipe details</Text>
+            </View>
+
+            {loadingRecipe ? (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator size="small" color={COLORS.accent} />
+                <Text style={styles.metaText}>Loading recipe...</Text>
+              </View>
+            ) : recipeError ? (
+              <Text style={styles.errorText}>{recipeError}</Text>
+            ) : recipe ? (
+              <View style={styles.recipeBlock}>
+                <Text style={styles.recipeTitle}>{recipe.recipeName ?? 'Untitled recipe'}</Text>
+                {recipe.flavorNote ? (
+                  <Text style={styles.recipeNote}>{recipe.flavorNote}</Text>
+                ) : null}
+
+                <View style={styles.recipeGrid}>
+                  {recipeInfoItems.map((item) => (
+                    <View key={item.label} style={styles.recipeGridItem}>
+                      <Text style={styles.recipeLabel}>{item.label}</Text>
+                      <Text style={styles.recipeValue}>{item.value}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {occasionList.length > 0 ? (
+                  <View style={styles.occasionRow}>
+                    {occasionList.map((occasion) => (
+                      <View key={occasion} style={styles.occasionChip}>
+                        <Text style={styles.occasionText}>{occasion}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {recipeIngredients.length > 0 ? (
+                  <View style={styles.ingredientRow}>
+                    {recipeIngredients.map((item, index) => {
+                      const name = item?.ingredient?.name ?? 'Unnamed ingredient';
+                      const qty = item?.quantity != null ? String(item.quantity) : '';
+                      const measurement = item?.measurement ? ` ${item.measurement}` : '';
+                      return (
+                        <View key={`${name}-${index}`} style={styles.ingredientChip}>
+                          <Text style={styles.ingredientText}>
+                            {name}
+                            {qty ? ` · ${qty}${measurement}` : ''}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                {getBrewingSteps(recipe?.brewingSteps).length > 0 ? (
+                  <View style={styles.stepsBlock}>
+                    <Text style={styles.stepsTitle}>Steps</Text>
+                    {getBrewingSteps(recipe?.brewingSteps).map((step: any, index: number) => {
+                      const stepNumber =
+                        typeof step === 'object' && step !== null && step.step
+                          ? step.step
+                          : index + 1;
+                      const stepText =
+                        typeof step === 'string'
+                          ? step
+                          : step.title || step.desc || '';
+                      return (
+                        <View key={index} style={styles.stepRow}>
+                          <View style={styles.stepBadge}>
+                            <Text style={styles.stepBadgeText}>{stepNumber}</Text>
+                          </View>
+                          <Text style={styles.stepText}>{stepText || ''}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            ) : (
+              <Text style={styles.metaText}>No recipe details available.</Text>
+            )}
+          </View>
+        ) : null}
       </ScrollView>
 
       <Modal transparent visible={showDisableModal} animationType="fade">
@@ -668,6 +934,100 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.ink,
+  },
+  recipeBlock: {
+    gap: 12,
+  },
+  recipeImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 18,
+  },
+  recipeImageFallback: {
+    width: '100%',
+    height: 180,
+    borderRadius: 18,
+    backgroundColor: '#F1E5DA',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  recipeTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.ink,
+  },
+  recipeNote: {
+    color: COLORS.muted,
+    lineHeight: 20,
+  },
+  recipeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  recipeGridItem: {
+    width: '48%',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: '#FBF7F3',
+  },
+  recipeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.muted,
+    textTransform: 'uppercase',
+  },
+  recipeValue: {
+    marginTop: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.ink,
+  },
+  occasionRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  occasionChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: COLORS.accentSoft,
+  },
+  occasionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.accent,
+  },
+  ingredientRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  ingredientChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#FBF7F3',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  ingredientText: {
+    fontSize: 12,
+    color: COLORS.ink,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -780,5 +1140,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 8,
+  },
+  stepsBlock: {
+    marginTop: 16,
+    gap: 12,
+  },
+  stepsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginBottom: 4,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stepBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  stepBadgeText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.ink,
+    fontWeight: '500',
   },
 });
