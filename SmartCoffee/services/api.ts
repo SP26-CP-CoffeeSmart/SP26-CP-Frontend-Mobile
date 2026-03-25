@@ -114,6 +114,7 @@ export const API_ENDPOINTS = {
   menuItem: {
     getAll: () => `${AUTH_BASE_URL}/MenuItem`,
     getById: (id: number) => `${AUTH_BASE_URL}/MenuItem/${id}`,
+    getByMenu: (menuId: number) => `${AUTH_BASE_URL}/MenuItem/by-menu/${menuId}`,
   },
   ingredient: {
     getAll: () => `${AUTH_BASE_URL}/Ingredient`,
