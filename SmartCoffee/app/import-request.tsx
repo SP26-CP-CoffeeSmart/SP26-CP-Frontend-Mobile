@@ -39,17 +39,21 @@ type Ingredient = {
   currentQuantity: number;
 };
 
-type ShopInventoryItem = {
-  inventoryDetailId: number;
+type IngredientApiItem = {
   ingredientId?: number;
-  quantity?: number;
+  IngredientId?: number;
+  name?: string;
+  Name?: string;
+  category?: string;
+  Category?: string;
+  image?: string | null;
+  Image?: string | null;
   measurement?: string;
-  ingredient?: {
-    ingredientId: number;
-    name: string;
-    category: string;
-    image: string | null;
-  } | null;
+  Measurement?: string;
+  quantity?: number;
+  Quantity?: number;
+  currentQuantity?: number;
+  CurrentQuantity?: number;
 };
 
 type ImportDetail = {
@@ -241,41 +245,36 @@ export default function ImportRequestScreen() {
   }, [searchQuery, selectedCategory, ingredients]);
 
   const loadIngredients = useCallback(async () => {
-    if (!coffeeShopId) {
-      setIngredients([]);
-      setIngredientError('Missing shop information. Please sign in again.');
-      return;
-    }
-
     try {
       setIngredientLoading(true);
       setIngredientError(null);
-      const response = await authorizedFetch(
-        API_ENDPOINTS.shopInventory.getByShop(coffeeShopId),
-        {
-          headers: {
-            Accept: '*/*',
-          },
-        }
-      );
+      const response = await authorizedFetch(API_ENDPOINTS.ingredient.getAll(), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
 
-      const data = (await response.json()) as ShopInventoryItem[];
-      const mapped: Ingredient[] = (Array.isArray(data) ? data : []).map((item) => {
-        const rawId = item.ingredientId ?? item.ingredient?.ingredientId ?? item.inventoryDetailId;
-        const ingredientId = Number.isFinite(rawId) ? Number(rawId) : item.inventoryDetailId;
+      const data = (await response.json()) as IngredientApiItem[] | { items?: IngredientApiItem[] };
+      const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+      const mapped: Ingredient[] = rows
+      .map((item) => {
+        const ingredientId = Number(item.ingredientId ?? item.IngredientId ?? 0);
         return {
           ingredientId,
-          name: item.ingredient?.name || `Ingredient #${item.inventoryDetailId}`,
-          category: item.ingredient?.category || 'Uncategorized',
-          image: item.ingredient?.image ?? null,
-          measurement: item.measurement || 'unit',
-          currentQuantity: Number(item.quantity ?? 0),
+          name: (item.name ?? item.Name)?.trim() || `Ingredient #${ingredientId || 'N/A'}`,
+          category: (item.category ?? item.Category)?.trim() || 'Uncategorized',
+          image: item.image ?? item.Image ?? null,
+          measurement: item.measurement ?? item.Measurement ?? 'unit',
+          currentQuantity: Number(
+            item.currentQuantity ?? item.CurrentQuantity ?? item.quantity ?? item.Quantity ?? 0
+          ),
         };
-      });
+      })
+      .filter((item) => item.ingredientId > 0);
 
       setIngredients(mapped);
       if (selectedCategory !== 'All' && !mapped.some((item) => item.category === selectedCategory)) {
@@ -283,11 +282,11 @@ export default function ImportRequestScreen() {
       }
     } catch (error) {
       setIngredients([]);
-      setIngredientError('Unable to load inventory for this shop.');
+      setIngredientError('Unable to load ingredients.');
     } finally {
       setIngredientLoading(false);
     }
-  }, [coffeeShopId, selectedCategory]);
+  }, [selectedCategory]);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
     setManualDetails((prev) => {

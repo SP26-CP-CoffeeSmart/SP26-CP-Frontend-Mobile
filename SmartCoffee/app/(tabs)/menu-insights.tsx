@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -72,6 +72,16 @@ interface DailySaleRecord {
   totalRevenue: number;
   cupSize?: string | null;
   createdAt?: string | null;
+}
+
+interface MenuItemCostPayload {
+  menuItemId: number;
+  shopRecipe?: {
+    totalCost?: number | null;
+    ingredients?: Array<{
+      cost?: number | null;
+    }> | null;
+  } | null;
 }
 
 interface MenuGroup {
@@ -172,6 +182,7 @@ export default function MenuInsightsScreen() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [itemSalesMap, setItemSalesMap] = useState<Map<number, number>>(new Map());
+  const [itemUnitCostMap, setItemUnitCostMap] = useState<Map<number, number>>(new Map());
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [menuImageUri, setMenuImageUri] = useState<string | null>(menuImage ?? null);
@@ -342,6 +353,43 @@ export default function MenuInsightsScreen() {
       console.log('[Menu Insights] Flattened menu items:', items);
       console.log('beverageCategory:', items.map(item => item.shopBeverage.beverageCategoryName));
       setMenuItems(items);
+
+      // Fetch detailed menu items for unit cost calculation.
+      // Backend summary currently can return cost = 0, so we compute on frontend.
+      const byMenuResponse = await authorizedFetch(API_ENDPOINTS.menuItem.getByMenu(id), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!byMenuResponse.ok) {
+        throw new Error(`HTTP error! status: ${byMenuResponse.status}`);
+      }
+
+      const byMenuPayload = await byMenuResponse.json();
+      const byMenuItems: MenuItemCostPayload[] = Array.isArray(byMenuPayload)
+        ? byMenuPayload
+        : Array.isArray(byMenuPayload?.items)
+          ? byMenuPayload.items
+          : Array.isArray(byMenuPayload?.data)
+            ? byMenuPayload.data
+            : [];
+
+      const unitCostMap = new Map<number, number>();
+      byMenuItems.forEach((menuItem) => {
+        const recipeCost = Number(menuItem?.shopRecipe?.totalCost ?? 0);
+        const ingredientCost = Array.isArray(menuItem?.shopRecipe?.ingredients)
+          ? menuItem.shopRecipe!.ingredients!.reduce((sum, ingredient) => {
+              const value = Number(ingredient?.cost ?? 0);
+              return Number.isFinite(value) ? sum + value : sum;
+            }, 0)
+          : 0;
+
+        const unitCost = recipeCost > 0 ? recipeCost : ingredientCost;
+        unitCostMap.set(menuItem.menuItemId, unitCost > 0 ? unitCost : 0);
+      });
+
+      setItemUnitCostMap(unitCostMap);
     } catch (err) {
       console.error('Error fetching menu items:', err);
     } finally {
@@ -643,11 +691,24 @@ export default function MenuInsightsScreen() {
     return data.chartData[selectedDateIndex] || null;
   };
 
+  const computedCostFromSales = useMemo(() => {
+    if (itemSalesMap.size === 0 || itemUnitCostMap.size === 0) return 0;
+    return Array.from(itemSalesMap.entries()).reduce((sum, [menuItemId, cupsSold]) => {
+      const unitCost = itemUnitCostMap.get(menuItemId) ?? 0;
+      return sum + unitCost * cupsSold;
+    }, 0);
+  }, [itemSalesMap, itemUnitCostMap]);
+
+  const getSelectedCost = () => {
+    const summaryCost = getSelectedDateData()?.cost || 0;
+    return computedCostFromSales > 0 ? computedCostFromSales : summaryCost;
+  };
+
   const getMenuScore = () => {
     const selectedData = getSelectedDateData();
     if (!selectedData) return 'N/A';
     
-    const profit = selectedData.totalRevenue - selectedData.cost;
+    const profit = selectedData.totalRevenue - getSelectedCost();
     const profitMargin = selectedData.totalRevenue > 0 
       ? (profit / selectedData.totalRevenue) * 100 
       : 0;
@@ -860,7 +921,18 @@ export default function MenuInsightsScreen() {
             <View style={styles.kpiCard}>
               <Text style={styles.kpiLabel}>PROFIT</Text>
               <Text style={styles.kpiValue}>
-                {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - (getSelectedDateData()?.cost || 0))}
+                {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - getSelectedCost())}
+              </Text>
+              <View style={styles.kpiChange}>
+                <Ionicons name="ellipse" size={12} color="#847362" />
+                <Text style={styles.kpiChangeTextGreen}>—</Text>
+              </View>
+            </View>
+
+            <View style={styles.kpiCard}>
+              <Text style={styles.kpiLabel}>COST</Text>
+              <Text style={styles.kpiValue}>
+                {formatCurrency(getSelectedCost())}
               </Text>
               <View style={styles.kpiChange}>
                 <Ionicons name="ellipse" size={12} color="#847362" />

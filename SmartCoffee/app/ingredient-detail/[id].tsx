@@ -1,12 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Dimensions,
   Image,
   Platform,
   ScrollView,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,8 +11,6 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
-import { LineChart } from 'react-native-chart-kit';
 import Toast from 'react-native-toast-message';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -70,9 +65,6 @@ export default function IngredientDetailScreen() {
   const [inventoryDetail, setInventoryDetail] = useState<ShopInventoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [minStockLevel, setMinStockLevel] = useState(5.0);
-  const [isAutoSuggest, setIsAutoSuggest] = useState(false);
-  const [aiSuggestedValue, setAiSuggestedValue] = useState(3.5);
   const [isUpdating, setIsUpdating] = useState(false);
   const [manualThresholdText, setManualThresholdText] = useState('');
 
@@ -86,18 +78,6 @@ export default function IngredientDetailScreen() {
     success: '#E5F8E6',
     successText: '#1B7A34',
     border: '#EFE7E1',
-  };
-
-  // Mock usage forecast data
-  const forecastData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        data: [2.5, 3.2, 4.1, 3.8, 3.5, 2.9],
-        color: (opacity = 1) => `rgba(184, 115, 51, ${opacity})`,
-        strokeWidth: 2,
-      },
-    ],
   };
 
   useEffect(() => {
@@ -121,7 +101,6 @@ export default function IngredientDetailScreen() {
       console.log('Shop inventory detail response:', data);
       setInventoryDetail(data);
       const nextMinStock = Number(data.minStock ?? 0);
-      setMinStockLevel(nextMinStock);
       setManualThresholdText(Number.isFinite(nextMinStock) ? nextMinStock.toFixed(1) : '');
     } catch (err) {
       console.error('Error fetching ingredient:', err);
@@ -137,7 +116,7 @@ export default function IngredientDetailScreen() {
     }
 
     const parsedManual = Number.parseFloat(manualThresholdText.replace(',', '.'));
-    if (!isAutoSuggest && !Number.isFinite(parsedManual)) {
+    if (!Number.isFinite(parsedManual)) {
       Toast.show({
         type: 'error',
         text1: 'Invalid threshold',
@@ -146,7 +125,7 @@ export default function IngredientDetailScreen() {
       return;
     }
 
-    const valueToApply = isAutoSuggest ? aiSuggestedValue : parsedManual;
+    const valueToApply = parsedManual;
     const unitLabel = formatMeasurement(inventoryDetail.measurement);
 
     try {
@@ -186,7 +165,6 @@ export default function IngredientDetailScreen() {
           };
       setInventoryDetail(updated);
       const updatedValue = Number(updated.minStock ?? valueToApply);
-      setMinStockLevel(updatedValue);
       setManualThresholdText(
         Number.isFinite(updatedValue) ? updatedValue.toFixed(1) : manualThresholdText
       );
@@ -250,8 +228,6 @@ export default function IngredientDetailScreen() {
       </View>
     );
   }
-
-  const screenWidth = Dimensions.get('window').width;
 
   // Extract ingredient info with fallbacks
   const ingredientName = inventoryDetail.ingredient?.name || `Ingredient #${inventoryDetail.inventoryDetailId}`;
@@ -354,57 +330,6 @@ export default function IngredientDetailScreen() {
           </View>
         </View>
 
-        {/* Usage Forecast */}
-        {/* <View
-          style={{
-            backgroundColor: COLORS.card,
-            padding: 16,
-            marginBottom: 12,
-            borderRadius: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 3,
-          }}
-        >
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.muted, letterSpacing: 1 }}>
-              USAGE FORECAST
-            </Text>
-            <Text style={{ fontSize: 12, color: '#9AA1B1' }}>Last 30 days vs Predicted</Text>
-          </View>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: COLORS.ink, marginTop: 6 }}>
-            42 {measurementUnit}
-          </Text>
-          <LineChart
-            data={forecastData}
-            width={screenWidth - 64}
-            height={180}
-            chartConfig={{
-              backgroundColor: COLORS.card,
-              backgroundGradientFrom: COLORS.card,
-              backgroundGradientTo: COLORS.card,
-              decimalPlaces: 1,
-              color: (opacity = 1) => `rgba(184, 115, 51, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(154, 161, 177, ${opacity})`,
-              style: {
-                borderRadius: 16,
-              },
-              propsForDots: {
-                r: '4',
-                strokeWidth: '2',
-                stroke: COLORS.accent,
-              },
-            }}
-            bezier
-            style={{
-              marginVertical: 8,
-              borderRadius: 16,
-            }}
-          />
-        </View> */}
-
         {/* Set Minimum Stock Level */}
         <View
           style={{
@@ -430,67 +355,20 @@ export default function IngredientDetailScreen() {
           >
             Set Minimum Stock Level
           </Text>
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: '#F3ECE7',
-              borderRadius: 12,
-              padding: 12,
-              marginBottom: 14,
-            }}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <View
-                style={{
-                  width: 26,
-                  height: 26,
-                  borderRadius: 13,
-                  backgroundColor: COLORS.accent,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginRight: 10,
-                }}
-              >
-                <Ionicons name="sparkles" size={14} color="#FFFFFF" />
-              </View>
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.ink }}>AI Auto-Suggest</Text>
-                <Text style={{ fontSize: 12, color: COLORS.muted }}>Optimized based on usage trends</Text>
-              </View>
-            </View>
-            <Switch
-              value={isAutoSuggest}
-              onValueChange={setIsAutoSuggest}
-              trackColor={{ false: '#C9C1BB', true: COLORS.accent }}
-              thumbColor="#FFFFFF"
-            />
-          </View>
-
           <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
             Threshold ({measurementUnit})
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TextInput
-              value={isAutoSuggest ? aiSuggestedValue.toFixed(1) : manualThresholdText}
-              editable={!isAutoSuggest}
+              value={manualThresholdText}
               onChangeText={(value) => {
                 const normalized = value.replace(',', '.');
                 setManualThresholdText(normalized);
-                const next = Number.parseFloat(normalized);
-                if (Number.isFinite(next)) {
-                  setMinStockLevel(next);
-                }
               }}
               onBlur={() => {
-                if (isAutoSuggest) {
-                  return;
-                }
                 const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
                 if (Number.isFinite(next)) {
                   setManualThresholdText(next.toFixed(1));
-                  setMinStockLevel(next);
                 }
               }}
               keyboardType="decimal-pad"
