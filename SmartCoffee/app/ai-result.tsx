@@ -364,14 +364,74 @@ export default function AiResultScreen() {
       const encodedRecipeImage = encodeFirebaseImageUrl(recipe.image);
       const encodedGeneratedImage = encodeFirebaseImageUrl(generatedImageUrl ?? undefined);
       const finalImageUrl = encodedGeneratedImage || encodedRecipeImage;
+      const resolvedIsUnique =
+        typeof recipe?.isUnique === 'boolean'
+          ? recipe.isUnique
+          : typeof uniqueness?.isUnique === 'boolean'
+            ? uniqueness.isUnique
+            : false;
+
+      const rawRecipe = { ...recipe } as Record<string, any>;
+      const recipeEntries = Object.entries(rawRecipe).filter(
+        ([key]) => key !== 'isUnique' && key !== 'beverageId'
+      );
+
+      const orderedRecipe: Record<string, any> = {};
+      let insertedIsUnique = false;
+      recipeEntries.forEach(([key, value]) => {
+        orderedRecipe[key] = value;
+        if (key === 'isPublic') {
+          orderedRecipe.isUnique = resolvedIsUnique;
+          insertedIsUnique = true;
+        }
+      });
+
+      if (!insertedIsUnique) {
+        orderedRecipe.isUnique = resolvedIsUnique;
+      }
+
+      const sourceIngredients = Array.isArray(rawRecipe.ingredients)
+        ? rawRecipe.ingredients
+        : Array.isArray(rawRecipe.shopRecipeIngredients)
+          ? rawRecipe.shopRecipeIngredients
+          : [];
+
+      const normalizedIngredients = sourceIngredients
+        .map((item: any) => {
+          const resolvedId = Number(
+            item?.id ?? item?.ingredientId ?? item?.ingredient?.ingredientId ?? 0
+          );
+          const quantity = Number(item?.quantity ?? item?.amount ?? 0);
+          const cost = Number(item?.cost ?? 0);
+          const measurement =
+            item?.measurement ??
+            (item?.ingredient?.category === 'Milk' || item?.ingredient?.category === 'Beverage'
+              ? 'ml'
+              : 'g');
+
+          return {
+            id: resolvedId,
+            quantity: Number.isFinite(quantity) ? quantity : 0,
+            cost: Number.isFinite(cost) ? cost : 0,
+            measurement: String(measurement ?? ''),
+          };
+        })
+        .filter((item: { id: number }) => Number.isFinite(item.id) && item.id > 0);
+
+      if (normalizedIngredients.length > 0) {
+        orderedRecipe.ingredients = normalizedIngredients;
+      } else {
+        delete orderedRecipe.ingredients;
+      }
+
+      delete orderedRecipe.shopRecipeIngredients;
+
+      orderedRecipe.beverageId = Number.isFinite(parsedBeverageId)
+        ? parsedBeverageId
+        : recipe.beverageId;
 
       const requestBody: Record<string, any> = {
-        recipe: {
-          ...recipe,
-          beverageId: Number.isFinite(parsedBeverageId)
-            ? parsedBeverageId
-            : recipe.beverageId,
-        },
+        recipe: orderedRecipe,
       };
 
       if (uniqueness) {
