@@ -12,6 +12,7 @@ import { AuthProvider, useAuth } from '@/context/auth-context';
 import { BeverageCategoryProvider } from '@/context/beverage-category-context';
 import { CartProvider } from '@/context/cart-context';
 import { SuggestionProvider } from '@/context/suggestion-context';
+import { AiSavedRecipeProvider } from '@/context/ai-saved-recipe-context';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -29,7 +30,7 @@ function RootLayoutNav() {
     }
 
     const firstSegment = segments[0];
-    const authScreens = ['sign-in', 'sign-up', 'forgot-password', 'otp', 'reset-password', 'index', 'loading'];
+    const authScreens = ['sign-in', 'sign-up', 'forgot-password', 'otp', 'reset-password', 'index', 'loading', 'onboarding'];
     const nestedScreens = ['change-password', 'ai-order-suggestions', 'ai-order-add-ingredients', 'recipe-detail', 'menu-detail', 'ai-loading', 'ai-recommendations', 'ai-result', 'staff-management', 'create-staff', 'create-recipe', 'menu-recommendations', 'menu-results', 'ingredient-detail', 'daily-sales', 'daily-sale-item', 'product-page', 'product-detail', 'cart', 'import-request', 'export-request', 'inventory-history', 'feedback', 'feedback-insights', 'post-detail'];
     const isOnAuthScreen = authScreens.includes(firstSegment);
     const isOnNestedScreen = nestedScreens.includes(firstSegment);
@@ -48,7 +49,8 @@ function RootLayoutNav() {
         }
       } else {
         // ShopOwner/Admin must use tabs layout
-        if (isOnAuthScreen) {
+        const shouldSkipAuthRedirect = firstSegment === 'otp' || firstSegment === 'onboarding';
+        if (isOnAuthScreen && !shouldSkipAuthRedirect) {
           router.replace('/(tabs)/menu');
         }
       }
@@ -115,9 +117,11 @@ export default function RootLayout() {
       <AuthProvider>
         <CartProvider>
           <BeverageCategoryProvider>
-            <SuggestionProvider>
-              <RootLayoutNav />
-            </SuggestionProvider>
+            <AiSavedRecipeProvider>
+              <SuggestionProvider>
+                <RootLayoutNav />
+              </SuggestionProvider>
+            </AiSavedRecipeProvider>
           </BeverageCategoryProvider>
         </CartProvider>
       </AuthProvider>

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   Image,
   ImageBackground,
   Modal,
@@ -36,6 +35,7 @@ const BACKGROUND_IMAGE = require('../assets/background.png');
 const ONBOARDING_COMPLETE_KEY = 'onboarding:complete';
 const SUBSCRIPTION_SKIP_ONCE_KEY = 'subscription:skip-once';
 const EDGE_NAV_WIDTH = 44;
+const ONBOARDING_CARD_HEIGHT = 640;
 
 type SubscriptionPackage = {
   subscriptionPackageId?: number;
@@ -309,7 +309,7 @@ export default function OnboardingScreen() {
         districtId: selectedDistrict.DistrictID,
         wardCode: selectedWard.WardCode,
       });
-      Toast.show({ type: 'success', text1: 'Shop name updated' });
+      Toast.show({ type: 'success', text1: 'Information updated successfully' });
       try {
         await refreshProfile();
       } catch {
@@ -510,7 +510,27 @@ export default function OnboardingScreen() {
     setWardFocused(false);
   }, []);
 
-  const screenWidth = Dimensions.get('window').width;
+  const primaryButtonLabel =
+    activeTab === 0 ? 'Next' : activeTab === 1 ? 'Save & Next' : 'Continue';
+
+  const primaryButtonDisabled =
+    activeTab === 1
+      ? savingShopName || Boolean(shopNameError)
+      : activeTab === 2
+        ? !subscriptionActivated
+        : false;
+
+  const handlePrimaryAction = () => {
+    if (activeTab === 0) {
+      goNext();
+      return;
+    }
+    if (activeTab === 1) {
+      handleSaveShopName();
+      return;
+    }
+    handleFinish();
+  };
 
   return (
     <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
@@ -550,9 +570,6 @@ export default function OnboardingScreen() {
                     <Text style={styles.infoText}>- Manage beverages and recipes</Text>
                     <Text style={styles.infoText}>- Monitor sales and stock</Text>
                   </View>
-                  <Pressable style={styles.nextBar} onPress={goNext}>
-                    <Text style={styles.nextBarText}>Next</Text>
-                  </Pressable>
                 </View>
               ) : null}
 
@@ -724,22 +741,6 @@ export default function OnboardingScreen() {
                     ) : null}
                     <View style={styles.sectionSpacer} />
                   </ScrollView>
-                  <View style={styles.sectionFooter}>
-                    <Pressable style={styles.secondaryButton} onPress={goPrev}>
-                      <Text style={styles.secondaryButtonText}>Back</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.primaryButton}
-                      onPress={handleSaveShopName}
-                      disabled={savingShopName || Boolean(shopNameError)}
-                    >
-                      {savingShopName ? (
-                        <ActivityIndicator size="small" color={COLORS.white} />
-                      ) : (
-                        <Text style={styles.primaryButtonText}>Save & Next</Text>
-                      )}
-                    </Pressable>
-                  </View>
                 </View>
               ) : null}
 
@@ -765,20 +766,42 @@ export default function OnboardingScreen() {
                         const price = formatPrice(item.price);
                         const isTrial = isTrialPackage(item);
                         const isTrialActivated = isTrial && subscriptionActivated;
+                        const descriptionLines = String(item.description ?? '')
+                          .split('\n')
+                          .map((line) => line.trim())
+                          .filter(Boolean);
                         return (
                           <View key={String(getPackageId(item) ?? item.name)} style={styles.packageCard}>
-                            <Text style={styles.packageName}>{item.name ?? 'Subscription'}</Text>
-                            {item.tier ? (
-                              <Text style={styles.packageTier}>{item.tier}</Text>
-                            ) : null}
+                            <View style={styles.packageHeaderRow}>
+                              <View>
+                                <Text style={styles.packageName}>{item.name ?? 'Subscription'}</Text>
+                                {item.tier ? (
+                                  <Text style={styles.packageTier}>{item.tier}</Text>
+                                ) : null}
+                              </View>
+                              <View style={[styles.packageBadge, isTrial ? styles.packageBadgeTrial : null]}>
+                                <Text style={[styles.packageBadgeText, isTrial ? styles.packageBadgeTextTrial : null]}>
+                                  {isTrial ? 'Trial' : 'Plan'}
+                                </Text>
+                              </View>
+                            </View>
+
                             {price ? (
                               <Text style={styles.packagePrice}>{price}</Text>
                             ) : null}
-                            {item.description ? (
-                              <Text style={styles.packageDesc}>{item.description}</Text>
+                            {descriptionLines.length > 0 ? (
+                              <View style={styles.packageDescList}>
+                                {descriptionLines.map((line, index) => (
+                                  <Text key={`${getPackageId(item) ?? item.name}-line-${index}`} style={styles.packageDesc}>
+                                    - {line}
+                                  </Text>
+                                ))}
+                              </View>
                             ) : null}
                             {item.duration ? (
-                              <Text style={styles.packageMeta}>Duration: {item.duration}</Text>
+                              <View style={styles.packageMetaBadge}>
+                                <Text style={styles.packageMeta}>Duration: {item.duration}</Text>
+                              </View>
                             ) : null}
                             <Pressable
                               style={[
@@ -809,27 +832,43 @@ export default function OnboardingScreen() {
                     </ScrollView>
                   )}
 
-                  <View style={styles.buttonRow}>
-                    <Pressable style={styles.secondaryButton} onPress={goPrev}>
-                      <Text style={styles.secondaryButtonText}>Back</Text>
-                    </Pressable>
-                    <Pressable
-                      style={styles.primaryButton}
-                      onPress={handleFinish}
-                      disabled={!subscriptionActivated}
-                    >
-                      <Text style={styles.primaryButtonText}>Continue</Text>
-                    </Pressable>
-                  </View>
-                  {!subscriptionActivated ? (
-                    <Text style={styles.subscriptionHint}>
-                      Please subscribe or start a trial to continue.
-                    </Text>
-                  ) : null}
                 </View>
               ) : null}
             </View>
 
+            {activeTab === 0 ? (
+              <View style={styles.singleFooter}>
+                <Pressable style={styles.primaryButtonSingle} onPress={goNext}>
+                  <Text style={styles.primaryButtonText}>Next</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.commonFooter}>
+                <Pressable style={styles.secondaryButton} onPress={goPrev}>
+                  <Text style={styles.secondaryButtonText}>Back</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.primaryButton, primaryButtonDisabled && styles.primaryButtonDisabled]}
+                  onPress={handlePrimaryAction}
+                  disabled={primaryButtonDisabled}
+                >
+                  {activeTab === 1 && savingShopName ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>{primaryButtonLabel}</Text>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
+          </View>
+
+          <View style={styles.subscriptionHintSlot}>
+            {activeTab === 2 && !subscriptionActivated ? (
+              <Text style={styles.subscriptionHintOutside}>
+                Please subscribe or start a trial to continue.
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -896,7 +935,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 6,
     position: 'relative',
-    minHeight: 560,
+    height: ONBOARDING_CARD_HEIGHT,
+    minHeight: ONBOARDING_CARD_HEIGHT,
+    maxHeight: ONBOARDING_CARD_HEIGHT,
   },
   heroBlock: {
     alignItems: 'center',
@@ -948,9 +989,10 @@ const styles = StyleSheet.create({
   },
   contentArea: {
     flex: 1,
-    minHeight: 320,
+    minHeight: 0,
   },
   sectionBlock: {
+    flex: 1,
     gap: 14,
   },
   sectionBlockFill: {
@@ -962,15 +1004,20 @@ const styles = StyleSheet.create({
   },
   sectionScrollContent: {
     gap: 14,
-    paddingBottom: 72,
+    paddingBottom: 12,
   },
   sectionShell: {
     flex: 1,
+    minHeight: 0,
   },
-  sectionFooter: {
+  commonFooter: {
     flexDirection: 'row',
-    gap: 12,
-    paddingTop: 10,
+    justifyContent: 'space-between',
+    paddingTop: 8,
+  },
+  singleFooter: {
+    paddingTop: 8,
+    alignItems: 'center',
   },
   sectionSpacer: {
     height: 8,
@@ -1038,40 +1085,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 8,
   },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
   primaryButton: {
-    flex: 1,
+    width: '48.5%',
+    height: 52,
+    backgroundColor: COLORS.accent,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonSingle: {
+    width: '100%',
     backgroundColor: COLORS.accent,
     borderRadius: 26,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  primaryButtonDisabled: {
+    opacity: 0.55,
   },
   primaryButtonText: {
     color: COLORS.white,
     fontSize: 14,
     fontWeight: '600',
   },
-  nextBar: {
-    width: '100%',
-    backgroundColor: COLORS.accent,
-    borderRadius: 24,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  nextBarText: {
-    color: COLORS.white,
-    fontSize: 14,
-    fontWeight: '600',
-  },
   secondaryButton: {
-    flex: 1,
+    width: '48.5%',
+    height: 52,
     borderRadius: 26,
-    paddingVertical: 14,
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: COLORS.white,
@@ -1092,12 +1134,23 @@ const styles = StyleSheet.create({
   packageCard: {
     padding: 14,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(91,50,22,0.15)',
-    backgroundColor: COLORS.white,
+    borderWidth: 1.5,
+    borderColor: 'rgba(91,50,22,0.3)',
+    backgroundColor: '#FFFCF8',
+    shadowColor: 'rgba(91,50,22,0.2)',
+    shadowOpacity: 1,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 7,
+  },
+  packageHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
   },
   packageName: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '700',
     color: COLORS.text,
   },
@@ -1106,27 +1159,58 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     marginTop: 4,
   },
+  packageBadge: {
+    borderRadius: 12,
+    backgroundColor: '#EFE6DE',
+    borderWidth: 1,
+    borderColor: '#E2D4C5',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  packageBadgeTrial: {
+    backgroundColor: '#E8F6EC',
+    borderColor: '#B9E5C5',
+  },
+  packageBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6F4A32',
+  },
+  packageBadgeTextTrial: {
+    color: '#2F7D4A',
+  },
   packagePrice: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '700',
     color: COLORS.accent,
-    marginTop: 6,
+    marginTop: 10,
+  },
+  packageDescList: {
+    marginTop: 10,
+    gap: 4,
   },
   packageDesc: {
     fontSize: 12,
     color: COLORS.text,
-    marginTop: 6,
+    lineHeight: 18,
+  },
+  packageMetaBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    borderRadius: 12,
+    backgroundColor: '#F6F1EB',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
   packageMeta: {
     fontSize: 11,
     color: COLORS.muted,
-    marginTop: 6,
   },
   packageAction: {
-    marginTop: 10,
+    marginTop: 12,
     backgroundColor: COLORS.accent,
     borderRadius: 18,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
   },
   packageActionText: {
@@ -1150,6 +1234,17 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     textAlign: 'center',
     marginTop: 8,
+  },
+  subscriptionHintOutside: {
+    fontSize: 12,
+    color: COLORS.muted,
+    textAlign: 'center',
+    marginTop: 6,
+    paddingHorizontal: 8,
+  },
+  subscriptionHintSlot: {
+    minHeight: 26,
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: 12,

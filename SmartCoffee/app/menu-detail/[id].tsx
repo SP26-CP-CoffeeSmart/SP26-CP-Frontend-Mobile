@@ -915,17 +915,25 @@ export default function MenuDetailScreen() {
       return;
     }
 
+    const imageUrls = Array.isArray(renderedMenuUrls) && renderedMenuUrls.length > 0
+      ? renderedMenuUrls
+      : resolvedImageUrl
+        ? [resolvedImageUrl]
+        : [];
+
     const payload = {
       ...menuForSave,
       menuId,
       modifiedMenuItemIds,
       imageUrl: resolvedImageUrl,
+      imageUrls,
     };
 
     console.log('[Menu Save AI] Request payload:', {
       menuId,
       modifiedMenuItemIds,
       imageUrl: resolvedImageUrl,
+      imageUrls,
     });
 
     try {

@@ -2,11 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ImageBackground, StyleSheet, View, Text, ScrollView, TouchableOpacity, Image, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-
-const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
 export default function AIRecommendationsScreen() {
   const router = useRouter();
@@ -27,7 +24,6 @@ export default function AIRecommendationsScreen() {
     isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
-      AsyncStorage.removeItem(SAVED_RECIPES_KEY).catch(() => undefined);
     };
   }, []);
 

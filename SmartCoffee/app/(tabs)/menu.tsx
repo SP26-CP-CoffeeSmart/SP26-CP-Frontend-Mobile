@@ -25,6 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
 import { useAuth } from '@/context/auth-context';
 import { BeverageCategory, useBeverageCategories } from '@/context/beverage-category-context';
 import Toast from 'react-native-toast-message';
@@ -64,7 +65,7 @@ interface MenuHeaderApiItem {
 
 type BeverageApiItem = Record<string, any>;
 
-const { width, height: windowHeight } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const MENU_CARD_WIDTH = width - 48;
 const BEVERAGE_PAGE_SIZE = 4;
 const BEVERAGE_PAGE_WIDTH = width - 48;
@@ -162,7 +163,6 @@ export default function MenuScreen() {
     getCategoryId,
     getCategoryName,
   } = useBeverageCategories();
-  const [selectedCategory, setSelectedCategory] = useState('Summer Refresh');
   const [beverages, setBeverages] = useState<BeverageItem[]>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
   const [beveragesError, setBeveragesError] = useState<string | null>(null);
@@ -192,15 +192,12 @@ export default function MenuScreen() {
   const [subscribeSubmitting, setSubscribeSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
+  const [checkingRecipeGate, setCheckingRecipeGate] = useState(false);
+  const [checkingMenuGate, setCheckingMenuGate] = useState(false);
+  const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
   const subscriptionSuccessRef = useRef(false);
-  const scrollViewRef = useRef<ScrollView | null>(null);
-  const [scrollY, setScrollY] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [suggestionLayoutY, setSuggestionLayoutY] = useState<number | null>(null);
   const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
   const [beverageLooping, setBeverageLooping] = useState(false);
-
-  const categories = ['Summer Refresh', 'Winter Warmers', 'New Menu'];
 
   const loadSubscriptionPackages = useCallback(async () => {
     try {
@@ -403,7 +400,7 @@ export default function MenuScreen() {
 
     if (!coffeeShopId) {
       setMenuItems([]);
-      setMenuError("Your shop doesn't have any menus yet.");
+      setMenuError(null);
       setMenuLoading(false);
       return;
     }
@@ -472,7 +469,7 @@ export default function MenuScreen() {
 
       if (sortedList.length === 0) {
         setMenuItems([]);
-        setMenuError("Your shop doesn't have any menus yet.");
+        setMenuError(null);
         return;
       }
 
@@ -627,7 +624,7 @@ export default function MenuScreen() {
 
     if (!coffeeShopId) {
       setBeverages([]);
-      setBeveragesError("Your shop doesn't have any beverages yet.");
+      setBeveragesError(null);
       setBeveragesLoading(false);
       return;
     }
@@ -666,7 +663,7 @@ export default function MenuScreen() {
 
       if (sortedList.length === 0) {
         setBeverages([]);
-        setBeveragesError("Your shop doesn't have any beverages yet.");
+        setBeveragesError(null);
         setBeveragesLoading(false);
         return;
       }
@@ -782,17 +779,12 @@ export default function MenuScreen() {
       'User'
     ).trim() || 'User';
 
-  const effectiveViewportHeight = viewportHeight || windowHeight;
-  const shouldShowSuggestionFab = suggestionLayoutY !== null;
-
-  const handleScrollToSuggestion = () => {
-    if (!scrollViewRef.current || suggestionLayoutY === null) {
-      return;
-    }
-
-    const targetY = Math.max(suggestionLayoutY - 16, 0);
-    scrollViewRef.current.scrollTo({ y: targetY, animated: true });
-  };
+  const isMenuEmptyState =
+    menuItems.length === 0 &&
+    (!menuError || menuError.toLowerCase().includes("doesn't have any menus yet"));
+  const isBeverageEmptyState =
+    beverages.length === 0 &&
+    (!beveragesError || beveragesError.toLowerCase().includes("doesn't have any beverages yet"));
 
   const resetCreateForm = () => {
     setCreateName('');
@@ -827,15 +819,100 @@ export default function MenuScreen() {
     }
   };
 
-  const handleNewMenuPress = () => {
-    // Use loaded beverage list as the source of truth for guard validation.
-    if (beverages.length >= 5) {
-      router.push('/menu-recommendations');
+  const isBeverageSizeActive = (size: BeverageSize) => {
+    const rawActive = (size as any)?.isActive ?? (size as any)?.active;
+    const status = String((size as any)?.status ?? '').trim().toLowerCase();
+
+    if (typeof rawActive === 'boolean') {
+      return rawActive;
+    }
+
+    if (typeof rawActive === 'number') {
+      return rawActive === 1;
+    }
+
+    if (typeof rawActive === 'string') {
+      const normalized = rawActive.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'active') {
+        return true;
+      }
+    }
+
+    return status === 'active' || status === 'enabled';
+  };
+
+  const handleNewMenuPress = useCallback(async () => {
+    if (checkingMenuGate) {
       return;
     }
 
-    setShowMenuGuardModal(true);
-  };
+    // Use loaded beverage list as the source of truth for guard validation.
+    if (beverages.length < 5) {
+      setShowMenuGuardModal(true);
+      return;
+    }
+
+    if (!coffeeShopId) {
+      setShowBeverageSizeGuideModal(true);
+      return;
+    }
+
+    try {
+      setCheckingMenuGate(true);
+      const sizes = await beverageSizeService.getByShop(coffeeShopId);
+      const hasActiveSize = sizes.some(isBeverageSizeActive);
+
+      if (!hasActiveSize) {
+        setShowBeverageSizeGuideModal(true);
+        return;
+      }
+
+      router.push('/menu-recommendations');
+    } catch {
+      Toast.show({
+        type: 'error',
+        text1: 'Cannot verify beverage size',
+        text2: 'Please try again in a moment.',
+      });
+    } finally {
+      setCheckingMenuGate(false);
+    }
+  }, [checkingMenuGate, beverages.length, coffeeShopId, router]);
+
+  const handleCreateRecipeEntry = useCallback(
+    async (target: '/ai-create' | '/create-recipe') => {
+      if (checkingRecipeGate) {
+        return;
+      }
+
+      if (!coffeeShopId) {
+        setShowBeverageSizeGuideModal(true);
+        return;
+      }
+
+      try {
+        setCheckingRecipeGate(true);
+        const sizes = await beverageSizeService.getByShop(coffeeShopId);
+        const hasActiveSize = sizes.some(isBeverageSizeActive);
+
+        if (!hasActiveSize) {
+          setShowBeverageSizeGuideModal(true);
+          return;
+        }
+
+        router.push(target);
+      } catch {
+        Toast.show({
+          type: 'error',
+          text1: 'Cannot verify beverage size',
+          text2: 'Please try again in a moment.',
+        });
+      } finally {
+        setCheckingRecipeGate(false);
+      }
+    },
+    [checkingRecipeGate, coffeeShopId, router]
+  );
 
   const handleSelectCategory = (category: BeverageCategory) => {
     const id = getCategoryId(category);
@@ -1278,12 +1355,8 @@ export default function MenuScreen() {
         </SafeAreaView>
       </Modal>
       <ScrollView
-        ref={scrollViewRef}
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
-        onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
-        onScroll={(event) => setScrollY(event.nativeEvent.contentOffset.y)}
-        scrollEventThrottle={16}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         <View style={styles.spacerTop} />
@@ -1303,44 +1376,30 @@ export default function MenuScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Menu List</Text>
-            <TouchableOpacity onPress={handleNewMenuPress}>
-              <Text style={styles.sectionActionPrimary}>New Menu</Text>
+            <TouchableOpacity onPress={handleNewMenuPress} disabled={checkingMenuGate}>
+              <Text
+                style={[
+                  styles.sectionActionPrimary,
+                  checkingMenuGate && styles.sectionActionPrimaryDisabled,
+                ]}>
+                {checkingMenuGate ? 'Checking...' : 'New Menu'}
+              </Text>
             </TouchableOpacity>
           </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.menuTabs}
-          >
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category}
-                style={[
-                  styles.menuChip,
-                  selectedCategory === category && styles.menuChipActive,
-                ]}
-                onPress={() => setSelectedCategory(category)}
-              >
-                <Text
-                  style={[
-                    styles.menuChipText,
-                    selectedCategory === category && styles.menuChipActiveText,
-                  ]}
-                >
-                  {category}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
 
           <View style={styles.menuList}>
             {menuLoading ? (
               <Text style={styles.menuStateText}>Loading...</Text>
+            ) : isMenuEmptyState ? (
+              <View style={styles.emptyStateCard}>
+                <View style={styles.emptyStateIconWrap}>
+                  <Ionicons name="restaurant-outline" size={36} color={stylesVars.muted} />
+                </View>
+                <Text style={styles.emptyStateTitle}>No menus yet</Text>
+                <Text style={styles.emptyStateText}>Your shop doesn't have any menus yet.</Text>
+              </View>
             ) : menuError ? (
               <Text style={styles.menuStateText}>{menuError}</Text>
-            ) : menuItems.length === 0 ? (
-              <Text style={styles.menuStateText}>No menu found</Text>
             ) : (
               <FlatList
                 horizontal
@@ -1432,23 +1491,15 @@ export default function MenuScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionTitle}>Your Beverages</Text>
-              <Text style={styles.sectionActionMuted}>Swipe to see more</Text>
-            </View>
-          </View>
-
-          <View style={styles.sectionHeaderActionRow}>
+            <Text style={styles.sectionTitle}>Your Beverages</Text>
             <TouchableOpacity
-              style={styles.addBeverageButton}
               onPress={() => {
                 resetCreateForm();
                 refreshCategories();
                 setShowCreateModal(true);
               }}
             >
-              <Ionicons name="add" size={16} color={stylesVars.espresso} />
-              <Text style={styles.addBeverageText}>Add</Text>
+              <Text style={styles.sectionActionPrimary}>New Beverage</Text>
             </TouchableOpacity>
           </View>
 
@@ -1457,10 +1508,16 @@ export default function MenuScreen() {
               <ActivityIndicator size="small" color={stylesVars.primary} />
               <Text style={styles.beverageLoadingText}>Loading...</Text>
             </View>
+          ) : isBeverageEmptyState ? (
+            <View style={styles.emptyStateCard}>
+              <View style={styles.emptyStateIconWrap}>
+                <Ionicons name="cafe-outline" size={36} color={stylesVars.muted} />
+              </View>
+              <Text style={styles.emptyStateTitle}>No beverages yet</Text>
+              <Text style={styles.emptyStateText}>Your shop doesn't have any beverages yet.</Text>
+            </View>
           ) : beveragesError ? (
             <Text style={styles.beverageStateText}>{beveragesError}</Text>
-          ) : beverages.length === 0 ? (
-            <Text style={styles.beverageStateText}>No beverages found</Text>
           ) : (
             <View style={styles.beveragePagerWrap}>
               <FlatList
@@ -1555,49 +1612,87 @@ export default function MenuScreen() {
           )}
         </View>
 
-        <View
-          style={styles.suggestionCard}
-          onLayout={(event) => setSuggestionLayoutY(event.nativeEvent.layout.y)}
-        >
+      </ScrollView>
+
+      <View style={styles.suggestionDock} pointerEvents="box-none">
+        <View style={styles.suggestionCard}>
           <View style={styles.suggestionGlow} />
           <View style={styles.suggestionContent}>
             <View style={styles.suggestionHeader}>
               <View style={styles.suggestionIconWrap}>
                 <MaterialIcons name="auto-awesome" size={18} color={stylesVars.primary} />
               </View>
-              <Text style={styles.suggestionTitle}>Suggestion:</Text>
+              <Text style={styles.suggestionTitle}>Create Recipe</Text>
             </View>
-            <Text style={styles.suggestionText}>
-              Create a recipe based on flavor, style, and cost preferences.
-            </Text>
             <View style={styles.suggestionButtons}>
-              <TouchableOpacity style={styles.aiButton} onPress={() => router.push('/ai-create')}>
+              <TouchableOpacity
+                style={[styles.aiButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                onPress={() => handleCreateRecipeEntry('/ai-create')}
+                disabled={checkingRecipeGate}
+              >
                 <Text style={styles.aiButtonText}>Create By AI</Text>
-                <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                {checkingRecipeGate ? (
+                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                )}
               </TouchableOpacity>
               <TouchableOpacity
-                style={styles.manualButton}
-                onPress={() => router.push('/create-recipe')}
+                style={[styles.manualButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                onPress={() => handleCreateRecipeEntry('/create-recipe')}
+                disabled={checkingRecipeGate}
               >
                 <Text style={styles.manualButtonText}>Create Manually</Text>
-                <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                {checkingRecipeGate ? (
+                  <ActivityIndicator size="small" color={stylesVars.espresso} />
+                ) : (
+                  <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
         </View>
+      </View>
 
-        <View style={{ height: 20 }} />
-      </ScrollView>
+      <Modal
+        visible={showBeverageSizeGuideModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBeverageSizeGuideModal(false)}
+      >
+        <View style={styles.sizeGuideOverlay}>
+          <View style={styles.sizeGuideCard}>
+            <View style={styles.sizeGuideIconWrap}>
+              <Ionicons name="resize-outline" size={28} color={stylesVars.primary} />
+            </View>
+            <Text style={styles.sizeGuideTitle}>Setup Beverage Size First</Text>
+            <Text style={styles.sizeGuideText}>
+              You need at least 1 active beverage size before creating recipes.
+            </Text>
+            <Text style={styles.sizeGuideText}>
+              Go to Profile tab to add or activate a beverage size.
+            </Text>
 
-      {shouldShowSuggestionFab ? (
-        <TouchableOpacity
-          style={styles.suggestionFab}
-          onPress={handleScrollToSuggestion}
-          activeOpacity={0.9}
-        >
-          <MaterialIcons name="auto-awesome" size={20} color={stylesVars.espresso} />
-        </TouchableOpacity>
-      ) : null}
+            <View style={styles.sizeGuideActions}>
+              <TouchableOpacity
+                style={styles.sizeGuideSecondaryButton}
+                onPress={() => setShowBeverageSizeGuideModal(false)}
+              >
+                <Text style={styles.sizeGuideSecondaryText}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.sizeGuidePrimaryButton}
+                onPress={() => {
+                  setShowBeverageSizeGuideModal(false);
+                  router.push('/(tabs)/profile');
+                }}
+              >
+                <Text style={styles.sizeGuidePrimaryText}>Go to Profile</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showMenuGuardModal}
@@ -1859,7 +1954,7 @@ const styles = StyleSheet.create({
   },
   container: {
     paddingHorizontal: 24,
-    paddingBottom: 120,
+    paddingBottom: 320,
     backgroundColor: stylesVars.background,
   },
   spacerTop: {
@@ -1911,17 +2006,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 16,
   },
-  sectionHeaderActionRow: {
-    alignItems: 'flex-end',
-    marginTop: -8,
-    marginBottom: 12,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    flex: 1,
-  },
   sectionTitle: {
     fontSize: 22,
     fontWeight: '700',
@@ -1932,50 +2016,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: stylesVars.primary,
   },
-  sectionActionMuted: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#A8A29E',
-  },
-  addBeverageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: '#F1E7D8',
-  },
-  addBeverageText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: stylesVars.espresso,
-  },
-  menuTabs: {
-    gap: 12,
-    paddingRight: 12,
-  },
-  menuChip: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 30,
-    backgroundColor: '#ECECEC',
-  },
-  menuChipActive: {
-    backgroundColor: stylesVars.espresso,
-  },
-  menuChipText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#8A8A8A',
-  },
-  menuChipActiveText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FDFBF7',
+  sectionActionPrimaryDisabled: {
+    opacity: 0.5,
   },
   menuList: {
-    marginTop: 20,
+    marginTop: 6,
     gap: 16,
   },
   menuStateText: {
@@ -2192,6 +2237,38 @@ const styles = StyleSheet.create({
     color: '#8B7355',
     fontWeight: '600',
   },
+  emptyStateCard: {
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#E9E1D7',
+    backgroundColor: '#FCFCFC',
+    paddingHorizontal: 24,
+    paddingVertical: 30,
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  emptyStateIconWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#F2F0EC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#212121',
+  },
+  emptyStateText: {
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#6F6A63',
+    paddingHorizontal: 8,
+  },
   beveragePager: {
     paddingRight: 12,
   },
@@ -2298,7 +2375,13 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     backgroundColor: stylesVars.espresso,
     overflow: 'hidden',
-    marginBottom: 20,
+  },
+  suggestionDock: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    zIndex: 30,
   },
   suggestionGlow: {
     position: 'absolute',
@@ -2330,11 +2413,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#FFF',
-  },
-  suggestionText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    lineHeight: 20,
   },
   suggestionButtons: {
     flexDirection: 'row',
@@ -2374,22 +2452,85 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  suggestionFab: {
-    position: 'absolute',
-    right: 18,
-    bottom: 50,
-    width: 50,
-    height: 50,
-    borderRadius: 18,
-    backgroundColor: stylesVars.primary,
+  suggestionActionDisabled: {
+    opacity: 0.75,
+  },
+  sizeGuideOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 50,
+    padding: 20,
+  },
+  sizeGuideCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFF8EE',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(217,160,91,0.35)',
+    padding: 20,
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  sizeGuideIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: 'rgba(217,160,91,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
+  sizeGuideTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+    textAlign: 'center',
+  },
+  sizeGuideText: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#6B5E52',
+    textAlign: 'center',
+  },
+  sizeGuideActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  sizeGuideSecondaryButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E3D8CC',
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 12,
+  },
+  sizeGuideSecondaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6B5E52',
+  },
+  sizeGuidePrimaryButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: stylesVars.primary,
+    paddingVertical: 12,
+  },
+  sizeGuidePrimaryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
   },
   guardOverlay: {
     flex: 1,

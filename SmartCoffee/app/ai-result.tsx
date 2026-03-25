@@ -1,17 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
+import { useAiSavedRecipe } from '@/context/ai-saved-recipe-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-
-const SAVED_RECIPES_KEY = 'savedAiRecipes';
 
 interface Recipe {
   recipeName: string;
@@ -73,6 +71,7 @@ export default function AiResultScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const { isRecipeSaved, markRecipeSaved } = useAiSavedRecipe();
   const { data, beverageId, beverage } = useLocalSearchParams<{
     data?: string;
     beverageId?: string;
@@ -91,6 +90,32 @@ export default function AiResultScreen() {
     'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
   const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
+
+  const buildRecipeSaveToken = (targetRecipe: Recipe | null): string | null => {
+    if (!targetRecipe) return null;
+
+    const ingredientSource = Array.isArray(targetRecipe.shopRecipeIngredients)
+      ? targetRecipe.shopRecipeIngredients
+      : Array.isArray((targetRecipe as any).ingredients)
+        ? ((targetRecipe as any).ingredients as Array<any>)
+        : [];
+
+    const ingredientsToken = ingredientSource
+      .map((item: any) => {
+        const id = item?.id ?? item?.ingredientId ?? item?.ingredient?.ingredientId ?? '';
+        const qty = item?.quantity ?? item?.amount ?? '';
+        return `${id}:${qty}`;
+      })
+      .join('|');
+
+    return [
+      Number.isFinite(parsedBeverageId) ? parsedBeverageId : 'no-beverage',
+      String(targetRecipe.recipeName ?? ''),
+      String(targetRecipe.proposedSellingPrice ?? ''),
+      String(targetRecipe.profitMarginPercent ?? ''),
+      ingredientsToken,
+    ].join('::');
+  };
 
   const parseJsonString = (value: unknown): any => {
     if (typeof value === 'string') {
@@ -256,33 +281,12 @@ export default function AiResultScreen() {
     }, 2000);
   };
 
+  const recipeSaveToken = useMemo(() => buildRecipeSaveToken(recipe), [recipe]);
+
   useEffect(() => {
-    if (!recipe?.recipeId) {
-      setIsSaved(false);
-      return;
-    }
-
-    let isActive = true;
-    const loadSavedState = async () => {
-      try {
-        const stored = await AsyncStorage.getItem(SAVED_RECIPES_KEY);
-        const ids = stored ? (JSON.parse(stored) as number[]) : [];
-        if (isActive) {
-          setIsSaved(ids.includes(Number(recipe?.recipeId)));
-        }
-      } catch {
-        if (isActive) {
-          setIsSaved(false);
-        }
-      }
-    };
-
-    loadSavedState();
-
-    return () => {
-      isActive = false;
-    };
-  }, [recipe?.recipeId]);
+    const recipeId = Number(recipe?.recipeId);
+    setIsSaved(isRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken));
+  }, [isRecipeSaved, recipe?.recipeId, recipeSaveToken]);
 
   useEffect(() => {
     let isActive = true;
@@ -373,7 +377,7 @@ export default function AiResultScreen() {
 
       const rawRecipe = { ...recipe } as Record<string, any>;
       const recipeEntries = Object.entries(rawRecipe).filter(
-        ([key]) => key !== 'isUnique' && key !== 'beverageId'
+        ([key]) => key !== 'isUnique' && key !== 'beverageId' && key !== 'totalCost' && key !== 'createDate' && key !== 'applyDate'
       );
 
       const orderedRecipe: Record<string, any> = {};
@@ -410,13 +414,13 @@ export default function AiResultScreen() {
               : 'g');
 
           return {
-            id: resolvedId,
+            ingredientId: resolvedId,
             quantity: Number.isFinite(quantity) ? quantity : 0,
             cost: Number.isFinite(cost) ? cost : 0,
             measurement: String(measurement ?? ''),
           };
         })
-        .filter((item: { id: number }) => Number.isFinite(item.id) && item.id > 0);
+        .filter((item: { ingredientId: number }) => Number.isFinite(item.ingredientId) && item.ingredientId > 0);
 
       if (normalizedIngredients.length > 0) {
         orderedRecipe.ingredients = normalizedIngredients;
@@ -473,17 +477,8 @@ export default function AiResultScreen() {
       const result = JSON.parse(responseText);
       console.log('Recipe saved successfully:', result);
 
-      try {
-        const stored = await AsyncStorage.getItem(SAVED_RECIPES_KEY);
-        const ids = stored ? (JSON.parse(stored) as number[]) : [];
-        const recipeId = Number(recipe?.recipeId);
-        if (Number.isFinite(recipeId) && !ids.includes(recipeId)) {
-          ids.push(recipeId);
-          await AsyncStorage.setItem(SAVED_RECIPES_KEY, JSON.stringify(ids));
-        }
-      } catch {
-        // Ignore storage errors for now.
-      }
+      const recipeId = Number(recipe?.recipeId);
+      markRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken);
 
       setIsSaved(true);
       showToast('Recipe saved successfully!');

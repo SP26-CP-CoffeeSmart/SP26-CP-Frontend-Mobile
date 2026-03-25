@@ -120,7 +120,7 @@ export default function AiCreateScreen() {
   const [cupType, setCupType] = useState('Plastic');
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
-  const [margin, setMargin] = useState(35);
+
   const [isUnique, setIsUnique] = useState(false);
   const [subscriptionPackageName, setSubscriptionPackageName] = useState<string | null>(null);
   const [showUniqueModal, setShowUniqueModal] = useState(false);
@@ -297,9 +297,6 @@ export default function AiCreateScreen() {
         selectedColorStyleId: colorStyle,
         selectedCategoryId: category,
       },
-      pricing: {
-        marginPercentage: margin,
-      },
       numberOption,
       isUnique,
       pricingStrategy,
@@ -308,22 +305,82 @@ export default function AiCreateScreen() {
     try {
       console.log('AI create payload:', JSON.stringify(payload, null, 2));
 
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/create-unique-ai-recipe`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      const responseText = await response.text();
-      // console.log('AI create response status:', response.status);
-      // console.log('AI create response body:', responseText);
+      const [createRecipeResponse, forecastSellingPriceResponse] = await Promise.all([
+        authorizedFetch(`${AUTH_BASE_URL}/AI/create-unique-ai-recipe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+        authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/forecast-selling-price`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+      ]);
 
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}: ${responseText}`);
+      const [createRecipeResponseText, forecastSellingPriceResponseText] = await Promise.all([
+        createRecipeResponse.text(),
+        forecastSellingPriceResponse.text(),
+      ]);
+
+      console.log('[AI recommend] create-unique-ai-recipe status:', createRecipeResponse.status);
+      console.log('[AI recommend] create-unique-ai-recipe body:', createRecipeResponseText);
+      console.log(
+        '[AI recommend] forecast-selling-price status:',
+        forecastSellingPriceResponse.status
+      );
+      console.log('[AI recommend] forecast-selling-price body:', forecastSellingPriceResponseText);
+
+      if (!forecastSellingPriceResponse.ok) {
+        throw new Error(
+          `Forecast selling price request failed: ${forecastSellingPriceResponse.status}: ${forecastSellingPriceResponseText}`
+        );
       }
 
-      const data = responseText ? JSON.parse(responseText) : null;
+      const forecastData = forecastSellingPriceResponseText
+        ? JSON.parse(forecastSellingPriceResponseText)
+        : null;
+
+      console.log('[AI recommend] parsed forecast-selling-price:', forecastData);
+      console.log('[AI recommend] forecast code:', forecastData?.code);
+      console.log('[AI recommend] forecast canCreateRecipe:', forecastData?.data?.canCreateRecipe);
+      console.log('[AI recommend] forecast message:', forecastData?.message);
+
+      const forecastCode = forecastData?.code;
+
+      if (forecastCode === 'FORECAST_NOT_FEASIBLE') {
+        console.log('[AI recommend] branch: forecast not feasible, show error on loading and go back');
+        router.replace({
+          pathname: '/ai-loading',
+          params: {
+            mode: 'forecast-error',
+            message: forecastData?.message ?? 'Khong the tao recipe theo pricing strategy hien tai.',
+          },
+        });
+        return;
+      }
+
+      if (forecastCode !== 'FORECAST_FEASIBLE') {
+        throw new Error(
+          `Unexpected forecast code: ${String(forecastCode)}. Body: ${forecastSellingPriceResponseText}`
+        );
+      }
+
+      console.log('[AI recommend] branch: forecast feasible, continue loading and create result');
+
+      if (!createRecipeResponse.ok) {
+        throw new Error(
+          `Create recipe request failed: ${createRecipeResponse.status}: ${createRecipeResponseText}`
+        );
+      }
+
+      const data = createRecipeResponseText ? JSON.parse(createRecipeResponseText) : null;
+      console.log('[AI recommend] branch: go to ai-recommendations with create recipe data');
+      console.log('[AI recommend] parsed create-unique-ai-recipe:', data);
       router.replace({
         pathname: '/ai-recommendations',
         params: {
@@ -881,27 +938,6 @@ export default function AiCreateScreen() {
                 })}
               </View>
 
-              <View style={styles.sectionSpacing} />
-
-              <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.groupTitle}>Margin</ThemedText>
-                <ThemedText style={styles.groupValue}>{margin}%</ThemedText>
-              </View>
-              <Slider
-                value={margin}
-                minimumValue={0}
-                maximumValue={70}
-                step={1}
-                minimumTrackTintColor="#B4632D"
-                maximumTrackTintColor="#E5E5E5"
-                thumbTintColor="#B4632D"
-                onValueChange={(next) => setMargin(next)}
-              />
-              <View style={styles.sliderScale}>
-                <ThemedText style={styles.scaleText}>0%</ThemedText>
-                <ThemedText style={styles.scaleText}>70%</ThemedText>
-              </View>
               <View style={styles.sectionSpacing} />
               <View style={styles.toggleRow}>
                 <View style={styles.toggleTextWrap}>
