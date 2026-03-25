@@ -14,9 +14,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@/context/auth-context';
 
 interface Ingredient {
     ingredientId: number;
@@ -55,6 +56,7 @@ const COLORS = {
 
 export default function InventoryScreen() {
     const router = useRouter();
+    const { coffeeShopId } = useAuth();
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedCategory, setSelectedCategory] = useState('All');
     const [selectedStatus, setSelectedStatus] = useState<'all' | 'in' | 'low' | 'out'>('all');
@@ -80,10 +82,18 @@ export default function InventoryScreen() {
     const hasInventory = ingredients.length > 0;
 
     const fetchIngredients = async () => {
+        if (!coffeeShopId) {
+            setIngredients([]);
+            setError('Không tìm thấy shopId của tài khoản hiện tại.');
+            setLoading(false);
+            setRefreshing(false);
+            return;
+        }
+
         try {
             setLoading(true);
             setError(null);
-            const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopInventory`);
+            const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId));
             const data = await response.json();
 
             if (Array.isArray(data)) {
@@ -102,7 +112,7 @@ export default function InventoryScreen() {
 
     useEffect(() => {
         fetchIngredients();
-    }, []);
+    }, [coffeeShopId]);
 
     const filteredIngredients = useMemo(() => {
         let filtered = ingredients;

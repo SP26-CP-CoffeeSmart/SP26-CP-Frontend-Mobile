@@ -108,6 +108,12 @@ const formatDate = (value?: string | null) => {
   return parsed.toLocaleString();
 };
 
+const formatStatusLabel = (value?: string | null) => {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return 'Draft';
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+};
+
 const splitLines = (text?: string | null) => {
   if (!text) return [] as string[];
   return text.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -413,10 +419,11 @@ export default function PostDetailScreen() {
     coffeeShopId && post?.coffeeShopId && coffeeShopId === post.coffeeShopId
   );
   const postStatus = String(post?.status ?? '').trim().toLowerCase();
+  const postStatusLabel = formatStatusLabel(post?.status);
   const isPublicPost = postStatus === 'public' || postStatus === 'active';
   const isPendingPost = postStatus === 'pending';
   const canEditPost = canManagePost && !isPublicPost;
-  const showManageButtons = canManagePost && !isPendingPost;
+  const showManageButtons = canManagePost && (!isPendingPost || isEditing);
   const recipeImage = resolveRecipeImageUrl(recipe?.image ?? null);
   const occasionList = useMemo(
     () => parseOccasions(recipe?.suggestedOccasions ?? null),
@@ -480,28 +487,55 @@ export default function PostDetailScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.headerRow}>
+        <View style={styles.topBar}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
             <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
+          <View style={styles.statusPill}>
+            <Text style={styles.statusPillText}>{postStatusLabel}</Text>
+          </View>
         </View>
 
-        {post?.recipeImageUrl ? (
-          <Image source={{ uri: post.recipeImageUrl }} style={styles.heroImage} />
-        ) : (
-          <View style={styles.heroFallback}>
-            <Ionicons name="images" size={28} color={COLORS.accent} />
-            <Text style={styles.heroFallbackText}>Recipe Highlight</Text>
+        <View style={styles.heroShell}>
+          {post?.recipeImageUrl ? (
+            <Image source={{ uri: post.recipeImageUrl }} style={styles.heroImage} />
+          ) : (
+            <View style={styles.heroFallback}>
+              <Ionicons name="images" size={28} color={COLORS.accent} />
+              <Text style={styles.heroFallbackText}>Recipe Highlight</Text>
+            </View>
+          )}
+          <View style={styles.heroOverlay} />
+          <View style={styles.heroInfo}>
+            <View style={styles.heroCategoryPill}>
+              <Text style={styles.heroCategoryText}>{categoryLabel}</Text>
+            </View>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {post?.title}
+            </Text>
+            <View style={styles.heroMetaRow}>
+              <View style={styles.heroMetaPill}>
+                <Ionicons name="calendar-outline" size={13} color="#FDF7F0" />
+                <Text style={styles.heroMetaText}>{dateLabel || 'No date'}</Text>
+              </View>
+              <View style={styles.heroMetaPill}>
+                <Ionicons name="eye-outline" size={13} color="#FDF7F0" />
+                <Text style={styles.heroMetaText}>{post?.viewCount ?? 0}</Text>
+              </View>
+            </View>
           </View>
-        )}
+        </View>
 
         <View style={styles.card}>
           <View style={styles.tagRow}>
-            <View style={styles.tagPill}>
-              <Text style={styles.tagText}>{categoryLabel}</Text>
+            <View>
+              <Text style={styles.sectionEyebrow}>Post details</Text>
+              <Text style={styles.sectionTitle}>Story and context</Text>
             </View>
-            <Text style={styles.metaText}>{dateLabel}</Text>
+            <View style={styles.softStatusPill}>
+              <Text style={styles.softStatusText}>{postStatusLabel}</Text>
+            </View>
           </View>
 
           {isEditing ? (
@@ -551,21 +585,27 @@ export default function PostDetailScreen() {
               />
             </View>
           ) : (
-            <Text style={styles.title}>{post?.title}</Text>
+            <View style={styles.metaStrip}>
+              <View style={styles.metaCard}>
+                <View style={styles.metaIconBubble}>
+                  <Ionicons name="storefront-outline" size={14} color={COLORS.accent} />
+                </View>
+                <View style={styles.metaCopyBlock}>
+                  <Text style={styles.metaCardLabel}>Coffee Shop</Text>
+                  <Text style={styles.metaCardValue}>{shopName ?? `Shop ${post?.coffeeShopId ?? '-'}`}</Text>
+                </View>
+              </View>
+              <View style={styles.metaCard}>
+                <View style={styles.metaIconBubble}>
+                  <Ionicons name="analytics-outline" size={14} color={COLORS.accent} />
+                </View>
+                <View style={styles.metaCopyBlock}>
+                  <Text style={styles.metaCardLabel}>Views</Text>
+                  <Text style={styles.metaCardValue}>{post?.viewCount ?? 0}</Text>
+                </View>
+              </View>
+            </View>
           )}
-
-          <View style={styles.metaRow}>
-            <View style={styles.metaPill}>
-              <Ionicons name="storefront" size={14} color={COLORS.muted} />
-              <Text style={styles.metaPillText}>
-                {shopName ?? `Shop ${post?.coffeeShopId ?? '-'}`}
-              </Text>
-            </View>
-            <View style={styles.metaPill}>
-              <Ionicons name="eye" size={14} color={COLORS.muted} />
-              <Text style={styles.metaPillText}>{post?.viewCount ?? 0}</Text>
-            </View>
-          </View>
 
           {!isEditing && (
             <View style={styles.contentBlock}>
@@ -602,7 +642,7 @@ export default function PostDetailScreen() {
                 </>
               ) : (
                 <>
-                  
+
                   {post?.status?.toLowerCase() === 'hidden' ? (
                     <TouchableOpacity
                       style={[styles.actionButton, styles.primaryButton]}
@@ -665,6 +705,14 @@ export default function PostDetailScreen() {
               <Text style={styles.errorText}>{recipeError}</Text>
             ) : recipe ? (
               <View style={styles.recipeBlock}>
+                {recipeImage ? (
+                  <Image source={{ uri: recipeImage }} style={styles.recipeImage} />
+                ) : (
+                  <View style={styles.recipeImageFallback}>
+                    <Ionicons name="cafe-outline" size={24} color={COLORS.accent} />
+                    <Text style={styles.heroFallbackText}>Recipe visual</Text>
+                  </View>
+                )}
                 <Text style={styles.recipeTitle}>{recipe.recipeName ?? 'Untitled recipe'}</Text>
                 {recipe.flavorNote ? (
                   <Text style={styles.recipeNote}>{recipe.flavorNote}</Text>
@@ -802,12 +850,12 @@ export default function PostDetailScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: COLORS.bg,
+    backgroundColor: '#F4ECE3',
   },
   container: {
     padding: 20,
-    paddingBottom: 40,
-    gap: 16,
+    paddingBottom: 48,
+    gap: 18,
   },
   centered: {
     flex: 1,
@@ -831,7 +879,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '700',
   },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -840,10 +888,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     borderRadius: 999,
-    backgroundColor: COLORS.card,
+    backgroundColor: '#FDF9F5',
     borderWidth: 1,
     borderColor: COLORS.border,
   },
@@ -851,15 +899,36 @@ const styles = StyleSheet.create({
     color: COLORS.ink,
     fontWeight: '600',
   },
+  statusPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: '#F0E1D2',
+    borderWidth: 1,
+    borderColor: '#E2CBB5',
+  },
+  statusPillText: {
+    color: '#805233',
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  heroShell: {
+    height: 252,
+    borderRadius: 26,
+    overflow: 'hidden',
+    position: 'relative',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: '#D9C2AE',
+  },
   heroImage: {
     width: '100%',
-    height: 220,
-    borderRadius: 22,
+    height: '100%',
   },
   heroFallback: {
     width: '100%',
-    height: 220,
-    borderRadius: 22,
+    height: '100%',
     backgroundColor: '#F1E5DA',
     alignItems: 'center',
     justifyContent: 'center',
@@ -869,34 +938,97 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontWeight: '600',
   },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(34, 22, 13, 0.36)',
+  },
+  heroInfo: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 14,
+    gap: 10,
+  },
+  heroCategoryPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+  },
+  heroCategoryText: {
+    color: '#FFF9F3',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 23,
+    lineHeight: 30,
+    fontWeight: '700',
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  heroMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.36)',
+  },
+  heroMetaText: {
+    color: '#FDF7F0',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   card: {
     backgroundColor: COLORS.card,
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: 24,
+    padding: 20,
     borderWidth: 1,
     borderColor: COLORS.border,
-    gap: 14,
+    gap: 16,
     shadowColor: '#000000',
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
     elevation: 4,
   },
   tagRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 10,
   },
-  tagPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: COLORS.accentSoft,
-  },
-  tagText: {
+  sectionEyebrow: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.accent,
+    color: '#9B7B63',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  softStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#F5ECE3',
+    borderWidth: 1,
+    borderColor: '#EAD8C7',
+  },
+  softStatusText: {
+    color: '#8B5A37',
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'capitalize',
   },
   metaText: {
     color: COLORS.muted,
@@ -906,7 +1038,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: COLORS.ink,
-    fontFamily: 'Georgia',
   },
   editBlock: {
     gap: 10,
@@ -940,22 +1071,61 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.ink,
   },
+  metaStrip: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  metaCard: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E9DDD1',
+    backgroundColor: '#FCF7F2',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  metaIconBubble: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F1E3D5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metaCopyBlock: {
+    flex: 1,
+    gap: 2,
+  },
+  metaCardLabel: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  metaCardValue: {
+    color: COLORS.ink,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   recipeBlock: {
-    gap: 12,
+    gap: 14,
   },
   recipeImage: {
     width: '100%',
-    height: 180,
-    borderRadius: 18,
+    height: 196,
+    borderRadius: 20,
   },
   recipeImageFallback: {
     width: '100%',
-    height: 180,
-    borderRadius: 18,
+    height: 196,
+    borderRadius: 20,
     backgroundColor: '#F1E5DA',
     alignItems: 'center',
     justifyContent: 'center',
@@ -979,8 +1149,8 @@ const styles = StyleSheet.create({
     width: '48%',
     borderWidth: 1,
     borderColor: COLORS.border,
-    borderRadius: 14,
-    padding: 10,
+    borderRadius: 16,
+    padding: 11,
     backgroundColor: '#FBF7F3',
   },
   recipeLabel: {
@@ -1078,7 +1248,8 @@ const styles = StyleSheet.create({
   },
   contentText: {
     color: COLORS.ink,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 24,
   },
   actionRow: {
     flexDirection: 'row',

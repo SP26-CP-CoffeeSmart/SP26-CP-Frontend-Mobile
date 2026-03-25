@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 interface Ingredient {
   name: string;
@@ -37,6 +38,7 @@ interface ShopInventoryItem {
 
 export default function InventoryScreen() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -68,10 +70,19 @@ export default function InventoryScreen() {
   };
 
   const fetchIngredients = async () => {
+    if (!coffeeShopId) {
+      setIngredients([]);
+      setFilteredIngredients([]);
+      setError('Không tìm thấy shopId của tài khoản hiện tại.');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopInventory`);
+      const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId));
       const data = await response.json();
 
       console.log('Fetched ingredients:', data);
@@ -90,7 +101,7 @@ export default function InventoryScreen() {
 
   useEffect(() => {
     fetchIngredients();
-  }, []);
+  }, [coffeeShopId]);
 
   const categoryOptions = ['All', ...Array.from(
     new Set(ingredients.map((item) => item.ingredient?.category || 'Uncategorized'))
