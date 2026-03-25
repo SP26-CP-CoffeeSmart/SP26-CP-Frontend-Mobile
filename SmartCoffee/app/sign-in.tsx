@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import {
+  Image,
+  ImageBackground,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -20,9 +22,13 @@ const COLORS = {
   text: '#3C2A21',
   muted: '#8E7B6F',
   border: '#B08B61',
-  accent: '#9C7A4B',
+  accent: '#5B3216',
+  accentSoft: '#EFE6DE',
   white: '#FFFFFF',
+  shadow: 'rgba(0,0,0,0.08)',
 };
+
+const BACKGROUND_IMAGE = require('../assets/background.png');
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -66,12 +72,15 @@ export default function SignInScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <View style={styles.headerBlock}>
-          <Text style={styles.title}>SmartCoffee</Text>
-          <Text style={styles.subtitle}>Welcome to login..!</Text>
-        </View>
+    <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.card}>
+            <View style={styles.heroBlock}>
+              <Image source={BACKGROUND_IMAGE} style={styles.heroImage} resizeMode="contain" />
+              <Text style={styles.title}>Welcome To Coffee Hearts</Text>
+              <Text style={styles.subtitle}>Sign in to get your day started</Text>
+            </View>
 
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>Email/Phone</Text>
@@ -125,38 +134,63 @@ export default function SignInScreen() {
           </Pressable>
         </View>
 
-        <Pressable style={styles.primaryButton} onPress={handleLogin} disabled={submitting}>
-          <Text style={styles.primaryButtonText}>{submitting ? 'Signing In...' : 'Sign In'}</Text>
-        </Pressable>
-      </ScrollView>
-    </SafeAreaView>
+            <Pressable style={styles.primaryButton} onPress={handleLogin} disabled={submitting}>
+              <Text style={styles.primaryButtonText}>{submitting ? 'Signing In...' : 'Sign In'}</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  background: {
     flex: 1,
     backgroundColor: COLORS.bg,
   },
+  backgroundImage: {
+    opacity: 0.18,
+  },
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flexGrow: 1,
-    paddingHorizontal: 28,
-    paddingVertical: 40,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     justifyContent: 'center',
   },
-  headerBlock: {
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+  heroBlock: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 22,
     gap: 8,
   },
+  heroImage: {
+    width: 140,
+    height: 140,
+  },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
+    textAlign: 'center',
   },
   subtitle: {
-    fontSize: 14,
+    fontSize: 12,
     color: COLORS.muted,
+    textAlign: 'center',
   },
   fieldGroup: {
     marginBottom: 18,
@@ -224,7 +258,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#EFE6DE',
+    backgroundColor: COLORS.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },

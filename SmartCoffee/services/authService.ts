@@ -74,7 +74,7 @@ const withAuthHeader = async (options: RequestInit, token?: string) => {
   } as RequestInit;
 };
 
-const postJson = async <T>(url: string, payload: Record<string, string>) => {
+const postJson = async <T>(url: string, payload: Record<string, string | undefined>) => {
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -100,8 +100,16 @@ const postJson = async <T>(url: string, payload: Record<string, string>) => {
   }
 };
 
-export const registerAccount = async (email: string, password: string): Promise<string> => {
-  return postJson<string>(API_ENDPOINTS.auth.register(), { email, password });
+export const registerAccount = async (
+  email: string,
+  password: string,
+  phone?: string
+): Promise<string> => {
+  return postJson<string>(API_ENDPOINTS.auth.register(), {
+    email,
+    password,
+    ...(phone ? { phone } : {}),
+  });
 };
 
 export const loginAccount = async (email: string, password: string): Promise<AuthTokens> => {
@@ -206,7 +214,12 @@ export const logoutAccount = async (): Promise<void> => {
   }
 
   // Always clear tokens from storage regardless of API response
-  await AsyncStorage.multiRemove(['accessToken', 'refreshToken', 'coffeeShopId']);
+  await AsyncStorage.multiRemove([
+    'accessToken',
+    'refreshToken',
+    'coffeeShopId',
+    'onboarding:complete',
+  ]);
 };
 
 export const changePassword = async (oldPassword: string, newPassword: string): Promise<void> => {
@@ -217,6 +230,37 @@ export const changePassword = async (oldPassword: string, newPassword: string): 
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ oldPassword, newPassword }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+};
+
+export const updateCoffeeShop = async (
+  coffeeShopId: number,
+  shopName: string,
+  details?: {
+    address?: string | null;
+    provinceId?: number | null;
+    districtId?: number | null;
+    wardCode?: string | null;
+  }
+): Promise<void> => {
+  const response = await authorizedFetch(API_ENDPOINTS.auth.updateCoffeeShop(), {
+    method: 'PUT',
+    headers: {
+      Accept: '*/*',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      coffeeShopId,
+      shopName,
+      address: details?.address ?? null,
+      provinceId: details?.provinceId ?? null,
+      districtId: details?.districtId ?? null,
+      wardCode: details?.wardCode ?? null,
+    }),
   });
 
   if (!response.ok) {

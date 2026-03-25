@@ -31,18 +31,29 @@ interface SupplierProductRecommendation {
 
 export default function AiLoadingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string }>();
+  const params = useLocalSearchParams<{ mode?: string; message?: string }>();
   const { coffeeShopId } = useAuth();
   const { setItems, clear } = useSuggestions();
   const [messageIndex, setMessageIndex] = useState(0);
   const textOpacity = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const isForecastErrorMode = params.mode === 'forecast-error';
+  const forecastErrorMessage =
+    typeof params.message === 'string'
+      ? params.message
+      : Array.isArray(params.message)
+        ? params.message[0]
+        : 'Khong the tao recipe theo pricing strategy hien tai.';
   const messages = [
     'AI is creating your results.',
     'Please be patient while we finish the menu.',
   ];
 
   useEffect(() => {
+    if (isForecastErrorMode) {
+      return;
+    }
+
     let isMounted = true;
 
     const runTextCycle = () => {
@@ -90,7 +101,19 @@ export default function AiLoadingScreen() {
       isMounted = false;
       pulseAnimation.stop();
     };
-  }, [messages.length, pulse, textOpacity]);
+  }, [isForecastErrorMode, messages.length, pulse, textOpacity]);
+
+  useEffect(() => {
+    if (!isForecastErrorMode) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      router.back();
+    }, 2200);
+
+    return () => clearTimeout(timeoutId);
+  }, [isForecastErrorMode, router]);
 
   useEffect(() => {
     if (params.mode !== 'order-suggestions') {
@@ -225,15 +248,22 @@ export default function AiLoadingScreen() {
           </Animated.View>
 
           <View style={styles.messageWrap}>
-            <Animated.View style={[styles.messageBlock, { opacity: textOpacity }]}>
-              <ThemedText
-                style={styles.title}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.85}>
-                {messages[messageIndex]}
-              </ThemedText>
-            </Animated.View>
+            {isForecastErrorMode ? (
+              <View style={styles.errorBlock}>
+                <ThemedText style={styles.errorTitle}>Can not create recipe</ThemedText>
+                <ThemedText style={styles.errorMessage}>{forecastErrorMessage}</ThemedText>
+              </View>
+            ) : (
+              <Animated.View style={[styles.messageBlock, { opacity: textOpacity }]}>
+                <ThemedText
+                  style={styles.title}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.85}>
+                  {messages[messageIndex]}
+                </ThemedText>
+              </Animated.View>
+            )}
           </View>
         </View>
       </View>
@@ -286,6 +316,25 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
+  },
+  errorBlock: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 6,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.rounded,
+    color: '#7A2F2F',
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: Fonts.regular,
+    color: '#4B2E1E',
+    textAlign: 'center',
   },
   title: {
     fontSize: 15,

@@ -323,17 +323,25 @@ export default function MenuResultsScreen() {
       return;
     }
 
+    const imageUrls = Array.isArray(menu?.imageUrls) && menu.imageUrls.length > 0
+      ? menu.imageUrls
+      : resolvedImageUrl
+        ? [resolvedImageUrl]
+        : [];
+
     const payload = {
       ...menu,
       menuId,
       modifiedMenuItemIds,
       imageUrl: resolvedImageUrl,
+      imageUrls,
     };
 
     console.log('[Menu Save AI] Request payload:', {
       menuId,
       modifiedMenuItemIds,
       imageUrl: resolvedImageUrl,
+      imageUrls,
     });
 
     try {

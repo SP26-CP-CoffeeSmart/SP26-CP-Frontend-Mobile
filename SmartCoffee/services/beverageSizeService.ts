@@ -34,16 +34,35 @@ export interface UpdateBeverageSizePayload {
 
 class BeverageSizeService {
   async getByShop(shopId: number): Promise<BeverageSize[]> {
+    const url = API_ENDPOINTS.beverageSize.getByShop(shopId);
     try {
-      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.getByShop(shopId), {
+      console.log('[BeverageSize][GET by shop] request', {
+        url,
+        method: 'GET',
+        shopId,
+      });
+
+      const response = await authorizedFetch(url, {
         headers: {
           Accept: '*/*',
         },
       });
+
+      const responseText = await response.text();
+      console.log('[BeverageSize][GET by shop] response', {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: responseText,
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(
+          `HTTP error! status: ${response.status}; body: ${responseText || '<empty>'}`
+        );
       }
-      const data = await response.json();
+
+      const data = responseText ? JSON.parse(responseText) : [];
       return Array.isArray(data) ? data : [];
     } catch (error) {
       console.error('Error fetching beverage sizes:', error);
@@ -52,8 +71,15 @@ class BeverageSizeService {
   }
 
   async create(payload: CreateBeverageSizePayload): Promise<BeverageSize> {
+    const url = API_ENDPOINTS.beverageSize.create();
     try {
-      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.create(), {
+      console.log('[BeverageSize][CREATE] request', {
+        url,
+        method: 'POST',
+        payload,
+      });
+
+      const response = await authorizedFetch(url, {
         method: 'POST',
         headers: {
           Accept: 'text/plain',
@@ -62,11 +88,32 @@ class BeverageSizeService {
         body: JSON.stringify(payload),
       });
 
+      const responseText = await response.text();
+      console.log('[BeverageSize][CREATE] response', {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: responseText,
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(
+          `HTTP error! status: ${response.status}; body: ${responseText || '<empty>'}`
+        );
       }
 
-      return await response.json();
+      if (!responseText) {
+        return payload as BeverageSize;
+      }
+
+      try {
+        return JSON.parse(responseText);
+      } catch {
+        return {
+          ...payload,
+          raw: responseText,
+        } as BeverageSize;
+      }
     } catch (error) {
       console.error('Error creating beverage size:', error);
       throw error;
@@ -74,8 +121,16 @@ class BeverageSizeService {
   }
 
   async update(id: number, payload: UpdateBeverageSizePayload): Promise<BeverageSize> {
+    const url = API_ENDPOINTS.beverageSize.update(id);
     try {
-      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.update(id), {
+      console.log('[BeverageSize][UPDATE] request', {
+        url,
+        method: 'PUT',
+        id,
+        payload,
+      });
+
+      const response = await authorizedFetch(url, {
         method: 'PUT',
         headers: {
           Accept: '*/*',
@@ -84,11 +139,18 @@ class BeverageSizeService {
         body: JSON.stringify(payload),
       });
 
+      const text = await response.text();
+      console.log('[BeverageSize][UPDATE] response', {
+        url,
+        status: response.status,
+        ok: response.ok,
+        body: text,
+      });
+
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        throw new Error(`HTTP error! status: ${response.status}; body: ${text || '<empty>'}`);
       }
 
-      const text = await response.text();
       if (!text) {
         return {
           beverageSizeId: payload.beverageSizeId,

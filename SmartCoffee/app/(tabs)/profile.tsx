@@ -500,7 +500,7 @@ export default function ProfileScreen() {
     try {
       setRefreshing(true);
       await refreshProfile();
-      await Promise.all([loadBeverageSizes(), loadSubscription()]);
+      await Promise.all([loadBeverageSizes(), loadSubscription(), loadPackages()]);
     } finally {
       setRefreshing(false);
     }

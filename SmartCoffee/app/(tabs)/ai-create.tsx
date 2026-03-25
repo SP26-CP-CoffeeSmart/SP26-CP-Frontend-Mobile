@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import {
   BackHandler,
   KeyboardAvoidingView,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -17,10 +18,11 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
 const COFFEE_TYPES = ['Robusta', 'Arabica', 'Blend', 'Cherry', 'Culi'];
@@ -70,6 +72,7 @@ const PRICING_STRATEGIES = [
 ];
 
 const SLIDER_KEYS = ['Bitterness', 'Sweetness', 'Body', 'Acidity'] as const;
+const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
 
 const getLevelLabel = (value: number) => {
   if (value <= 2) return 'Very Low';
@@ -117,57 +120,105 @@ export default function AiCreateScreen() {
   const [cupType, setCupType] = useState('Plastic');
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
-  const [margin, setMargin] = useState(35);
-  const [isUnique, setIsUnique] = useState(true);
+
+  const [isUnique, setIsUnique] = useState(false);
+  const [subscriptionPackageName, setSubscriptionPackageName] = useState<string | null>(null);
+  const [showUniqueModal, setShowUniqueModal] = useState(false);
   const [numberOption, setNumberOption] = useState(3);
   const [pricingStrategy, setPricingStrategy] = useState(2);
   const [isLoading, setIsLoading] = useState(false);
 
+  const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
+
+  const fetchBeverages = useCallback(async () => {
+    setBeveragesLoading(true);
+    setBeveragesError(null);
+    try {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const result = await response.json();
+      const rawList: Record<string, any>[] = Array.isArray(result)
+        ? result
+        : Array.isArray(result?.data)
+          ? result.data
+          : Array.isArray(result?.data?.items)
+            ? result.data.items
+            : Array.isArray(result?.items)
+              ? result.items
+              : Array.isArray(result?.result)
+                ? result.result
+                : [];
+
+      const mapped = rawList.map((item, index) => ({
+        id: String(item?.beverageId ?? item?.id ?? index),
+        name: String(item?.beverageName ?? item?.name ?? 'Unknown'),
+        raw: item ?? {},
+      }));
+
+      setBeverages(mapped);
+      setSelectedBeverageId((prev) => {
+        if (prev && mapped.some((item) => item.id === prev)) {
+          const current = mapped.find((item) => item.id === prev);
+          setSelectedBeverage(current?.raw ?? null);
+          return prev;
+        }
+
+        if (mapped.length > 0) {
+          setSelectedBeverage(mapped[0].raw ?? null);
+          return mapped[0].id;
+        }
+
+        setSelectedBeverage(null);
+        return null;
+      });
+    } catch (error) {
+      setBeveragesError('Failed to load beverages.');
+    } finally {
+      setBeveragesLoading(false);
+    }
+  }, [coffeeShopId]);
+
+  useEffect(() => {
+    fetchBeverages();
+  }, [fetchBeverages]);
+
   useEffect(() => {
     let isMounted = true;
 
-    const fetchBeverages = async () => {
-      setBeveragesLoading(true);
-      setBeveragesError(null);
+    const fetchSubscription = async () => {
+      if (!coffeeShopId) {
+        if (isMounted) {
+          setSubscriptionPackageName(null);
+        }
+        return;
+      }
+
       try {
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+        const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
         if (!response.ok) {
           throw new Error(`Request failed: ${response.status}`);
         }
-        const result = await response.json();
-        const rawList: Record<string, any>[] = Array.isArray(result)
-          ? result
-          : Array.isArray(result?.data)
-            ? result.data
-            : Array.isArray(result?.items)
-              ? result.items
-              : [];
-
-        const mapped = rawList.map((item, index) => ({
-          id: String(item?.beverageId ?? item?.id ?? index),
-          name: String(item?.beverageName ?? item?.name ?? 'Unknown'),
-          raw: item ?? {},
-        }));
-
+        const data = await response.json();
+        const resolved = Array.isArray(data) ? data[0] : Array.isArray(data?.data) ? data.data[0] : data;
+        const name =
+          resolved?.package?.name ??
+          resolved?.subscriptionPackage?.name ??
+          resolved?.packageName ??
+          resolved?.name ??
+          null;
         if (isMounted) {
-          setBeverages(mapped);
-          if (!selectedBeverageId && mapped.length > 0) {
-            setSelectedBeverageId(mapped[0].id);
-            setSelectedBeverage(mapped[0].raw ?? null);
-          }
+          setSubscriptionPackageName(typeof name === 'string' ? name : null);
         }
       } catch (error) {
         if (isMounted) {
-          setBeveragesError('Failed to load beverages.');
-        }
-      } finally {
-        if (isMounted) {
-          setBeveragesLoading(false);
+          setSubscriptionPackageName(null);
         }
       }
     };
 
-    fetchBeverages();
+    fetchSubscription();
 
     return () => {
       isMounted = false;
@@ -176,6 +227,21 @@ export default function AiCreateScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      const syncOnFocus = async () => {
+        try {
+          const shouldRefresh = await AsyncStorage.getItem(BEVERAGE_REFRESH_FLAG_KEY);
+          if (shouldRefresh === '1') {
+            await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
+          }
+        } catch {
+          // Ignore storage errors; still refresh from API.
+        }
+
+        fetchBeverages();
+      };
+
+      syncOnFocus();
+
       const onBackPress = () => {
         router.replace('/(tabs)/menu');
         return true;
@@ -183,7 +249,7 @@ export default function AiCreateScreen() {
 
       const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove();
-    }, [router])
+    }, [fetchBeverages, router])
   );
 
   const handleSubmit = async () => {
@@ -231,9 +297,6 @@ export default function AiCreateScreen() {
         selectedColorStyleId: colorStyle,
         selectedCategoryId: category,
       },
-      pricing: {
-        marginPercentage: margin,
-      },
       numberOption,
       isUnique,
       pricingStrategy,
@@ -242,22 +305,82 @@ export default function AiCreateScreen() {
     try {
       console.log('AI create payload:', JSON.stringify(payload, null, 2));
 
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/AI/create-unique-ai-recipe`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-      const responseText = await response.text();
-      // console.log('AI create response status:', response.status);
-      // console.log('AI create response body:', responseText);
+      const [createRecipeResponse, forecastSellingPriceResponse] = await Promise.all([
+        authorizedFetch(`${AUTH_BASE_URL}/AI/create-unique-ai-recipe`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+        authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/forecast-selling-price`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }),
+      ]);
 
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}: ${responseText}`);
+      const [createRecipeResponseText, forecastSellingPriceResponseText] = await Promise.all([
+        createRecipeResponse.text(),
+        forecastSellingPriceResponse.text(),
+      ]);
+
+      console.log('[AI recommend] create-unique-ai-recipe status:', createRecipeResponse.status);
+      console.log('[AI recommend] create-unique-ai-recipe body:', createRecipeResponseText);
+      console.log(
+        '[AI recommend] forecast-selling-price status:',
+        forecastSellingPriceResponse.status
+      );
+      console.log('[AI recommend] forecast-selling-price body:', forecastSellingPriceResponseText);
+
+      if (!forecastSellingPriceResponse.ok) {
+        throw new Error(
+          `Forecast selling price request failed: ${forecastSellingPriceResponse.status}: ${forecastSellingPriceResponseText}`
+        );
       }
 
-      const data = responseText ? JSON.parse(responseText) : null;
+      const forecastData = forecastSellingPriceResponseText
+        ? JSON.parse(forecastSellingPriceResponseText)
+        : null;
+
+      console.log('[AI recommend] parsed forecast-selling-price:', forecastData);
+      console.log('[AI recommend] forecast code:', forecastData?.code);
+      console.log('[AI recommend] forecast canCreateRecipe:', forecastData?.data?.canCreateRecipe);
+      console.log('[AI recommend] forecast message:', forecastData?.message);
+
+      const forecastCode = forecastData?.code;
+
+      if (forecastCode === 'FORECAST_NOT_FEASIBLE') {
+        console.log('[AI recommend] branch: forecast not feasible, show error on loading and go back');
+        router.replace({
+          pathname: '/ai-loading',
+          params: {
+            mode: 'forecast-error',
+            message: forecastData?.message ?? 'Khong the tao recipe theo pricing strategy hien tai.',
+          },
+        });
+        return;
+      }
+
+      if (forecastCode !== 'FORECAST_FEASIBLE') {
+        throw new Error(
+          `Unexpected forecast code: ${String(forecastCode)}. Body: ${forecastSellingPriceResponseText}`
+        );
+      }
+
+      console.log('[AI recommend] branch: forecast feasible, continue loading and create result');
+
+      if (!createRecipeResponse.ok) {
+        throw new Error(
+          `Create recipe request failed: ${createRecipeResponse.status}: ${createRecipeResponseText}`
+        );
+      }
+
+      const data = createRecipeResponseText ? JSON.parse(createRecipeResponseText) : null;
+      console.log('[AI recommend] branch: go to ai-recommendations with create recipe data');
+      console.log('[AI recommend] parsed create-unique-ai-recipe:', data);
       router.replace({
         pathname: '/ai-recommendations',
         params: {
@@ -816,27 +939,6 @@ export default function AiCreateScreen() {
               </View>
 
               <View style={styles.sectionSpacing} />
-
-              <ThemedText style={styles.subSectionTitle}>Proposed Selling Price</ThemedText>
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.groupTitle}>Margin</ThemedText>
-                <ThemedText style={styles.groupValue}>{margin}%</ThemedText>
-              </View>
-              <Slider
-                value={margin}
-                minimumValue={0}
-                maximumValue={70}
-                step={1}
-                minimumTrackTintColor="#B4632D"
-                maximumTrackTintColor="#E5E5E5"
-                thumbTintColor="#B4632D"
-                onValueChange={(next) => setMargin(next)}
-              />
-              <View style={styles.sliderScale}>
-                <ThemedText style={styles.scaleText}>0%</ThemedText>
-                <ThemedText style={styles.scaleText}>70%</ThemedText>
-              </View>
-              <View style={styles.sectionSpacing} />
               <View style={styles.toggleRow}>
                 <View style={styles.toggleTextWrap}>
                   <ThemedText style={styles.subSectionTitle}>Check uniqueness?</ThemedText>
@@ -844,11 +946,39 @@ export default function AiCreateScreen() {
                 </View>
                 <Switch
                   value={isUnique}
-                  onValueChange={setIsUnique}
+                  onValueChange={(value) => {
+                    if (value && !isProPlan) {
+                      setShowUniqueModal(true);
+                      setIsUnique(false);
+                      return;
+                    }
+                    setIsUnique(value);
+                  }}
                   trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
                   thumbColor={isUnique ? '#6B3E1F' : '#A3A3A3'}
                 />
               </View>
+              <Modal
+                transparent
+                visible={showUniqueModal}
+                animationType="fade"
+                onRequestClose={() => setShowUniqueModal(false)}
+              >
+                <View style={styles.upgradeModalBackdrop}>
+                  <View style={styles.upgradeModalCard}>
+                    <ThemedText style={styles.upgradeModalTitle}>Feature locked</ThemedText>
+                    <ThemedText style={styles.upgradeModalText}>
+                      Tinh nang "Cong thuc doc nhat" chi danh cho goi Pro. Vui long nang cap goi de su dung.
+                    </ThemedText>
+                    <Pressable
+                      style={styles.upgradeModalButton}
+                      onPress={() => setShowUniqueModal(false)}
+                    >
+                      <ThemedText style={styles.upgradeModalButtonText}>Got it</ThemedText>
+                    </Pressable>
+                  </View>
+                </View>
+              </Modal>
               <Pressable
                 style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
                 onPress={handleSubmit}
@@ -1027,6 +1157,45 @@ const styles = StyleSheet.create({
   },
   submitButtonDisabled: {
     opacity: 0.7,
+  },
+  upgradeModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 17, 17, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  upgradeModalCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#E6D6C8',
+  },
+  upgradeModalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#3C2A21',
+    marginBottom: 8,
+  },
+  upgradeModalText: {
+    fontSize: 13,
+    color: '#6B4D35',
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+  upgradeModalButton: {
+    alignSelf: 'flex-end',
+    backgroundColor: '#6B3E1F',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  upgradeModalButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
   },
   submitButtonText: {
     color: '#FFFFFF',
