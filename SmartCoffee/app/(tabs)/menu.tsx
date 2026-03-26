@@ -68,6 +68,7 @@ type BeverageApiItem = Record<string, any>;
 const { width } = Dimensions.get('window');
 const MENU_CARD_WIDTH = width - 48;
 const BEVERAGE_PAGE_SIZE = 4;
+const BEVERAGE_API_PAGE_SIZE = 8;
 const BEVERAGE_PAGE_WIDTH = width - 48;
 const BEVERAGE_PAGE_GUTTER = 16;
 const BEVERAGE_PAGE_ITEM_WIDTH = BEVERAGE_PAGE_WIDTH + BEVERAGE_PAGE_GUTTER;
@@ -197,7 +198,10 @@ export default function MenuScreen() {
   const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
   const subscriptionSuccessRef = useRef(false);
   const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
-  const [beverageLooping, setBeverageLooping] = useState(false);
+  const [beveragePage, setBeveragePage] = useState(1);
+  const [beverageHasMore, setBeverageHasMore] = useState(true);
+  const [beverageLoadingMore, setBeverageLoadingMore] = useState(false);
+  const [beverageSearchQuery, setBeverageSearchQuery] = useState('');
 
   const loadSubscriptionPackages = useCallback(async () => {
     try {
@@ -568,7 +572,7 @@ export default function MenuScreen() {
 
           if (shouldRefreshBeverages === '1') {
             await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
-            await Promise.all([fetchBeverages(), fetchBeverageCount(), refreshCategories()]);
+            await Promise.all([fetchBeverages(false, 1, beverageSearchQuery), fetchBeverageCount(), refreshCategories()]);
           }
         } catch {
           // Ignore storage errors to avoid blocking UI flow.
@@ -617,87 +621,116 @@ export default function MenuScreen() {
     }
   }, [authLoading, coffeeShopId]);
 
-  const fetchBeverages = useCallback(async () => {
-    if (authLoading) {
-      return;
-    }
+  const mapBeverageItems = useCallback((rawList: BeverageApiItem[]) => {
+    return rawList.map((item, index) => {
+      const rawImage = String(item?.image ?? item?.imageUrl ?? '');
+      const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage);
+      return {
+        id: String(item?.beverageId ?? item?.id ?? index),
+        beverageId: Number(item?.beverageId ?? item?.id ?? 0),
+        name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
+        flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
+        time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
+        image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
+        imageUrl: imageUrl ?? null,
+        hasRealImage: hasRealBeverageImage(rawImage),
+        createDate: String(
+          item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
+        ),
+      };
+    });
+  }, []);
+
+  const parseBeverageResponse = (result: any) => {
+    const rawList: BeverageApiItem[] = Array.isArray(result)
+      ? result
+      : Array.isArray(result?.data)
+        ? result.data
+        : Array.isArray(result?.items)
+          ? result.items
+          : [];
+    const totalCount = Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? 0);
+    return { rawList, totalCount };
+  };
+
+  const fetchBeverages = useCallback(async (isLoadMore = false, page = 1, searchQuery = '') => {
+    if (authLoading) return;
 
     if (!coffeeShopId) {
-      setBeverages([]);
-      setBeveragesError(null);
-      setBeveragesLoading(false);
+      if (!isLoadMore) {
+        setBeverages([]);
+        setBeveragesError(null);
+        setBeveragesLoading(false);
+      }
       return;
     }
 
-    setBeveragesLoading(true);
+    if (isLoadMore) {
+      setBeverageLoadingMore(true);
+    } else {
+      setBeveragesLoading(true);
+      setBeverageHasMore(true);
+    }
     setBeveragesError(null);
+
     try {
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+      const qs = `page=${page}&pageSize=${BEVERAGE_API_PAGE_SIZE}${searchQuery ? `&beverageName=${encodeURIComponent(searchQuery)}` : ''}`;
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}?${qs}`);
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
       const result = await response.json();
-      const rawList: BeverageApiItem[] = Array.isArray(result)
-        ? result
-        : Array.isArray(result?.data)
-          ? result.data
-          : Array.isArray(result?.items)
-            ? result.items
-            : [];
+      const { rawList, totalCount } = parseBeverageResponse(result);
 
-      const parseCreateDate = (value?: string) => {
-        if (!value) return 0;
-        const parsed = Date.parse(value);
-        return Number.isNaN(parsed) ? 0 : parsed;
-      };
+      const mapped = mapBeverageItems(rawList);
 
-      const sortedList = [...rawList].sort((a, b) =>
-        parseCreateDate(
-          b?.createDate ?? b?.createdAt ?? b?.createdDate ?? b?.createdOn ?? ''
-        ) -
-        parseCreateDate(
-          a?.createDate ?? a?.createdAt ?? a?.createdDate ?? a?.createdOn ?? ''
-        )
-      );
-
-      if (sortedList.length === 0) {
-        setBeverages([]);
-        setBeveragesError(null);
-        setBeveragesLoading(false);
-        return;
+      if (isLoadMore) {
+        setBeverages((prev) => {
+          const newList = [...prev, ...mapped];
+          if (totalCount > 0) {
+            setBeverageHasMore(newList.length < totalCount);
+          } else {
+            setBeverageHasMore(rawList.length >= BEVERAGE_API_PAGE_SIZE);
+          }
+          return newList;
+        });
+      } else {
+        setBeverages(mapped);
+        if (totalCount > 0) {
+          setBeverageHasMore(mapped.length < totalCount);
+        } else {
+          setBeverageHasMore(rawList.length >= BEVERAGE_API_PAGE_SIZE);
+        }
       }
 
-      const mapped = sortedList.map((item, index) => {
-        const rawImage = String(item?.image ?? item?.imageUrl ?? '');
-        const imageUrl = resolveImageUrl(AUTH_BASE_URL, rawImage);
-        return {
-          id: String(item?.beverageId ?? item?.id ?? index),
-          beverageId: Number(item?.beverageId ?? item?.id ?? 0),
-          name: String(item?.name ?? item?.beverageName ?? 'Unknown'),
-          flavor: String(item?.beverageCategory?.name ?? item?.flavor ?? item?.taste ?? 'Unknown'),
-          time: String(item?.brewingTimeMinutes ?? item?.time ?? item?.prepTime ?? ''),
-          image: imageUrl ? { uri: imageUrl } : { uri: fallbackBeverageImage },
-          imageUrl: imageUrl ?? null,
-          hasRealImage: hasRealBeverageImage(rawImage),
-          createDate: String(
-            item?.createDate ?? item?.createdAt ?? item?.createdDate ?? item?.createdOn ?? ''
-          ),
-        };
-      });
-
-      setBeverages(mapped);
-      // console.log('Fetched Beverages:', mapped);
+      setBeveragePage(page);
     } catch (error) {
-      setBeveragesError('Failed to load beverages');
+      if (!isLoadMore) {
+        setBeveragesError('Failed to load beverages');
+      }
     } finally {
-      setBeveragesLoading(false);
+      if (isLoadMore) {
+        setBeverageLoadingMore(false);
+      } else {
+        setBeveragesLoading(false);
+      }
     }
-  }, [authLoading, coffeeShopId]);
+  }, [authLoading, coffeeShopId, mapBeverageItems]);
 
+  const fetchMoreBeverages = useCallback(() => {
+    if (beverageLoadingMore || !beverageHasMore || !coffeeShopId) return;
+    fetchBeverages(true, beveragePage + 1, beverageSearchQuery);
+  }, [beverageLoadingMore, beverageHasMore, coffeeShopId, beveragePage, beverageSearchQuery, fetchBeverages]);
+
+  // Initial fetch and Search debounce
   useEffect(() => {
-    fetchBeverages();
-  }, [fetchBeverages]);
+    const delayDebounceFn = setTimeout(() => {
+      fetchBeverages(false, 1, beverageSearchQuery);
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [beverageSearchQuery, fetchBeverages]);
 
   useEffect(() => {
     fetchBeverageCount();
@@ -712,43 +745,24 @@ export default function MenuScreen() {
     [beverages]
   );
 
-  const beveragePagerData = useMemo(() => {
-    if (beveragePages.length <= 1) {
-      return beveragePages;
-    }
-    const firstPage = beveragePages[0];
-    const lastPage = beveragePages[beveragePages.length - 1];
-    return [lastPage, ...beveragePages, firstPage];
-  }, [beveragePages]);
+  const handleBeverageScrollEnd = useCallback(
+    (event: any) => {
+      if (!beverageHasMore || beverageLoadingMore) {
+        return;
+      }
 
-  const handleBeveragePagerScrollEnd = (event: any) => {
-    if (beveragePages.length <= 1) {
-      return;
-    }
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      const offsetX = contentOffset?.x ?? 0;
+      const contentWidth = contentSize?.width ?? 0;
+      const layoutWidth = layoutMeasurement?.width ?? 0;
 
-    const { contentOffset } = event.nativeEvent;
-    const rawIndex = Math.round(contentOffset.x / BEVERAGE_PAGE_ITEM_WIDTH);
-
-    if (!beveragePagerRef.current) {
-      return;
-    }
-
-    if (rawIndex === 0) {
-      setBeverageLooping(true);
-      beveragePagerRef.current.scrollToIndex({
-        index: beveragePages.length,
-        animated: false,
-      });
-      setTimeout(() => setBeverageLooping(false), 120);
-    } else if (rawIndex === beveragePages.length + 1) {
-      setBeverageLooping(true);
-      beveragePagerRef.current.scrollToIndex({
-        index: 1,
-        animated: false,
-      });
-      setTimeout(() => setBeverageLooping(false), 120);
-    }
-  };
+      // Trigger load more when within 1 page width of the end
+      if (offsetX + layoutWidth >= contentWidth - BEVERAGE_PAGE_ITEM_WIDTH * 0.5) {
+        fetchMoreBeverages();
+      }
+    },
+    [beverageHasMore, beverageLoadingMore, fetchMoreBeverages]
+  );
 
   const formatMenuCreateDate = (value?: string) => {
     if (!value) return '';
@@ -810,7 +824,7 @@ export default function MenuScreen() {
       setRefreshing(true);
       await Promise.all([
         fetchMenus(),
-        fetchBeverages(),
+        fetchBeverages(false, 1, beverageSearchQuery),
         fetchBeverageCount(),
         refreshCategories(),
       ]);
@@ -1187,7 +1201,7 @@ export default function MenuScreen() {
       setBeveragesError(null);
       setBeverages((prev) => [mapped, ...prev]);
       await AsyncStorage.setItem(BEVERAGE_REFRESH_FLAG_KEY, '1');
-      await Promise.all([fetchBeverages(), fetchBeverageCount(), refreshCategories()]);
+      await Promise.all([fetchBeverages(false, 1, beverageSearchQuery), fetchBeverageCount(), refreshCategories()]);
       resetCreateForm();
       setShowCreateModal(false);
     } catch (error) {
@@ -1503,6 +1517,17 @@ export default function MenuScreen() {
             </TouchableOpacity>
           </View>
 
+          <View style={styles.menuSearchContainer}>
+            <Ionicons name="search" size={18} color={stylesVars.muted} style={styles.menuSearchIcon} />
+            <TextInput
+              style={styles.menuSearchInput}
+              placeholder="Search your beverages..."
+              placeholderTextColor={stylesVars.muted}
+              value={beverageSearchQuery}
+              onChangeText={setBeverageSearchQuery}
+            />
+          </View>
+
           {beveragesLoading && beverages.length === 0 ? (
             <View style={styles.beverageLoadingWrap}>
               <ActivityIndicator size="small" color={stylesVars.primary} />
@@ -1525,7 +1550,7 @@ export default function MenuScreen() {
                   beveragePagerRef.current = ref;
                 }}
                 horizontal
-                data={beveragePagerData}
+                data={beveragePages}
                 keyExtractor={(_, index) => `beverage-page-${index}`}
                 showsHorizontalScrollIndicator={false}
                 pagingEnabled
@@ -1533,7 +1558,6 @@ export default function MenuScreen() {
                 snapToInterval={BEVERAGE_PAGE_ITEM_WIDTH}
                 snapToAlignment="start"
                 disableIntervalMomentum
-                initialScrollIndex={beveragePages.length > 1 ? 1 : 0}
                 getItemLayout={(_, index) => ({
                   length: BEVERAGE_PAGE_ITEM_WIDTH,
                   offset: BEVERAGE_PAGE_ITEM_WIDTH * index,
@@ -1543,11 +1567,12 @@ export default function MenuScreen() {
                 removeClippedSubviews={false}
                 updateCellsBatchingPeriod={30}
                 contentContainerStyle={styles.beveragePager}
-                onMomentumScrollEnd={handleBeveragePagerScrollEnd}
+                onScroll={handleBeverageScrollEnd}
+                scrollEventThrottle={16}
                 renderItem={({ item: pageItems }) => (
                   <View style={styles.beveragePage}>
                     <View style={styles.beverageGrid}>
-                      {pageItems.map((item) => (
+                      {pageItems.map((item: BeverageItem) => (
                         <TouchableOpacity
                           key={item.id}
                           style={styles.beverageCard}
@@ -1578,7 +1603,7 @@ export default function MenuScreen() {
                             ) : null}
                           </View>
                           <View style={styles.beverageContent}>
-                            <Text style={styles.beverageTitle}>{item.name}</Text>
+                            <Text style={styles.beverageTitle} numberOfLines={2}>{item.name}</Text>
                             <View style={styles.beverageMetaRow}>
                               <Ionicons name="cafe-outline" size={12} color={stylesVars.primary} />
                               <Text style={styles.beverageMetaText}>{item.flavor}</Text>
@@ -1602,12 +1627,14 @@ export default function MenuScreen() {
                     </View>
                   </View>
                 )}
+                ListFooterComponent={() => 
+                  beverageLoadingMore ? (
+                    <View style={[styles.beveragePage, { justifyContent: 'center', alignItems: 'center' }]}>
+                      <ActivityIndicator size="small" color={stylesVars.primary} />
+                    </View>
+                  ) : null
+                }
               />
-              {beverageLooping ? (
-                <View style={styles.beverageLoopOverlay}>
-                  <ActivityIndicator size="small" color={stylesVars.primary} />
-                </View>
-              ) : null}
             </View>
           )}
         </View>
@@ -2299,6 +2326,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 16,
+    paddingBottom: 16,
   },
   beverageLoadingMore: {
     width: 120,
@@ -2353,11 +2381,14 @@ const styles = StyleSheet.create({
   beverageContent: {
     padding: 14,
     gap: 6,
+    flex: 1,
+    justifyContent: 'space-between',
   },
   beverageTitle: {
     fontSize: 14,
     fontWeight: '700',
     color: stylesVars.espresso,
+    minHeight: 40,
   },
   beverageMetaRow: {
     flexDirection: 'row',
@@ -2986,5 +3017,24 @@ const styles = StyleSheet.create({
   },
   payosWebview: {
     flex: 1,
+  },
+  menuSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAF8F5',
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEBE9',
+  },
+  menuSearchIcon: {
+    marginRight: 8,
+  },
+  menuSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: stylesVars.espresso,
+    paddingVertical: 10,
   },
 });

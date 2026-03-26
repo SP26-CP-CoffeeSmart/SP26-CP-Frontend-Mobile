@@ -251,6 +251,19 @@ export default function MenuRecommendationsScreen() {
       return;
     }
 
+    const existingGroupIndex = menuGroups.findIndex(
+      (g, index) => index !== activeGroupIndex && g.selectedBeverageCategories.includes(categoryId)
+    );
+
+    if (existingGroupIndex !== -1) {
+      Toast.show({
+        type: 'error',
+        text1: 'Category Already Selected',
+        text2: `This category is already used in "${menuGroups[existingGroupIndex].name}".`,
+      });
+      return;
+    }
+
     setMenuGroups((prev) =>
       prev.map((group, index) => {
         if (index !== activeGroupIndex) {
@@ -732,12 +745,29 @@ export default function MenuRecommendationsScreen() {
                   const selected =
                     activeGroupIndex !== null &&
                     menuGroups[activeGroupIndex]?.selectedBeverageCategories.includes(id);
+                  const occupiedGroup = menuGroups.find(
+                    (g, index) => index !== activeGroupIndex && g.selectedBeverageCategories.includes(id)
+                  );
 
                   return (
                     <TouchableOpacity
                       key={id}
-                      style={[styles.modalRow, selected && styles.modalRowActive]}
-                      onPress={() => toggleCategoryForGroup(id)}
+                      style={[
+                        styles.modalRow,
+                        selected && styles.modalRowActive,
+                        occupiedGroup && { opacity: 0.5 }
+                      ]}
+                      onPress={() => {
+                        if (occupiedGroup) {
+                          Toast.show({
+                            type: 'error',
+                            text1: 'Category Already Selected',
+                            text2: `This category is already used in "${occupiedGroup.name}".`,
+                          });
+                          return;
+                        }
+                        toggleCategoryForGroup(id);
+                      }}
                       activeOpacity={0.85}
                     >
                       <Text style={[styles.modalRowText, selected && styles.modalRowTextActive]}>
@@ -745,6 +775,8 @@ export default function MenuRecommendationsScreen() {
                       </Text>
                       {selected ? (
                         <Ionicons name="checkmark-circle" size={18} color={COLORS.accent} />
+                      ) : occupiedGroup ? (
+                        <Ionicons name="lock-closed-outline" size={16} color={COLORS.muted} />
                       ) : null}
                     </TouchableOpacity>
                   );

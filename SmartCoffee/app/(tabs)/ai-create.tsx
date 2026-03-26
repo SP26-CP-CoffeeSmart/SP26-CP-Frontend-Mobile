@@ -5,13 +5,16 @@ import Slider from '@react-native-community/slider';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import {
+  ActivityIndicator,
   BackHandler,
+  FlatList,
   KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -94,12 +97,18 @@ export default function AiCreateScreen() {
     Acidity: 2,
   });
   const { coffeeShopId } = useAuth();
-  const [beverages, setBeverages] = useState<Array<{ id: string; name: string; raw: Record<string, any> }>>([]);
+  const [beveragesList, setBeveragesList] = useState<Array<{ id: string; name: string; raw: Record<string, any> }>>([]);
   const [beveragesLoading, setBeveragesLoading] = useState(false);
   const [beveragesError, setBeveragesError] = useState<string | null>(null);
   const [selectedBeverageId, setSelectedBeverageId] = useState<string | null>(null);
   const [selectedBeverage, setSelectedBeverage] = useState<Record<string, any> | null>(null);
   const [beverageSelectionError, setBeverageSelectionError] = useState<string | null>(null);
+
+  const [showBeverageModal, setShowBeverageModal] = useState(false);
+  const [beverageSearch, setBeverageSearch] = useState('');
+  const [beveragePage, setBeveragePage] = useState(1);
+  const [beverageHasMore, setBeverageHasMore] = useState(true);
+  const [beverageLoadingMore, setBeverageLoadingMore] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState('Bold');
   const [coffeeType, setCoffeeType] = useState('Robusta');
   const [roastLevel, setRoastLevel] = useState('Light');
@@ -130,11 +139,20 @@ export default function AiCreateScreen() {
 
   const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
 
-  const fetchBeverages = useCallback(async () => {
-    setBeveragesLoading(true);
+  const fetchBeverages = useCallback(async (isLoadMore = false, page = 1, search = '') => {
+    if (!coffeeShopId) return;
+
+    if (isLoadMore) {
+      setBeverageLoadingMore(true);
+    } else {
+      setBeveragesLoading(true);
+      setBeverageHasMore(true);
+    }
     setBeveragesError(null);
+
     try {
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}`);
+      const qs = `page=${page}&pageSize=10${search ? `&beverageName=${encodeURIComponent(search)}` : ''}`;
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/shop/${coffeeShopId}?${qs}`);
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
@@ -150,6 +168,8 @@ export default function AiCreateScreen() {
               : Array.isArray(result?.result)
                 ? result.result
                 : [];
+      
+      const totalCount = Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? 0);
 
       const mapped = rawList.map((item, index) => ({
         id: String(item?.beverageId ?? item?.id ?? index),
@@ -157,32 +177,64 @@ export default function AiCreateScreen() {
         raw: item ?? {},
       }));
 
-      setBeverages(mapped);
-      setSelectedBeverageId((prev) => {
-        if (prev && mapped.some((item) => item.id === prev)) {
-          const current = mapped.find((item) => item.id === prev);
-          setSelectedBeverage(current?.raw ?? null);
-          return prev;
+      if (isLoadMore) {
+        setBeveragesList((prev) => {
+          const newList = [...prev, ...mapped];
+          if (totalCount > 0) {
+            setBeverageHasMore(newList.length < totalCount);
+          } else {
+            setBeverageHasMore(mapped.length >= 10);
+          }
+          return newList;
+        });
+      } else {
+        setBeveragesList(mapped);
+        if (totalCount > 0) {
+          setBeverageHasMore(mapped.length < totalCount);
+        } else {
+          setBeverageHasMore(mapped.length >= 10);
         }
 
-        if (mapped.length > 0) {
-          setSelectedBeverage(mapped[0].raw ?? null);
-          return mapped[0].id;
-        }
+        setSelectedBeverageId((prevId) => {
+          if (!prevId && !search && mapped.length > 0) {
+            setSelectedBeverage(mapped[0].raw);
+            return mapped[0].id;
+          }
+          return prevId;
+        });
+      }
 
-        setSelectedBeverage(null);
-        return null;
-      });
+      setBeveragePage(page);
     } catch (error) {
       setBeveragesError('Failed to load beverages.');
     } finally {
-      setBeveragesLoading(false);
+      if (isLoadMore) {
+        setBeverageLoadingMore(false);
+      } else {
+        setBeveragesLoading(false);
+      }
     }
   }, [coffeeShopId]);
 
+  const loadMoreBeverages = useCallback(() => {
+    if (!beverageHasMore || beverageLoadingMore || beveragesLoading) return;
+    fetchBeverages(true, beveragePage + 1, beverageSearch);
+  }, [beverageHasMore, beverageLoadingMore, beveragesLoading, beveragePage, beverageSearch, fetchBeverages]);
+
+  // Initial fetch
   useEffect(() => {
-    fetchBeverages();
+    fetchBeverages(false, 1, '');
   }, [fetchBeverages]);
+
+  // Search debounce
+  useEffect(() => {
+    if (!showBeverageModal) return; // Only search when modal is open
+    const delayDebounceFn = setTimeout(() => {
+      fetchBeverages(false, 1, beverageSearch);
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [beverageSearch, showBeverageModal]);
 
   useEffect(() => {
     let isMounted = true;
@@ -232,12 +284,11 @@ export default function AiCreateScreen() {
           const shouldRefresh = await AsyncStorage.getItem(BEVERAGE_REFRESH_FLAG_KEY);
           if (shouldRefresh === '1') {
             await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
+            fetchBeverages(false, 1, beverageSearch);
           }
         } catch {
           // Ignore storage errors; still refresh from API.
         }
-
-        fetchBeverages();
       };
 
       syncOnFocus();
@@ -474,37 +525,20 @@ export default function AiCreateScreen() {
 
               <ThemedText style={styles.subSectionTitle}>Beverage</ThemedText>
               <ThemedText style={styles.helperText}>What drink does this recipe make?</ThemedText>
-              {beveragesLoading ? (
-                <ThemedText style={styles.beverageStateText}>Loading beverages...</ThemedText>
-              ) : beveragesError ? (
-                <ThemedText style={styles.beverageStateText}>{beveragesError}</ThemedText>
-              ) : beverages.length === 0 ? (
-                <ThemedText style={styles.beverageStateText}>No beverages found.</ThemedText>
-              ) : (
-                <View style={styles.beverageOptions}>
-                  {beverages.map((item) => {
-                    const isSelected = item.id === selectedBeverageId;
-                    return (
-                      <Pressable
-                        key={item.id}
-                        onPress={() => {
-                          setSelectedBeverageId(item.id);
-                          setSelectedBeverage(item.raw ?? null);
-                          setBeverageSelectionError(null);
-                        }}
-                        style={[styles.beverageOption, isSelected && styles.beverageOptionSelected]}>
-                        <ThemedText
-                          style={[
-                            styles.beverageOptionText,
-                            isSelected && styles.beverageOptionTextSelected,
-                          ]}>
-                          {item.name}
-                        </ThemedText>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
+              <Pressable
+                style={styles.dropdownSelector}
+                onPress={() => setShowBeverageModal(true)}
+              >
+                <ThemedText
+                  style={[
+                    styles.dropdownText,
+                    !selectedBeverageId && styles.dropdownPlaceholder,
+                  ]}
+                >
+                  {selectedBeverage ? selectedBeverage.name || selectedBeverage.beverageName : 'Select a beverage...'}
+                </ThemedText>
+                <MaterialIcons name="arrow-drop-down" size={24} color="#8D6E63" />
+              </Pressable>
               {beverageSelectionError ? (
                 <ThemedText style={styles.beverageErrorText}>{beverageSelectionError}</ThemedText>
               ) : null}
@@ -979,6 +1013,90 @@ export default function AiCreateScreen() {
                   </View>
                 </View>
               </Modal>
+
+              <Modal
+                transparent
+                visible={showBeverageModal}
+                animationType="slide"
+                onRequestClose={() => setShowBeverageModal(false)}
+              >
+                <View style={styles.modalBackdrop}>
+                  <View style={styles.modalContent}>
+                    <View style={styles.modalHeader}>
+                      <ThemedText style={styles.modalTitle}>Select Beverage</ThemedText>
+                      <Pressable onPress={() => setShowBeverageModal(false)} style={styles.modalCloseButton}>
+                        <MaterialIcons name="close" size={24} color="#5D4037" />
+                      </Pressable>
+                    </View>
+
+                    <View style={styles.searchContainer}>
+                      <MaterialIcons name="search" size={20} color="#8D6E63" style={styles.searchIcon} />
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search beverages..."
+                        placeholderTextColor="#A1887F"
+                        value={beverageSearch}
+                        onChangeText={setBeverageSearch}
+                      />
+                    </View>
+
+                    {beveragesError ? (
+                      <View style={styles.modalStateContainer}>
+                        <ThemedText style={styles.beverageErrorText}>{beveragesError}</ThemedText>
+                      </View>
+                    ) : beveragesList.length === 0 && !beveragesLoading ? (
+                      <View style={styles.modalStateContainer}>
+                        <ThemedText style={styles.beverageStateText}>No beverages found.</ThemedText>
+                      </View>
+                    ) : (
+                      <FlatList
+                        data={beveragesList}
+                        keyExtractor={(item) => item.id}
+                        contentContainerStyle={styles.listContainer}
+                        showsVerticalScrollIndicator={false}
+                        onEndReached={loadMoreBeverages}
+                        onEndReachedThreshold={0.5}
+                        ListFooterComponent={() => (
+                          <View style={styles.listFooter}>
+                            {beveragesLoading || beverageLoadingMore ? (
+                              <ActivityIndicator size="small" color="#B4632D" />
+                            ) : !beverageHasMore && beveragesList.length > 0 ? (
+                              <ThemedText style={styles.endOfListText}>No more beverages</ThemedText>
+                            ) : null}
+                          </View>
+                        )}
+                        renderItem={({ item }) => {
+                          const isSelected = item.id === selectedBeverageId;
+                          return (
+                            <Pressable
+                              style={[
+                                styles.listItem,
+                                isSelected && styles.listItemSelected
+                              ]}
+                              onPress={() => {
+                                setSelectedBeverageId(item.id);
+                                setSelectedBeverage(item.raw ?? null);
+                                setBeverageSelectionError(null);
+                                setShowBeverageModal(false);
+                              }}
+                            >
+                              <ThemedText style={[
+                                styles.listItemText,
+                                isSelected && styles.listItemTextSelected
+                              ]}>
+                                {item.name}
+                              </ThemedText>
+                              {isSelected && (
+                                <MaterialIcons name="check" size={20} color="#FFFFFF" />
+                              )}
+                            </Pressable>
+                          );
+                        }}
+                      />
+                    )}
+                  </View>
+                </View>
+              </Modal>
               <Pressable
                 style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
                 onPress={handleSubmit}
@@ -1193,9 +1311,115 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   upgradeModalButtonText: {
+    fontWeight: '600',
+    fontSize: 14,
+    color: '#FFF',
+  },
+  dropdownSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FAF8F5',
+    borderWidth: 1,
+    borderColor: '#E5D5C5',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  dropdownText: {
+    fontWeight: '500',
+    fontSize: 14,
+    color: '#3E2723',
+  },
+  dropdownPlaceholder: {
+    color: '#A1887F',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    height: '75%',
+    paddingTop: 16,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  modalTitle: {
+    fontWeight: '600',
+    fontSize: 18,
+    color: '#3E2723',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FAFAFA',
+    margin: 16,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#EFEBE9',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#3E2723',
+    paddingVertical: 10,
+  },
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+    borderRadius: 6,
+  },
+  listItemSelected: {
+    backgroundColor: '#B4632D',
+    borderBottomColor: 'transparent',
+  },
+  listItemText: {
+    fontWeight: '500',
+    fontSize: 15,
+    color: '#5D4037',
+  },
+  listItemTextSelected: {
     color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 13,
+  },
+  modalStateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 40,
+  },
+  listFooter: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  endOfListText: {
+    fontSize: 12,
+    color: '#A1887F',
   },
   submitButtonText: {
     color: '#FFFFFF',

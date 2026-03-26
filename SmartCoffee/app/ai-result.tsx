@@ -376,8 +376,18 @@ export default function AiResultScreen() {
             : false;
 
       const rawRecipe = { ...recipe } as Record<string, any>;
+      const strippedKeys = new Set([
+        'isUnique',
+        'beverageId',
+        'totalCost',
+        'createDate',
+        'applyDate',
+        'image',
+        'status',
+        'shopRecipeIngredients',
+      ]);
       const recipeEntries = Object.entries(rawRecipe).filter(
-        ([key]) => key !== 'isUnique' && key !== 'beverageId' && key !== 'totalCost' && key !== 'createDate' && key !== 'applyDate'
+        ([key]) => !strippedKeys.has(key)
       );
 
       const orderedRecipe: Record<string, any> = {};
