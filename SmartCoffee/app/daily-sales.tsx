@@ -21,7 +21,6 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
-import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
 
 const COLORS = {
     bg: '#F7F3EF',
@@ -43,6 +42,7 @@ interface MenuItem {
     description: string | null;
     sellingPrice: number;
     addedDate: string;
+    itemSizeViewModels?: ItemSize[];
     shopBeverage: {
         beverageId: number;
         name: string;
@@ -112,9 +112,9 @@ export default function DailySalesScreen() {
     const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
     const [salesData, setSalesData] = useState<Map<number, DailySalesItem>>(new Map());
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [beverageSizes, setBeverageSizes] = useState<BeverageSize[]>([]);
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [itemSizeMap, setItemSizeMap] = useState<Map<number, ItemSize[]>>(new Map());
+
+    const normalizeSizeName = (value?: string) => (value || '').trim().toUpperCase();
 
     const formatPrice = (value?: number) => {
         if (value == null) return '';
@@ -167,58 +167,6 @@ export default function DailySalesScreen() {
                 });
             }
             setAllItems(items);
-
-            // Fetch item sizes (prices per size for each menu item in this menu)
-            try {
-                const itemSizeResponse = await authorizedFetch(
-                    API_ENDPOINTS.itemSize.getByMenu(menuData.menuId),
-                    {
-                        headers: {
-                            Accept: '*/*',
-                        },
-                    }
-                );
-
-                if (itemSizeResponse.ok) {
-                    const data: ItemSize[] = await itemSizeResponse.json();
-                    console.log('[Daily Sales] ItemSize by menu response:', data);
-                    if (Array.isArray(data)) {
-                        const map = new Map<number, ItemSize[]>();
-                        data.forEach((item) => {
-                            const key = item.menuItemId;
-                            if (!key) return;
-                            const list = map.get(key) || [];
-                            list.push(item);
-                            map.set(key, list);
-                        });
-                        console.log('[Daily Sales] ItemSize mapping (menuItemId -> sizes):',
-                            Array.from(map.entries()).map(([menuItemId, sizes]) => ({ menuItemId, sizes }))
-                        );
-                        setItemSizeMap(map);
-                    }
-                } else {
-                    console.error(
-                        '[Daily Sales] Error fetching item sizes:',
-                        itemSizeResponse.status
-                    );
-                }
-            } catch (itemSizeError) {
-                console.error('[Daily Sales] Error fetching item sizes:', itemSizeError);
-                // Continue without item sizes; price mapping will be unavailable
-            }
-
-            // Fetch beverage sizes for this shop
-            try {
-                const sizes = await beverageSizeService.getByShop(coffeeShopId);
-                // Filter only active sizes
-                const activeSizes = sizes.filter(
-                    (size: BeverageSize) => size.isActive === true || size.active === true
-                );
-                setBeverageSizes(activeSizes);
-            } catch (sizeError) {
-                console.error('[Daily Sales] Error fetching beverage sizes:', sizeError);
-                // Continue without beverage sizes
-            }
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to load menu';
             setError(errorMessage);
@@ -234,43 +182,50 @@ export default function DailySalesScreen() {
     }, [coffeeShopId]);
 
     const getAvailableSizes = (): string[] => {
-        if (beverageSizes.length > 0) {
-            return beverageSizes
-                .map((size) => size.sizeName || (size as any).name || '')
-                .filter((name) => !!name);
+        const fromItems = allItems
+            .flatMap((item) => item.itemSizeViewModels || [])
+            .map((sizeItem) => (sizeItem.beverageSize?.sizeName || '').trim())
+            .filter((name) => !!name);
+
+        if (fromItems.length > 0) {
+            return Array.from(new Set(fromItems));
         }
+
         return ['S', 'M', 'L'];
     };
 
     const getSizeInfosForItem = (menuItemId: number): SizeInfo[] => {
         const sizeNames = getAvailableSizes();
-        const itemSizesForItem = itemSizeMap.get(menuItemId) || [];
+        const currentItem = allItems.find((item) => item.menuItemId === menuItemId);
+        const itemSizesForItem = currentItem?.itemSizeViewModels || [];
 
         return sizeNames.map((name) => {
             const trimmedName = name.trim();
+            const normalizedName = normalizeSizeName(trimmedName);
 
             const matchByName = itemSizesForItem.find(
-                (it) => it.beverageSize?.sizeName?.trim() === trimmedName
+                (it) => normalizeSizeName(it.beverageSize?.sizeName) === normalizedName
             );
-
-            let match = matchByName;
-            if (!match) {
-                const beverageSizeDef = beverageSizes.find(
-                    (bs) => ((bs.sizeName || (bs as any).name || '').trim() === trimmedName)
-                );
-                const bsId =
-                    beverageSizeDef?.beverageSizeId || (beverageSizeDef as any)?.id;
-                if (bsId != null) {
-                    match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
-                }
-            }
 
             return {
                 name: trimmedName,
-                hasPrice: !!match,
-                price: match?.sellingPrice,
+                hasPrice: !!matchByName,
+                price: matchByName?.sellingPrice,
             };
         });
+    };
+
+    const calculateItemSubtotal = (
+        sizeInfos: SizeInfo[],
+        sale?: DailySalesItem
+    ): number => {
+        if (!sale) return 0;
+
+        return sizeInfos.reduce((sum, sizeInfo) => {
+            const quantity = sale.sizes[sizeInfo.name] || 0;
+            const unitPrice = sizeInfo.price ?? 0;
+            return sum + quantity * unitPrice;
+        }, 0);
     };
 
     const updateSalesQuantity = (
@@ -322,31 +277,16 @@ export default function DailySalesScreen() {
         let totalRevenue = 0;
 
         salesData.forEach((sale) => {
-            const itemSizesForItem = itemSizeMap.get(sale.menuItemId) || [];
+            const sizeInfos = getSizeInfosForItem(sale.menuItemId);
 
             Object.entries(sale.sizes).forEach(([sizeName, qty]) => {
                 const quantity = typeof qty === 'number' ? qty : 0;
                 if (quantity <= 0) return;
 
-                const trimmedName = sizeName.trim();
-
-                let match = itemSizesForItem.find(
-                    (it) => it.beverageSize?.sizeName?.trim() === trimmedName
+                const sizeInfo = sizeInfos.find(
+                    (it) => normalizeSizeName(it.name) === normalizeSizeName(sizeName)
                 );
-
-                if (!match) {
-                    const beverageSizeDef = beverageSizes.find(
-                        (bs) =>
-                            (bs.sizeName || (bs as any).name || '').trim() === trimmedName
-                    );
-                    const bsId =
-                        beverageSizeDef?.beverageSizeId || (beverageSizeDef as any)?.id;
-                    if (bsId != null) {
-                        match = itemSizesForItem.find((it) => it.beverageSizeId === bsId);
-                    }
-                }
-
-                const price = match?.sellingPrice ?? 0;
+                const price = sizeInfo?.price ?? 0;
 
                 totalCups += quantity;
                 totalRevenue += quantity * price;
@@ -377,6 +317,7 @@ export default function DailySalesScreen() {
         const sale = salesData.get(item.menuItemId);
         const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
         const sizeInfos = getSizeInfosForItem(item.menuItemId);
+        const itemSubtotal = calculateItemSubtotal(sizeInfos, sale);
 
         return (
             <View key={item.menuItemId} style={styles.salesItemCard}>
@@ -390,6 +331,12 @@ export default function DailySalesScreen() {
                         />
                         <Text style={styles.salesItemName} numberOfLines={2}>
                             {item.shopRecipe.recipeName}
+                        </Text>
+                    </View>
+                    <View style={styles.itemSubtotalBlock}>
+                        <Text style={styles.itemSubtotalLabel}>Subtotal</Text>
+                        <Text style={styles.itemSubtotalValue}>
+                            {formatPrice(itemSubtotal)}
                         </Text>
                     </View>
                 </View>
@@ -416,7 +363,9 @@ export default function DailySalesScreen() {
                                     ]}
                                 >
                                     {size.name}
-                                    {!size.hasPrice ? ' (Chưa có giá)' : ''}
+                                    {size.hasPrice
+                                        ? ` • ${formatPrice(size.price)}`
+                                        : ' • Chưa có giá'}
                                 </Text>
                                 <View style={styles.sizeQuantityControls}>
                                     <TouchableOpacity
@@ -516,18 +465,22 @@ export default function DailySalesScreen() {
 
             // For each item in salesData
             salesData.forEach((sale) => {
-                // For each size, create an entry
-                beverageSizes.forEach((size) => {
-                    const sizeKey = size.sizeName || size.name;
-                    const quantity = sale.sizes[sizeKey || ''] || 0;
+                const itemSizes = sale.item.itemSizeViewModels || [];
 
-                    // Only add entries with quantity > 0
+                // For each size from itemSizeViewModels, create an entry
+                itemSizes.forEach((sizeItem) => {
+                    const sizeKey = sizeItem.beverageSize?.sizeName || '';
+                    const matchingSizeEntry = Object.entries(sale.sizes).find(
+                        ([name]) => normalizeSizeName(name) === normalizeSizeName(sizeKey)
+                    );
+                    const quantity = matchingSizeEntry?.[1] || 0;
+
                     if (quantity > 0) {
                         menuItemList.push({
                             menuItemId: sale.menuItemId,
                             saleDate: isoDate,
                             totalCups: quantity,
-                            beverageSizeId: size.beverageSizeId || size.id,
+                            beverageSizeId: sizeItem.beverageSizeId,
                         });
                     }
                 });
@@ -915,6 +868,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
+        flex: 1,
     },
     salesItemImage: {
         width: 50,
@@ -931,6 +885,23 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: COLORS.text,
         marginBottom: 4,
+    },
+    itemSubtotalBlock: {
+        alignItems: 'flex-end',
+        marginLeft: 10,
+    },
+    itemSubtotalLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: COLORS.textSecondary,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+    },
+    itemSubtotalValue: {
+        marginTop: 4,
+        fontSize: 14,
+        fontWeight: '700',
+        color: DAILY_SALES_BROWN,
     },
     // legacy quantity / size selector styles removed in favor of new per-size controls
     sizeQuantityRow: {

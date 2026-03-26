@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     StyleSheet,
     Text,
@@ -10,12 +10,13 @@ import {
     RefreshControl,
     Image,
     Modal,
+    Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import { useRouter } from 'expo-router';
-import { API_ENDPOINTS } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 import QRCode from 'react-native-qrcode-svg';
@@ -39,6 +40,17 @@ interface MenuItem {
     description: string | null;
     sellingPrice: number;
     addedDate: string;
+    itemSizeViewModels?: Array<{
+        itemSizeId: number;
+        beverageSizeId: number;
+        menuItemId: number;
+        sellingPrice: number;
+        beverageSize?: {
+            beverageSizeId: number;
+            sizeName?: string;
+            volume?: number;
+        };
+    }>;
     shopBeverage: {
         beverageId: number;
         name: string;
@@ -67,10 +79,23 @@ interface MenuData {
     versionNumber: string;
     status: string;
     isActive: boolean;
+    image?: string | null;
+    images?: string[];
     menuGroups: MenuGroup[];
 }
 
-const fallbackMenuImage = 'https://via.placeholder.com/60';
+const fallbackMenuImage =
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+const { width } = Dimensions.get('window');
+const MENU_IMAGE_WIDTH = width - 32;
+const ZOOM_IMAGE_WIDTH = width;
+
+const resolveImageUrl = (baseUrl: string, image?: string | null) => {
+    if (!image || image === 'null' || image === 'undefined') return null;
+    if (image.startsWith('http://') || image.startsWith('https://')) return image;
+    if (image.startsWith('/')) return `${baseUrl}${image}`;
+    return `${baseUrl}/images/${image}`;
+};
 
 export default function MenuStaffScreen() {
     const router = useRouter();
@@ -82,6 +107,10 @@ export default function MenuStaffScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [menuHeaderName, setMenuHeaderName] = useState<string | null>(null);
     const [qrItem, setQrItem] = useState<MenuItem | null>(null);
+    const [menuImageIndex, setMenuImageIndex] = useState(0);
+    const [zoomImageIndex, setZoomImageIndex] = useState(0);
+    const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
+    const zoomListRef = useRef<FlatList<string>>(null);
 
     const fetchMenu = async () => {
         if (!coffeeShopId) {
@@ -158,6 +187,59 @@ export default function MenuStaffScreen() {
         fetchMenu();
     };
 
+    const getMenuImages = (): string[] => {
+        if (!menuData) return [];
+
+        const merged = [...(menuData.images ?? []), menuData.image ?? '']
+            .map((url) => (url || '').trim())
+            .filter((url) => !!url);
+
+        return Array.from(new Set(merged));
+    };
+
+    const handleMenuImageScrollEnd = (event: any) => {
+        const contentOffsetX = event.nativeEvent.contentOffset.x || 0;
+        const nextIndex = Math.round(contentOffsetX / MENU_IMAGE_WIDTH);
+        setMenuImageIndex(nextIndex);
+    };
+
+    const handleOpenImageZoom = (index: number) => {
+        setZoomImageIndex(index);
+        setIsImageZoomOpen(true);
+    };
+
+    const handleZoomImageScrollEnd = (event: any) => {
+        const contentOffsetX = event.nativeEvent.contentOffset.x || 0;
+        const nextIndex = Math.round(contentOffsetX / ZOOM_IMAGE_WIDTH);
+        setZoomImageIndex(nextIndex);
+    };
+
+    const formatPrice = (value?: number) => {
+        if (value == null) return '';
+        return `${value.toLocaleString('vi-VN')} đ`;
+    };
+
+    const menuImages = getMenuImages();
+
+    useEffect(() => {
+        if (menuImageIndex >= menuImages.length) {
+            setMenuImageIndex(0);
+        }
+    }, [menuImages.length, menuImageIndex]);
+
+    useEffect(() => {
+        if (zoomImageIndex >= menuImages.length) {
+            setZoomImageIndex(0);
+        }
+    }, [menuImages.length, zoomImageIndex]);
+
+    useEffect(() => {
+        // Warm network/cache for zoom modal to reduce first-open delay.
+        menuImages.forEach((uri) => {
+            Image.prefetch(uri);
+        });
+    }, [menuImages]);
+
     const getStatusColor = (status: string) => {
         switch (status?.toLowerCase()) {
             case 'active':
@@ -179,12 +261,26 @@ export default function MenuStaffScreen() {
     };
 
     const handleDailySales = (item: MenuItem) => {
+        const sizeData = (item.itemSizeViewModels || []).map((sizeItem) => ({
+            sizeName: (sizeItem.beverageSize?.sizeName || '').trim(),
+            sellingPrice: sizeItem.sellingPrice,
+            volume: sizeItem.beverageSize?.volume || 0,
+        }));
+
+        const itemImageUrl =
+            resolveImageUrl(
+                AUTH_BASE_URL,
+                item.shopRecipe?.image ?? item.shopBeverage.imageUrl
+            ) || fallbackMenuImage;
+
         router.push({
             pathname: '/daily-sale-item/[menuItemId]',
             params: {
                 menuItemId: item.menuItemId.toString(),
                 recipeName: item.shopRecipe?.recipeName ?? 'Chưa có tên',
                 beverageName: item.shopBeverage.name,
+                itemImage: itemImageUrl,
+                sizeData: JSON.stringify(sizeData),
             },
         });
     };
@@ -202,28 +298,54 @@ export default function MenuStaffScreen() {
     };
 
     const renderMenuItem = ({ item }: { item: MenuItem }) => {
-        const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
+        const imageUrl = resolveImageUrl(
+            AUTH_BASE_URL,
+            item.shopRecipe?.image ?? item.shopBeverage.imageUrl
+        );
+        const hasImage = !!imageUrl;
         const statusColor = getStatusColor(item.shopBeverage.status);
+        const itemSizes = [...(item.itemSizeViewModels || [])].sort((a, b) => {
+            const volumeA = a.beverageSize?.volume ?? 0;
+            const volumeB = b.beverageSize?.volume ?? 0;
+            return volumeA - volumeB;
+        });
 
         return (
             <View style={styles.menuItemCard}>
                 <View style={styles.menuItemContent}>
                     {/* Left: Image */}
-                    <Image
-                        source={{ uri: imageUrl }}
-                        style={styles.menuItemImage}
-                        defaultSource={{ uri: fallbackMenuImage }}
-                    />
+                    {hasImage ? (
+                        <Image
+                            source={{ uri: imageUrl }}
+                            style={styles.menuItemImage}
+                        />
+                    ) : (
+                        <View style={styles.menuItemImageFallback}>
+                            <Ionicons name="cafe" size={32} color="#847362" />
+                        </View>
+                    )}
 
                     {/* Center: Details */}
                     <View style={styles.menuItemDetails}>
                         <Text style={styles.beverageName}>{item.shopRecipe?.recipeName ?? 'Chưa có tên'}</Text>
 
                         <View style={styles.priceRow}>
-                            <Text style={styles.price}>
+                            {/* <Text style={styles.price}>
                                 {(item.sellingPrice / 1000).toFixed(0)}K VNĐ
-                            </Text>
+                            </Text> */}
                         </View>
+
+                        {itemSizes.length > 0 && (
+                            <View style={styles.sizePriceList}>
+                                {itemSizes.map((sizeItem) => (
+                                    <View key={sizeItem.itemSizeId} style={styles.sizePriceChip}>
+                                        <Text style={styles.sizePriceText}>
+                                            {(sizeItem.beverageSize?.sizeName || 'Size').trim()} • {formatPrice(sizeItem.sellingPrice)}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+                        )}
                     </View>
 
                     {/* Right: Status Badge */}
@@ -310,6 +432,47 @@ export default function MenuStaffScreen() {
                     />
                 }
             >
+                {menuImages.length > 0 && (
+                    <View style={styles.menuImageSection}>
+                        <FlatList
+                            data={menuImages}
+                            horizontal
+                            pagingEnabled
+                            keyExtractor={(item, index) => `${item}-${index}`}
+                            showsHorizontalScrollIndicator={false}
+                            decelerationRate="fast"
+                            snapToAlignment="center"
+                            initialScrollIndex={0}
+                            onMomentumScrollEnd={handleMenuImageScrollEnd}
+                            renderItem={({ item, index }) => (
+                                <View style={styles.menuImageWrapper}>
+                                    <TouchableOpacity
+                                        activeOpacity={0.95}
+                                        onPress={() => handleOpenImageZoom(index)}
+                                        style={styles.menuImageTapArea}
+                                    >
+                                        <Image source={{ uri: item }} style={styles.menuBannerImage} />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                        />
+
+                        {menuImages.length > 1 && (
+                            <View style={styles.menuImagePagination}>
+                                {menuImages.map((_, index) => (
+                                    <View
+                                        key={`menu-image-dot-${index}`}
+                                        style={[
+                                            styles.menuImageDot,
+                                            index === menuImageIndex && styles.menuImageDotActive,
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+                        )}
+                    </View>
+                )}
+
                 {/* Enter Daily Sales Card */}
                 <TouchableOpacity
                     style={styles.dailySalesCard}
@@ -382,6 +545,72 @@ export default function MenuStaffScreen() {
                     </View>
                 </View>
             </Modal>
+
+            <Modal
+                visible={isImageZoomOpen}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setIsImageZoomOpen(false)}
+                onShow={() => {
+                    requestAnimationFrame(() => {
+                        zoomListRef.current?.scrollToIndex({
+                            index: zoomImageIndex,
+                            animated: false,
+                        });
+                    });
+                }}
+            >
+                <View style={styles.zoomModalBackdrop}>
+                    <TouchableOpacity
+                        style={styles.zoomCloseButton}
+                        onPress={() => setIsImageZoomOpen(false)}
+                    >
+                        <Ionicons name="close" size={24} color={COLORS.white} />
+                    </TouchableOpacity>
+
+                    <FlatList
+                        ref={zoomListRef}
+                        data={menuImages}
+                        horizontal
+                        pagingEnabled
+                        keyExtractor={(item, index) => `${item}-zoom-${index}`}
+                        getItemLayout={(_, index) => ({
+                            length: ZOOM_IMAGE_WIDTH,
+                            offset: ZOOM_IMAGE_WIDTH * index,
+                            index,
+                        })}
+                        onMomentumScrollEnd={handleZoomImageScrollEnd}
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.zoomList}
+                        initialNumToRender={1}
+                        maxToRenderPerBatch={1}
+                        windowSize={2}
+                        renderItem={({ item }) => (
+                            <View style={styles.zoomImageSlide}>
+                                <Image
+                                    source={{ uri: item }}
+                                    style={styles.zoomImage}
+                                    resizeMode="contain"
+                                />
+                            </View>
+                        )}
+                    />
+
+                    {menuImages.length > 1 && (
+                        <View style={styles.zoomPagination}>
+                            {menuImages.map((_, index) => (
+                                <View
+                                    key={`zoom-dot-${index}`}
+                                    style={[
+                                        styles.zoomDot,
+                                        index === zoomImageIndex && styles.zoomDotActive,
+                                    ]}
+                                />
+                            ))}
+                        </View>
+                    )}
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -425,6 +654,50 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingHorizontal: 16,
         paddingTop: 16,
+    },
+    menuImageSection: {
+        marginBottom: 20,
+    },
+    menuImageWrapper: {
+        width: MENU_IMAGE_WIDTH,
+        height: 280,
+        borderRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: '#DDD',
+        borderWidth: 1,
+        borderColor: 'rgba(31, 31, 31, 0.08)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+        elevation: 4,
+    },
+    menuImageTapArea: {
+        width: '100%',
+        height: '100%',
+    },
+    menuBannerImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    menuImagePagination: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 10,
+    },
+    menuImageDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#CFC7BE',
+    },
+    menuImageDotActive: {
+        width: 24,
+        borderRadius: 4,
+        backgroundColor: '#1F1F1F',
     },
     dailySalesCard: {
         backgroundColor: '#6B4423',
@@ -508,6 +781,14 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         backgroundColor: '#E8CCBE',
     },
+    menuItemImageFallback: {
+        width: 80,
+        height: 80,
+        borderRadius: 10,
+        backgroundColor: '#EFE7DE',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     menuItemDetails: {
         flex: 1,
         marginHorizontal: 12,
@@ -531,6 +812,22 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: COLORS.accent,
         marginBottom: 4,
+    },
+    sizePriceList: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    sizePriceChip: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 999,
+        backgroundColor: 'rgba(211, 139, 42, 0.12)',
+    },
+    sizePriceText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: COLORS.accentDark,
     },
     ratingBadge: {
         flexDirection: 'row',
@@ -667,5 +964,54 @@ const styles = StyleSheet.create({
         color: COLORS.white,
         fontWeight: '600',
         fontSize: 14,
+    },
+    zoomModalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.92)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    zoomCloseButton: {
+        position: 'absolute',
+        top: 56,
+        right: 18,
+        zIndex: 3,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.18)',
+    },
+    zoomImageSlide: {
+        width: ZOOM_IMAGE_WIDTH,
+        height: '100%',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    zoomList: {
+        width: ZOOM_IMAGE_WIDTH,
+    },
+    zoomImage: {
+        width: '100%',
+        height: '80%',
+    },
+    zoomPagination: {
+        position: 'absolute',
+        bottom: 46,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    zoomDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: 'rgba(255,255,255,0.35)',
+    },
+    zoomDotActive: {
+        width: 24,
+        borderRadius: 4,
+        backgroundColor: '#FFFFFF',
     },
 });
