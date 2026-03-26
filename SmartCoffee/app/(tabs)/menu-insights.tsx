@@ -11,6 +11,7 @@ import {
   FlatList,
   Image,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -98,6 +99,7 @@ interface MenuData {
   status: string;
   isActive: boolean;
   image?: string | null;
+  images?: string[];
   menuGroups: MenuGroup[];
 }
 
@@ -106,6 +108,7 @@ const fallbackMenuImage =
 
 const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const resolveImageUrl = (raw?: string | null) => {
   if (!raw || raw === 'null' || raw === 'undefined') return null;
@@ -185,11 +188,14 @@ export default function MenuInsightsScreen() {
   const [itemUnitCostMap, setItemUnitCostMap] = useState<Map<number, number>>(new Map());
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
-  const [menuImageUri, setMenuImageUri] = useState<string | null>(menuImage ?? null);
+  const [menuImageUris, setMenuImageUris] = useState<string[]>(
+    () => (menuImage ? [menuImage] : [])
+  );
   const [currentMenuRaw, setCurrentMenuRaw] = useState<any>(null);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [generatingMenu, setGeneratingMenu] = useState(false);
   const [visibleCount, setVisibleCount] = useState(MENU_PAGE_SIZE);
+  const [currentViewerImageIndex, setCurrentViewerImageIndex] = useState(0);
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -199,6 +205,7 @@ export default function MenuInsightsScreen() {
   const savedTranslateY = useSharedValue(0);
   
   const { categories } = useBeverageCategories();
+  const menuImageUri = menuImageUris[0] ?? null;
 
   const resetZoom = () => {
     scale.value = 1;
@@ -333,11 +340,21 @@ export default function MenuInsightsScreen() {
       console.log('[Menu Insights] Full menu data:', menuData);
       setCurrentMenuRaw(menuData);
 
-      const resolvedMenuImage =
-        resolveImageUrl(menuData.image) ??
-        (menuImage && menuImage.length > 0 ? menuImage : null);
-      if (resolvedMenuImage) {
-        setMenuImageUri(resolvedMenuImage);
+      const normalizedImagesFromArray = (Array.isArray(menuData.images) ? menuData.images : [])
+        .map((raw) => resolveImageUrl(raw))
+        .filter((url): url is string => Boolean(url && url.trim().length > 0));
+
+      const normalizedMenuImages =
+        normalizedImagesFromArray.length > 0
+          ? normalizedImagesFromArray
+          : [menuData.image, menuImage && menuImage.length > 0 ? menuImage : null]
+              .map((raw) => resolveImageUrl(raw))
+              .filter((url): url is string => Boolean(url && url.trim().length > 0));
+
+      if (normalizedMenuImages.length > 0) {
+        setMenuImageUris(Array.from(new Set(normalizedMenuImages)));
+      } else {
+        setMenuImageUris([]);
       }
 
       // Flatten all menu items from all groups (like daily-sales.tsx)
@@ -841,6 +858,7 @@ export default function MenuInsightsScreen() {
             style={styles.menuImageCard}
             onPress={() => {
               resetZoom();
+              setCurrentViewerImageIndex(0);
               setShowImageViewer(true);
             }}
           >
@@ -851,7 +869,9 @@ export default function MenuInsightsScreen() {
             />
             <View style={styles.menuImageHintChip}>
               <Ionicons name="expand-outline" size={14} color="#FFFFFF" />
-              <Text style={styles.menuImageHintText}>Zoom menu image</Text>
+              <Text style={styles.menuImageHintText}>
+                {menuImageUris.length > 1 ? `Swipe ${menuImageUris.length} images` : 'Zoom menu image'}
+              </Text>
             </View>
           </TouchableOpacity>
         </View>
@@ -1138,13 +1158,39 @@ export default function MenuInsightsScreen() {
             </TouchableOpacity>
 
             <View style={styles.imageViewerGestureArea}>
-              <GestureDetector gesture={imageGesture}>
-                <Animated.Image
-                  source={{ uri: menuImageUri || fallbackMenuImage }}
-                  resizeMode="contain"
-                  style={[styles.imageViewerImage, animatedImageStyle]}
-                />
-              </GestureDetector>
+              {menuImageUris.length > 1 ? (
+                <>
+                  <ScrollView
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    onMomentumScrollEnd={(event) => {
+                      const nextIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                      setCurrentViewerImageIndex(nextIndex);
+                      resetZoom();
+                    }}
+                  >
+                    {menuImageUris.map((uri) => (
+                      <View key={uri} style={styles.imageViewerSlide}>
+                        <Image source={{ uri }} resizeMode="contain" style={styles.imageViewerImage} />
+                      </View>
+                    ))}
+                  </ScrollView>
+                  <View style={styles.imageViewerPager}>
+                    <Text style={styles.imageViewerPagerText}>
+                      {currentViewerImageIndex + 1}/{menuImageUris.length}
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <GestureDetector gesture={imageGesture}>
+                  <Animated.Image
+                    source={{ uri: menuImageUri || fallbackMenuImage }}
+                    resizeMode="contain"
+                    style={[styles.imageViewerImage, animatedImageStyle]}
+                  />
+                </GestureDetector>
+              )}
             </View>
           </View>
         </GestureHandlerRootView>
@@ -1399,6 +1445,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  imageViewerSlide: {
+    width: SCREEN_WIDTH,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   imageViewerCloseButton: {
     position: 'absolute',
     top: 52,
@@ -1414,6 +1466,20 @@ const styles = StyleSheet.create({
   imageViewerImage: {
     width: '95%',
     height: '75%',
+  },
+  imageViewerPager: {
+    position: 'absolute',
+    bottom: 36,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  imageViewerPagerText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '600',
   },
   banner: {
     backgroundColor: '#4a3621',
