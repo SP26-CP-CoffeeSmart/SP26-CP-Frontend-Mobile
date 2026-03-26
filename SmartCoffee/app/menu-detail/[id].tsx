@@ -677,11 +677,25 @@ export default function MenuDetailScreen() {
         null;
 
       const responseMenu = responseMenus[resolvedMenuIndex] ?? responseMenus[0] ?? null;
-      const responseMenuItems = toArray(
+      let responseMenuItems = toArray(
         responseMenu?.menuItems ??
           responseMenu?.menu?.menuItems ??
           []
       );
+
+      const getRecipeName = (mi: any) => {
+        const sr = mi?.shopRecipe || mi?.shopBeverage?.shopRecipes?.[0];
+        return sr?.recipeName || mi?.shopBeverage?.name || mi?.name || '';
+      };
+
+      const oldRecipeNames = new Set(storedMenuItems.map(getRecipeName));
+      responseMenuItems = responseMenuItems.map((item: any) => {
+        const rName = getRecipeName(item);
+        if (rName && !oldRecipeNames.has(rName)) {
+          return { ...item, isNewlyRegenerated: true };
+        }
+        return item;
+      });
 
       if (responseMenu) {
         setCurrentMenu((prev) => ({
@@ -1234,7 +1248,7 @@ export default function MenuDetailScreen() {
               <Text style={styles.groupTitle}>{group.groupName}</Text>
               <View style={styles.itemList}>
                 {group.items.map((item, itemIndex) => {
-                  const isModified = modifiedItemIdSet.has(Number(item.menuItemId));
+                  const isModified = modifiedItemIdSet.has(Number(item.menuItemId)) || !!item.sourceMenuItem?.isNewlyRegenerated;
                   const card = (
                     <TouchableOpacity
                       key={`${group.beverageCategoryId}-item-${itemIndex}`}
@@ -1554,12 +1568,12 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: '#F1EAE2',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 5,
-    marginVertical: 1,
+    shadowColor: '#3E2723',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
+    marginVertical: 6,
   },
   itemCardModified: {
     borderColor: '#D39C5E',
