@@ -870,6 +870,10 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleWalletCardPress = () => {
+    router.push('/wallet-management');
+  };
+
   const formatTransactionDate = (value?: string) => {
     if (!value) return '-';
     const parsed = new Date(value);
@@ -913,70 +917,64 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
-        <View style={styles.header}>
-          <View style={styles.avatarWrap}>
-            <View style={styles.avatar}>
-              {profileImageUrl ? (
-                <Image source={{ uri: profileImageUrl }} style={styles.avatarImage} />
-              ) : (
-                <Ionicons name="person-outline" size={36} color="#8B6B4D" />
-              )}
-            </View>
-            <View style={styles.avatarBadge}>
-              <Ionicons name="pencil" size={12} color="#7A4A1B" />
-            </View>
-          </View>
-          <View style={styles.headerNameRow}>
-            <Text style={styles.name}>{profileHeaderName}</Text>
-            <TouchableOpacity
-              style={styles.headerSettingsButton}
-              onPress={() => setShowAccountInfo((prev) => !prev)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="settings-outline" size={18} color="#F5D39C" />
-            </TouchableOpacity>
-          </View>
-          {profileRoleDisplay ? <Text style={styles.role}>{profileRoleDisplay}</Text> : null}
-          {subscriptionName ? (
-            <View style={styles.profileBadgeRow}>
-              <View style={styles.profileBadge}>
-                <Ionicons name="sparkles" size={12} color="#A36D2D" />
-                <Text style={styles.profileBadgeText}>{subscriptionBadge}</Text>
-              </View>
-            </View>
-          ) : null}
+        <View style={styles.topNav}>
+          <TouchableOpacity 
+            style={styles.topNavSettings} 
+            onPress={() => setShowAccountInfo((prev) => !prev)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="settings" size={24} color="#3C2B20" />
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.subscriptionCard}>
-          <View style={styles.subscriptionHeaderRow}>
-            <View style={styles.subscriptionTitleWrap}>
-              <Text style={styles.subscriptionEyebrow}>My Subscription</Text>
-              <Text style={styles.subscriptionTitle}>{subscriptionName}</Text>
+        <View style={styles.heroSection}>
+          <View style={styles.heroAvatarWrap}>
+            <View style={styles.heroAvatar}>
+              {profileImageUrl ? (
+                <Image source={{ uri: profileImageUrl }} style={styles.heroAvatarImage} />
+              ) : (
+                <Ionicons name="person" size={64} color="#D8C3AE" />
+              )}
             </View>
-            <View style={styles.subscriptionHeaderRight}>
-              <View style={styles.subscriptionBadgePill}>
-                <Text style={styles.subscriptionBadgeText}>{subscriptionStatus.label}</Text>
+            {subscriptionName && (
+              <View style={styles.heroBadge}>
+                <Text style={styles.heroBadgeText}>{subscriptionName.toUpperCase()}</Text>
               </View>
+            )}
+          </View>
+          <Text style={styles.heroName}>{profileHeaderName}</Text>
+          <Text style={styles.heroRole}>{profileRoleDisplay?.toUpperCase() || 'SHOPOWNER'}</Text>
+          
+          <View style={styles.heroPillsRow}>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>Est. 2023</Text>
+            </View>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>Premium Beans</Text>
             </View>
           </View>
-          <Text style={styles.subscriptionSubtitle}>
-            {subscriptionLoading
-              ? 'Loading your subscription details...'
-              : subscriptionError
-                ? subscriptionError
-                : 'Unlock deeper insights and smarter coffee workflows.'}
+        </View>
+
+        <View style={styles.subCard}>
+          <Text style={styles.subCardEyebrow}>MY SUBSCRIPTION</Text>
+          <View style={styles.subCardIconWrap}>
+            <Ionicons name="star" size={14} color="#3C2B20" />
+          </View>
+          <Text style={styles.subCardTitle}>
+            {subscriptionLoading ? 'Loading...' : subscriptionError ? 'Error' : `${subscriptionName || 'Starter'} Plan`}
+          </Text>
+          <Text style={styles.subCardDesc}>
+            Unlock advanced analytics and inventory tracking today.
           </Text>
           {subscriptionEndDate ? (
-            <View style={styles.subscriptionMetaRow}>
-              <Text style={styles.subscriptionMetaText}>Ends {subscriptionEndDate}</Text>
-            </View>
+             <Text style={[styles.subCardDesc, {marginTop: 4, marginBottom: 24}]}>Ends {subscriptionEndDate}</Text>
           ) : null}
-          <TouchableOpacity
-            style={styles.subscriptionUpgradeButton}
+          <TouchableOpacity 
+            style={styles.subCardButton}
             activeOpacity={0.85}
             onPress={handleOpenUpgrade}
           >
-            <Text style={styles.subscriptionUpgradeText}>Upgrade</Text>
+            <Text style={styles.subCardButtonText}>Upgrade Now</Text>
           </TouchableOpacity>
         </View>
 
@@ -1008,56 +1006,34 @@ export default function ProfileScreen() {
           </View>
         ) : null}
 
-        <View style={styles.card}>
-          <View style={styles.cardRowBetween}>
-            <View style={styles.cardRow}>
-              <Ionicons name="wallet" size={16} color="#A36D2D" />
-              <Text style={styles.cardTitle}>Wallet balance</Text>
+        <TouchableOpacity style={styles.walletBalanceCard} onPress={handleWalletCardPress} activeOpacity={0.8}>
+          <View style={styles.walletBalanceRow}>
+            <View style={styles.walletBalanceLeft}>
+              <Text style={styles.walletBalanceLabel}>Wallet Balance</Text>
             </View>
-            <Text style={styles.walletBalance}>{formattedBalance} vnd</Text>
+            <View style={styles.walletBalanceRight}>
+              <Text style={styles.walletBalanceAmount}>{formattedBalance} vnd</Text>
+              <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
+            </View>
           </View>
+        </TouchableOpacity>
 
-          <Text style={styles.walletHint}>Choose an amount to top up</Text>
-          <View style={styles.walletOptions}>
-            {topupPresets.map((amount) => {
-              const isActive = amount === selectedTopup;
-              return (
-                <TouchableOpacity
-                  key={amount}
-                  style={[styles.walletChip, isActive && styles.walletChipActive]}
-                  activeOpacity={0.8}
-                  onPress={() => handleSelectTopup(amount)}
-                >
-                  <Text style={[styles.walletChipText, isActive && styles.walletChipTextActive]}>
-                    {amount.toLocaleString('vi-VN')} vnd
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <Text style={styles.walletHint}>Or enter a custom amount</Text>
-          <TextInput
-            value={customTopup}
-            onChangeText={(value) => {
-              setCustomTopup(value);
-              if (selectedTopup) {
-                setSelectedTopup(null);
-              }
-            }}
-            placeholder="e.g. 250000"
-            keyboardType="numeric"
-            style={styles.walletInput}
-          />
-          <TouchableOpacity
-            style={[styles.walletButton, topupSubmitting && styles.walletButtonDisabled]}
-            onPress={handleTopup}
-            disabled={topupSubmitting}
-          >
-            <Text style={styles.walletButtonText}>
-              {topupSubmitting ? 'Processing...' : 'Top up wallet'}
-            </Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionHeading}>Purchase Order</Text>
+          <TouchableOpacity activeOpacity={0.7}>
+            <Text style={styles.sectionAction}>View purchase history</Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={styles.statusGrid}>
+          {purchaseStatuses.map((status) => (
+            <View key={status.label} style={styles.statusItem}>
+              <View style={styles.statusIconWrap}>
+                <Ionicons name={status.icon as any} size={22} color="#A36D2D" />
+              </View>
+              <Text style={styles.statusLabel}>{status.label}</Text>
+            </View>
+          ))}
         </View>
 
         <Modal
@@ -1095,6 +1071,8 @@ export default function ProfileScreen() {
             )}
           </SafeAreaView>
         </Modal>
+
+
 
           <Modal
             visible={showSubscriptionModal}
@@ -1408,23 +1386,7 @@ export default function ProfileScreen() {
           </View>
         </Modal>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionHeading}>Purchase Order</Text>
-          <TouchableOpacity activeOpacity={0.7}>
-            <Text style={styles.sectionAction}>View purchase history</Text>
-          </TouchableOpacity>
-        </View>
 
-        <View style={styles.statusGrid}>
-          {purchaseStatuses.map((status) => (
-            <View key={status.label} style={styles.statusItem}>
-              <View style={styles.statusIconWrap}>
-                <Ionicons name={status.icon as any} size={22} color="#A36D2D" />
-              </View>
-              <Text style={styles.statusLabel}>{status.label}</Text>
-            </View>
-          ))}
-        </View>
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionHeading}>Settings</Text>
@@ -1439,14 +1401,6 @@ export default function ProfileScreen() {
             <View style={styles.listLeft}>
               <Ionicons name="notifications" size={18} color="#A36D2D" />
               <Text style={styles.listText}>Notifications</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
-          </TouchableOpacity>
-          <View style={styles.divider} />
-          <TouchableOpacity style={styles.listRow} activeOpacity={0.7}>
-            <View style={styles.listLeft}>
-              <Ionicons name="globe-outline" size={18} color="#A36D2D" />
-              <Text style={styles.listText}>Languages</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
           </TouchableOpacity>
@@ -1612,85 +1566,86 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     backgroundColor: '#F6EFE6',
   },
-  header: {
+  topNav: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 0,
     paddingTop: 10,
-    paddingBottom: 18,
+    paddingBottom: 24,
   },
-  headerNameRow: {
-    flexDirection: 'row',
+  topNavSettings: {
+    padding: 4,
+  },
+  heroSection: {
     alignItems: 'center',
-    gap: 10,
+    marginBottom: 32,
   },
-  headerSettingsButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#EADBCB',
-    borderWidth: 1,
-    borderColor: '#D8C3AE',
-    alignItems: 'center',
-    justifyContent: 'center',
+  heroAvatarWrap: {
+    position: 'relative',
+    marginBottom: 16,
   },
-  avatarWrap: {
-    marginBottom: 8,
-  },
-  avatar: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    borderWidth: 2,
-    borderColor: '#D8C3AE',
-    backgroundColor: '#FFF6ED',
+  heroAvatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 24,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+    shadowColor: '#2C2017',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  avatarImage: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
+  heroAvatarImage: {
+    width: 120,
+    height: 120,
   },
-  avatarBadge: {
+  heroBadge: {
     position: 'absolute',
-    right: -4,
-    top: -2,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#F5D39C',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#EAC892',
+    right: -10,
+    bottom: -6,
+    backgroundColor: '#FAE8C1',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 14,
   },
-  name: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#3C2B20',
-  },
-  role: {
-    fontSize: 14,
-    color: '#8B6B4D',
-    marginTop: 2,
-  },
-  profileBadgeRow: {
-    marginTop: 8,
-  },
-  profileBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#FFF1E0',
-    borderWidth: 1,
-    borderColor: '#EAC892',
-  },
-  profileBadgeText: {
-    fontSize: 11,
+  heroBadgeText: {
+    fontSize: 10,
     fontWeight: '700',
     color: '#7A4A1B',
+    letterSpacing: 0.5,
+  },
+  heroName: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#3C2B20',
+    marginBottom: 6,
+  },
+  heroRole: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#A89B8F',
+    letterSpacing: 2,
+    marginBottom: 16,
+  },
+  heroPillsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroPill: {
+    backgroundColor: '#EBE5D9',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  heroPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#5C4D40',
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -2032,113 +1987,58 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 13,
   },
-  subscriptionCard: {
-    backgroundColor: '#2C1C14',
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#3E281C',
-    shadowColor: '#1F120C',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+  subCard: {
+    backgroundColor: '#2D1B14',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    shadowColor: '#2D1B14',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 5,
   },
-  subscriptionHeaderRow: {
-    flexDirection: 'row',
+  subCardEyebrow: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#8A7A70',
+    letterSpacing: 1.5,
+    marginBottom: 16,
+  },
+  subCardIconWrap: {
+    position: 'absolute',
+    top: 24,
+    right: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E8D5C0',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
+    justifyContent: 'center',
   },
-  subscriptionTitleWrap: {
-    flex: 1,
+  subCardTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFF6ED',
+    marginBottom: 10,
+  },
+  subCardDesc: {
+    fontSize: 13,
+    color: '#A89B8F',
+    lineHeight: 20,
+    marginBottom: 12,
     paddingRight: 10,
   },
-  subscriptionEyebrow: {
-    fontSize: 11,
-    color: '#E7CFAF',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  subscriptionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#FFF3E6',
-    fontFamily: Fonts.rounded,
-    marginTop: 4,
-  },
-  subscriptionBadgePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: '#F5D39C',
-  },
-  subscriptionHeaderRight: {
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  subscriptionBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#7A4A1B',
-  },
-  subscriptionSubtitle: {
-    fontSize: 12,
-    color: '#EBDCC8',
-    lineHeight: 18,
-    marginBottom: 12,
-  },
-  subscriptionMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  subscriptionStatusActive: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E6F6EA',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  subscriptionStatusInactive: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#F8E6D8',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
-  },
-  subscriptionStatusTextActive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#2B8A3E',
-  },
-  subscriptionStatusTextInactive: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#B85A2B',
-  },
-  subscriptionMetaText: {
-    fontSize: 11,
-    color: '#E7CFAF',
-    fontWeight: '600',
-  },
-  subscriptionUpgradeButton: {
-    backgroundColor: '#F5D39C',
+  subCardButton: {
+    backgroundColor: '#FAE8C1',
     borderRadius: 16,
-    paddingVertical: 10,
+    paddingVertical: 14,
     alignItems: 'center',
   },
-  subscriptionUpgradeText: {
-    fontSize: 13,
+  subCardButtonText: {
+    fontSize: 14,
     fontWeight: '700',
-    color: '#7A4A1B',
+    color: '#3C2B20',
   },
   sectionTitle: {
     fontSize: 15,
@@ -2668,5 +2568,90 @@ const styles = StyleSheet.create({
   txColStatus: {
     width: 90,
     textAlign: 'right',
+  },
+  walletBalanceCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E8DDD3',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  walletBalanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  walletBalanceLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  walletIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#FFF3E0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletBalanceLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5A3E28',
+  },
+  walletBalanceAmount: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#A36D2D',
+  },
+  topupModalCard: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+  },
+  topupModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  topupModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3C2B20',
+  },
+  walletBalanceRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modalBackButton: {
+    marginRight: 8,
+  },
+  optionsContainer: {
+    gap: 12,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: '#FFF9F2',
+    borderWidth: 1,
+    borderColor: '#EADBCB',
+  },
+  optionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#3C2B20',
   },
 });
