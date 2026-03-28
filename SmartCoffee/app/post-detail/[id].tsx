@@ -1069,22 +1069,11 @@ export default function PostDetailScreen() {
           </View>
 
           <View style={styles.commentComposer}>
-            {replyTarget ? (
-              <View style={styles.replyHintRow}>
-                <Text style={styles.replyHintText}>Replying to comment #{replyTarget.commentId}</Text>
-                <TouchableOpacity onPress={() => setReplyTarget(null)} disabled={sendingComment}>
-                  <Text style={styles.replyHintAction}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-
             <TextInput
               style={[styles.input, styles.commentInput]}
               value={commentDraft}
               onChangeText={setCommentDraft}
-              placeholder={
-                replyTarget ? `Write a reply to #${replyTarget.commentId}...` : 'Write a comment...'
-              }
+              placeholder="Write a comment..."
               placeholderTextColor={COLORS.muted}
               multiline
             />
@@ -1147,6 +1136,34 @@ export default function PostDetailScreen() {
                           <Text style={styles.commentContent}>{reply.content || ''}</Text>
                         </View>
                       ))}
+                    </View>
+                  ) : null}
+
+                  {replyTarget?.commentId === comment.commentId ? (
+                    <View style={styles.inlineReplyComposer}>
+                      <View style={styles.replyHintRow}>
+                        <Text style={styles.replyHintText}>Replying to comment #{comment.commentId}</Text>
+                        <TouchableOpacity onPress={() => setReplyTarget(null)} disabled={sendingComment}>
+                          <Text style={styles.replyHintAction}>Cancel</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        style={[styles.input, styles.commentInput]}
+                        value={commentDraft}
+                        onChangeText={setCommentDraft}
+                        placeholder={`Write a reply to #${comment.commentId}...`}
+                        placeholderTextColor={COLORS.muted}
+                        multiline
+                      />
+                      <TouchableOpacity
+                        style={[styles.commentSubmitButton, sendingComment && styles.commentSubmitButtonDisabled]}
+                        onPress={handleSubmitComment}
+                        disabled={sendingComment}
+                      >
+                        <Text style={styles.commentSubmitText}>
+                          {sendingComment ? 'Sending...' : 'Post reply'}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                   ) : null}
                 </View>
@@ -1687,6 +1704,15 @@ const styles = StyleSheet.create({
     color: COLORS.accent,
     fontSize: 12,
     fontWeight: '700',
+  },
+  inlineReplyComposer: {
+    marginTop: 4,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#E9DDD1',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    padding: 10,
   },
   commentList: {
     gap: 10,
