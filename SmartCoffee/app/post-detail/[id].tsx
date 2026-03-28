@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 
@@ -74,6 +74,43 @@ type RecipeIngredient = {
   } | null;
 };
 
+type PostCommentReply = {
+  commentId: number;
+  postId?: number | null;
+  parentId?: number | null;
+  userId?: number | null;
+  content?: string | null;
+  createdAt?: string | null;
+};
+
+type PostCommentItem = {
+  commentId: number;
+  postId?: number | null;
+  parentId?: number | null;
+  userId?: number | null;
+  content?: string | null;
+  createdAt?: string | null;
+  branchCommentIds?: number[] | null;
+  branchComments?: PostCommentReply[] | null;
+};
+
+type ShopStaffItem = {
+  staffId?: number | null;
+  accountId?: number | null;
+  fullName?: string | null;
+};
+
+type CoffeeShopWithAccount = {
+  coffeeShopId: number;
+  shopName?: string | null;
+  account?: {
+    accountId?: number | null;
+    userName?: string | null;
+    fullName?: string | null;
+    email?: string | null;
+  } | null;
+};
+
 const COLORS = {
   bg: '#F6EFE8',
   card: '#FFFFFF',
@@ -108,6 +145,21 @@ const formatDate = (value?: string | null) => {
   return parsed.toLocaleString();
 };
 
+const pickDisplayName = (...candidates: unknown[]) => {
+  for (const value of candidates) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+};
+
+const getEmailAlias = (value: unknown) => {
+  const email = String(value ?? '').trim();
+  if (!email || !email.includes('@')) return null;
+  const alias = email.split('@')[0]?.trim();
+  return alias || null;
+};
+
 const formatStatusLabel = (value?: string | null) => {
   const normalized = String(value ?? '').trim().toLowerCase();
   if (!normalized) return 'Draft';
@@ -137,15 +189,9 @@ const parseOccasions = (value?: string | null) => {
     .filter(Boolean);
 };
 
-const resolveRecipeImageUrl = (raw?: string | null) => {
-  if (!raw || raw === 'null' || raw === 'undefined') return null;
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-  return `${AUTH_BASE_URL}${raw.startsWith('/') ? raw : `/images/${raw}`}`;
-};
-
 export default function PostDetailScreen() {
   const router = useRouter();
-  const { coffeeShopId } = useAuth();
+  const { coffeeShopId, accountId, profile } = useAuth();
   const { id } = useLocalSearchParams();
   const [post, setPost] = useState<PostDetail | null>(null);
   const [shopName, setShopName] = useState<string | null>(null);
@@ -166,19 +212,28 @@ export default function PostDetailScreen() {
   const [showDisableModal, setShowDisableModal] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [showEnableModal, setShowEnableModal] = useState(false);
+  const [comments, setComments] = useState<PostCommentItem[]>([]);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [replyTarget, setReplyTarget] = useState<PostCommentItem | null>(null);
+  const [sendingComment, setSendingComment] = useState(false);
+  const [commentAuthorMap, setCommentAuthorMap] = useState<Record<number, string>>({});
   const lastReportedViewKey = useRef<string | null>(null);
 
   const postId = useMemo(() => Number(id ?? 0), [id]);
 
-  const loadPost = useCallback(async () => {
+  const loadPost = useCallback(async (options?: { showLoader?: boolean; syncEditor?: boolean }) => {
+    const showLoader = options?.showLoader ?? true;
+    const syncEditor = options?.syncEditor ?? true;
     if (!postId) {
       setError('Missing post id.');
-      setLoading(false);
-      return;
+      if (showLoader) setLoading(false);
+      return null;
     }
 
     try {
-      setLoading(true);
+      if (showLoader) setLoading(true);
       setError(null);
 
       const response = await authorizedFetch(API_ENDPOINTS.post.getById(postId), {
@@ -191,9 +246,11 @@ export default function PostDetailScreen() {
 
       const data = (await response.json()) as PostDetail;
       setPost(data);
-      setEditTitle(data?.title ?? '');
-      setEditContent(data?.content ?? '');
-      setSelectedCategoryId(data?.postCategoryId ?? null);
+      if (syncEditor) {
+        setEditTitle(data?.title ?? '');
+        setEditContent(data?.content ?? '');
+        setSelectedCategoryId(data?.postCategoryId ?? null);
+      }
 
       if (data?.coffeeShopId) {
         const shopResponse = await authorizedFetch(
@@ -205,11 +262,13 @@ export default function PostDetailScreen() {
           setShopName(shopData?.shopName ?? null);
         }
       }
+      return data;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to load post.';
       setError(message);
+      return null;
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   }, [postId]);
 
@@ -284,6 +343,199 @@ export default function PostDetailScreen() {
       setLoadingRecipe(false);
     }
   }, []);
+
+  const sortCommentsByDate = useCallback(
+    <T extends { createdAt?: string | null }>(items: T[]) =>
+      [...items].sort((a, b) => {
+        const timeA = new Date(a.createdAt ?? 0).getTime();
+        const timeB = new Date(b.createdAt ?? 0).getTime();
+        if (!Number.isFinite(timeA) || !Number.isFinite(timeB)) return 0;
+        return timeA - timeB;
+      }),
+    []
+  );
+
+  const loadComments = useCallback(
+    async (commentIds?: number[] | null) => {
+      const ids = Array.isArray(commentIds)
+        ? Array.from(new Set(commentIds.map((item) => Number(item)).filter((item) => item > 0)))
+        : [];
+
+      if (ids.length === 0) {
+        setComments([]);
+        setCommentError(null);
+        return;
+      }
+
+      try {
+        setLoadingComments(true);
+        setCommentError(null);
+
+        const responses = await Promise.allSettled(
+          ids.map(async (commentId) => {
+            const response = await authorizedFetch(API_ENDPOINTS.postComment.getById(commentId), {
+              headers: { Accept: 'application/json' },
+            });
+            if (!response.ok) {
+              throw new Error(`Request failed (${response.status})`);
+            }
+            const payload = (await response.json()) as PostCommentItem;
+            return {
+              ...payload,
+              branchComments: sortCommentsByDate(Array.isArray(payload?.branchComments) ? payload.branchComments : []),
+            } as PostCommentItem;
+          })
+        );
+
+        const loaded = responses
+          .filter((result): result is PromiseFulfilledResult<PostCommentItem> => result.status === 'fulfilled')
+          .map((result) => result.value);
+
+        setComments(sortCommentsByDate(loaded));
+        if (loaded.length === 0) {
+          setCommentError('Unable to load comments right now.');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to load comments.';
+        setCommentError(message);
+        setComments([]);
+      } finally {
+        setLoadingComments(false);
+      }
+    },
+    [sortCommentsByDate]
+  );
+
+  const resolveCommentAuthors = useCallback(
+    async (items: PostCommentItem[], sourceShopId?: number | null) => {
+      const userIds = new Set<number>();
+      items.forEach((item) => {
+        if (item.userId && item.userId > 0) userIds.add(item.userId);
+        if (Array.isArray(item.branchComments)) {
+          item.branchComments.forEach((reply) => {
+            if (reply.userId && reply.userId > 0) userIds.add(reply.userId);
+          });
+        }
+      });
+
+      if (userIds.size === 0) return;
+
+      const resolved: Record<number, string> = {};
+
+      if (accountId && userIds.has(accountId)) {
+        const selfName = pickDisplayName(
+          (profile as any)?.fullName,
+          (profile as any)?.userName,
+          (profile as any)?.name,
+          getEmailAlias((profile as any)?.email)
+        );
+        if (selfName) {
+          resolved[accountId] = selfName;
+        }
+      }
+
+      if (sourceShopId) {
+        try {
+          const response = await authorizedFetch(API_ENDPOINTS.shopStaff.getByShop(sourceShopId), {
+            headers: { Accept: 'application/json' },
+          });
+          if (response.ok) {
+            const payload = await response.json();
+            const staffItems = (Array.isArray(payload) ? payload : payload?.data ?? payload?.items ?? []) as ShopStaffItem[];
+            staffItems.forEach((staff) => {
+              const id = Number(staff?.accountId ?? 0);
+              if (id > 0 && userIds.has(id)) {
+                const name = pickDisplayName(staff?.fullName);
+                if (name) {
+                  resolved[id] = name;
+                }
+              }
+            });
+          }
+        } catch {
+          // Keep fallback labels when lookup fails.
+        }
+      }
+
+      try {
+        const response = await authorizedFetch(API_ENDPOINTS.coffeeShop.list(), {
+          headers: { Accept: 'application/json' },
+        });
+        if (response.ok) {
+          const payload = await response.json();
+          const shops = (Array.isArray(payload) ? payload : payload?.data ?? payload?.items ?? []) as CoffeeShopWithAccount[];
+          shops.forEach((shop) => {
+            const id = Number(shop?.account?.accountId ?? 0);
+            if (id > 0 && userIds.has(id) && !resolved[id]) {
+              const name = pickDisplayName(
+                shop?.account?.fullName,
+                shop?.account?.userName,
+                shop?.shopName,
+                getEmailAlias(shop?.account?.email)
+              );
+              if (name) {
+                resolved[id] = name;
+              }
+            }
+          });
+        }
+      } catch {
+        // Keep fallback labels when lookup fails.
+      }
+
+      if (Object.keys(resolved).length > 0) {
+        setCommentAuthorMap((prev) => ({ ...prev, ...resolved }));
+      }
+    },
+    [accountId, profile]
+  );
+
+  const handleSubmitComment = useCallback(async () => {
+    if (!post?.postId) return;
+    const content = commentDraft.trim();
+    if (!content) {
+      Toast.show({ type: 'error', text1: 'Missing comment', text2: 'Please type your message.' });
+      return;
+    }
+
+    try {
+      setSendingComment(true);
+      const payload: { content: string; parentId?: number } = { content };
+      if (replyTarget?.commentId) {
+        payload.parentId = replyTarget.commentId;
+      }
+
+      const response = await authorizedFetch(API_ENDPOINTS.postComment.create(post.postId), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      setCommentDraft('');
+      setReplyTarget(null);
+
+      const refreshedPost = await loadPost({ showLoader: false, syncEditor: false });
+      const nextCommentIds = refreshedPost?.postCommentIds ?? post?.postCommentIds ?? [];
+      await loadComments(nextCommentIds);
+
+      Toast.show({
+        type: 'success',
+        text1: replyTarget?.commentId ? 'Reply posted' : 'Comment posted',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to submit comment.';
+      Toast.show({ type: 'error', text1: 'Comment failed', text2: message });
+    } finally {
+      setSendingComment(false);
+    }
+  }, [commentDraft, loadComments, loadPost, post?.postCommentIds, post?.postId, replyTarget]);
 
   const handleSave = useCallback(async () => {
     if (!post) return;
@@ -388,6 +640,15 @@ export default function PostDetailScreen() {
   }, [loadRecipe, post?.recipeId]);
 
   useEffect(() => {
+    loadComments(post?.postCommentIds ?? null);
+  }, [loadComments, post?.postCommentIds]);
+
+  useEffect(() => {
+    if (comments.length === 0) return;
+    resolveCommentAuthors(comments, post?.coffeeShopId ?? coffeeShopId ?? null);
+  }, [coffeeShopId, comments, post?.coffeeShopId, resolveCommentAuthors]);
+
+  useEffect(() => {
     if (!post?.postId) return;
     const viewKey = `${post.postId}:${post.viewCount ?? 0}`;
     if (lastReportedViewKey.current === viewKey) return;
@@ -424,7 +685,14 @@ export default function PostDetailScreen() {
   const isPendingPost = postStatus === 'pending';
   const canEditPost = canManagePost && !isPublicPost;
   const showManageButtons = canManagePost && (!isPendingPost || isEditing);
-  const recipeImage = resolveRecipeImageUrl(recipe?.image ?? null);
+  const commentCount = useMemo(
+    () =>
+      comments.reduce(
+        (total, item) => total + 1 + (Array.isArray(item.branchComments) ? item.branchComments.length : 0),
+        0
+      ),
+    [comments]
+  );
   const occasionList = useMemo(
     () => parseOccasions(recipe?.suggestedOccasions ?? null),
     [recipe?.suggestedOccasions]
@@ -460,6 +728,14 @@ export default function PostDetailScreen() {
       ] as Array<{ label: string; value: string }>,
     [recipe]
   );
+  const getAuthorLabel = useCallback(
+    (userId?: number | null) => {
+      const id = Number(userId ?? 0);
+      if (id <= 0) return 'User #-';
+      return commentAuthorMap[id] ?? `User #${id}`;
+    },
+    [commentAuthorMap]
+  );
 
   if (loading) {
     return (
@@ -476,7 +752,7 @@ export default function PostDetailScreen() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={loadPost}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => loadPost()}>
             <Text style={styles.retryText}>Try again</Text>
           </TouchableOpacity>
         </View>
@@ -705,18 +981,17 @@ export default function PostDetailScreen() {
               <Text style={styles.errorText}>{recipeError}</Text>
             ) : recipe ? (
               <View style={styles.recipeBlock}>
-                {recipeImage ? (
-                  <Image source={{ uri: recipeImage }} style={styles.recipeImage} />
-                ) : (
-                  <View style={styles.recipeImageFallback}>
-                    <Ionicons name="cafe-outline" size={24} color={COLORS.accent} />
-                    <Text style={styles.heroFallbackText}>Recipe visual</Text>
+                <View style={styles.recipeIntroCard}>
+                  <View style={styles.recipeIntroIcon}>
+                    <Ionicons name="cafe-outline" size={22} color={COLORS.accent} />
                   </View>
-                )}
-                <Text style={styles.recipeTitle}>{recipe.recipeName ?? 'Untitled recipe'}</Text>
-                {recipe.flavorNote ? (
-                  <Text style={styles.recipeNote}>{recipe.flavorNote}</Text>
-                ) : null}
+                  <View style={styles.recipeIntroCopy}>
+                    <Text style={styles.recipeTitle}>{recipe.recipeName ?? 'Untitled recipe'}</Text>
+                    <Text style={styles.recipeNote}>
+                      {recipe.flavorNote || 'A curated recipe with brew settings and step-by-step guide.'}
+                    </Text>
+                  </View>
+                </View>
 
                 <View style={styles.recipeGrid}>
                   {recipeInfoItems.map((item) => (
@@ -784,6 +1059,101 @@ export default function PostDetailScreen() {
             )}
           </View>
         ) : null}
+
+        <View style={styles.card}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Comments</Text>
+            <View style={styles.commentCountPill}>
+              <Text style={styles.commentCountText}>{commentCount}</Text>
+            </View>
+          </View>
+
+          <View style={styles.commentComposer}>
+            {replyTarget ? (
+              <View style={styles.replyHintRow}>
+                <Text style={styles.replyHintText}>Replying to comment #{replyTarget.commentId}</Text>
+                <TouchableOpacity onPress={() => setReplyTarget(null)} disabled={sendingComment}>
+                  <Text style={styles.replyHintAction}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <TextInput
+              style={[styles.input, styles.commentInput]}
+              value={commentDraft}
+              onChangeText={setCommentDraft}
+              placeholder={
+                replyTarget ? `Write a reply to #${replyTarget.commentId}...` : 'Write a comment...'
+              }
+              placeholderTextColor={COLORS.muted}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.commentSubmitButton, sendingComment && styles.commentSubmitButtonDisabled]}
+              onPress={handleSubmitComment}
+              disabled={sendingComment}
+            >
+              <Text style={styles.commentSubmitText}>
+                {sendingComment ? 'Sending...' : replyTarget ? 'Post reply' : 'Post comment'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {loadingComments ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color={COLORS.accent} />
+              <Text style={styles.metaText}>Loading comments...</Text>
+            </View>
+          ) : null}
+
+          {commentError ? <Text style={styles.errorText}>{commentError}</Text> : null}
+
+          {!loadingComments && comments.length === 0 && !commentError ? (
+            <Text style={styles.metaText}>No comments yet. Be the first to comment.</Text>
+          ) : null}
+
+          {comments.length > 0 ? (
+            <View style={styles.commentList}>
+              {comments.map((comment) => (
+                <View key={comment.commentId} style={styles.commentCard}>
+                  <View style={styles.commentHeader}>
+                    <Text style={styles.commentAuthor}>
+                      {getAuthorLabel(comment.userId)}
+                      {accountId && comment.userId === accountId ? ' (You)' : ''}
+                    </Text>
+                    <Text style={styles.commentTime}>{formatDate(comment.createdAt) || 'No date'}</Text>
+                  </View>
+                  <Text style={styles.commentContent}>{comment.content || ''}</Text>
+                  <TouchableOpacity
+                    style={styles.commentReplyButton}
+                    onPress={() => setReplyTarget(comment)}
+                    disabled={sendingComment}
+                  >
+                    <Ionicons name="return-down-forward-outline" size={14} color={COLORS.accent} />
+                    <Text style={styles.commentReplyText}>Reply</Text>
+                  </TouchableOpacity>
+
+                  {Array.isArray(comment.branchComments) && comment.branchComments.length > 0 ? (
+                    <View style={styles.replyList}>
+                      {comment.branchComments.map((reply) => (
+                        <View key={reply.commentId} style={styles.replyCard}>
+                          <View style={styles.commentHeader}>
+                            <Text style={styles.commentAuthor}>
+                              {getAuthorLabel(reply.userId)}
+                              {accountId && reply.userId === accountId ? ' (You)' : ''}
+                            </Text>
+                            <Text style={styles.commentTime}>{formatDate(reply.createdAt) || 'No date'}</Text>
+                          </View>
+                          <Text style={styles.commentContent}>{reply.content || ''}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
       </ScrollView>
 
       <Modal transparent visible={showDisableModal} animationType="fade">
@@ -1117,22 +1487,30 @@ const styles = StyleSheet.create({
   recipeBlock: {
     gap: 14,
   },
-  recipeImage: {
-    width: '100%',
-    height: 196,
-    borderRadius: 20,
+  recipeIntroCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E8D8C7',
+    backgroundColor: '#FCF5EE',
+    padding: 12,
   },
-  recipeImageFallback: {
-    width: '100%',
-    height: 196,
+  recipeIntroIcon: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    backgroundColor: '#F1E5DA',
+    backgroundColor: '#F1E2D1',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+  },
+  recipeIntroCopy: {
+    flex: 1,
+    gap: 4,
   },
   recipeTitle: {
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: '700',
     color: COLORS.ink,
   },
@@ -1250,6 +1628,127 @@ const styles = StyleSheet.create({
     color: COLORS.ink,
     fontSize: 15,
     lineHeight: 24,
+  },
+  commentCountPill: {
+    minWidth: 28,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E2CBB5',
+    backgroundColor: '#F4E5D7',
+    alignItems: 'center',
+  },
+  commentCountText: {
+    color: '#805233',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  commentComposer: {
+    gap: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    backgroundColor: '#FCF8F4',
+    padding: 12,
+  },
+  commentInput: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  commentSubmitButton: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.accent,
+  },
+  commentSubmitButtonDisabled: {
+    opacity: 0.6,
+  },
+  commentSubmitText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  replyHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  replyHintText: {
+    flex: 1,
+    color: COLORS.muted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  replyHintAction: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  commentList: {
+    gap: 10,
+  },
+  commentCard: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: '#FBF7F3',
+    padding: 12,
+    gap: 8,
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  commentAuthor: {
+    flex: 1,
+    color: COLORS.ink,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  commentTime: {
+    color: COLORS.muted,
+    fontSize: 11,
+  },
+  commentContent: {
+    color: COLORS.ink,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  commentReplyButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E2CBB5',
+    backgroundColor: '#F4E5D7',
+  },
+  commentReplyText: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  replyList: {
+    marginTop: 4,
+    gap: 8,
+  },
+  replyCard: {
+    marginLeft: 16,
+    borderWidth: 1,
+    borderColor: '#E9DDD1',
+    borderRadius: 12,
+    backgroundColor: '#FFFFFF',
+    padding: 10,
+    gap: 6,
   },
   actionRow: {
     flexDirection: 'row',
