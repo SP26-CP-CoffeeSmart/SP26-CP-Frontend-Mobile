@@ -721,6 +721,12 @@ export default function MenuInsightsScreen() {
     return computedCostFromSales > 0 ? computedCostFromSales : summaryCost;
   };
 
+  const getItemTotalCost = (menuItemId: number) => {
+    const soldCups = itemSalesMap.get(menuItemId) ?? 0;
+    const unitCost = itemUnitCostMap.get(menuItemId) ?? 0;
+    return soldCups * unitCost;
+  };
+
   const getMenuScore = () => {
     const selectedData = getSelectedDateData();
     if (!selectedData) return 'N/A';
@@ -1070,6 +1076,9 @@ export default function MenuInsightsScreen() {
                       {formatCurrency(item.sellingPrice)}
                     </Text>
                   </View>
+                  <Text style={styles.menuItemCostText}>
+                    Total cost: {formatCurrency(getItemTotalCost(item.menuItemId))}
+                  </Text>
                   {/* {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
                     <View style={styles.sizesContainer}>
                       <Text style={styles.sizesLabel}>Sizes: </Text>
@@ -1976,6 +1985,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#4a3621',
+  },
+  menuItemCostText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b5a47',
+    marginBottom: 6,
   },
   categoryBadge: {
     backgroundColor: 'rgba(74, 54, 33, 0.1)',
