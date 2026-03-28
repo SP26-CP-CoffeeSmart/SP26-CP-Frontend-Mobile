@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   Image,
+  Modal,
   Platform,
   ScrollView,
   Text,
@@ -12,6 +14,8 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
+import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
@@ -42,6 +46,8 @@ interface ShopInventoryDetail {
   minStock: number;
   expirationDate: string | null;
   measurement: string;
+  imageUrl?: string | null;
+  image?: string | null;
   ingredient: IngredientInfo | null;
   coffeeShop: CoffeeShopInfo | null;
 }
@@ -57,6 +63,9 @@ const formatMeasurement = (measurement?: string) => {
   return measurement;
 };
 
+const MAX_ZOOM_SCALE = 3;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
 export default function IngredientDetailScreen() {
   const isDark = false;
   const { id } = useLocalSearchParams();
@@ -67,6 +76,14 @@ export default function IngredientDetailScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [manualThresholdText, setManualThresholdText] = useState('');
+  const [showImageViewer, setShowImageViewer] = useState(false);
+
+  const scale = useSharedValue(1);
+  const savedScale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
 
   const COLORS = {
     background: '#F6F1EE',
@@ -83,6 +100,71 @@ export default function IngredientDetailScreen() {
   useEffect(() => {
     fetchIngredientDetail();
   }, [id]);
+
+  const resetZoom = () => {
+    scale.value = 1;
+    savedScale.value = 1;
+    translateX.value = 0;
+    translateY.value = 0;
+    savedTranslateX.value = 0;
+    savedTranslateY.value = 0;
+  };
+
+  const pinchGesture = Gesture.Pinch()
+    .onUpdate((event) => {
+      const next = savedScale.value * event.scale;
+      scale.value = Math.max(1, Math.min(MAX_ZOOM_SCALE, next));
+    })
+    .onEnd(() => {
+      savedScale.value = scale.value;
+      if (scale.value <= 1) {
+        translateX.value = 0;
+        translateY.value = 0;
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+      }
+    });
+
+  const panGesture = Gesture.Pan()
+    .onUpdate((event) => {
+      if (scale.value <= 1) {
+        translateX.value = 0;
+        translateY.value = 0;
+        return;
+      }
+
+      const limit = (scale.value - 1) * 260;
+      const nextX = savedTranslateX.value + event.translationX;
+      const nextY = savedTranslateY.value + event.translationY;
+      translateX.value = Math.max(-limit, Math.min(limit, nextX));
+      translateY.value = Math.max(-limit, Math.min(limit, nextY));
+    })
+    .onEnd(() => {
+      savedTranslateX.value = translateX.value;
+      savedTranslateY.value = translateY.value;
+    });
+
+  const doubleTapGesture = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      if (scale.value > 1) {
+        resetZoom();
+      } else {
+        scale.value = 2;
+        savedScale.value = 2;
+      }
+    });
+
+  const pinchPanGesture = Gesture.Simultaneous(pinchGesture, panGesture);
+  const imageGesture = Gesture.Exclusive(doubleTapGesture, pinchPanGesture);
+
+  const animatedImageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
 
   const fetchIngredientDetail = async () => {
     try {
@@ -231,7 +313,8 @@ export default function IngredientDetailScreen() {
 
   // Extract ingredient info with fallbacks
   const ingredientName = inventoryDetail.ingredient?.name || `Ingredient #${inventoryDetail.inventoryDetailId}`;
-  const ingredientImage = inventoryDetail.ingredient?.image || null;
+  const ingredientImage =
+    inventoryDetail.image || inventoryDetail.imageUrl || inventoryDetail.ingredient?.image || null;
   const ingredientCategory = inventoryDetail.ingredient?.category || 'Unknown';
   const ingredientEndDate = inventoryDetail.ingredient?.endDate || new Date().toISOString();
   const measurementUnit = formatMeasurement(inventoryDetail.measurement);
@@ -278,7 +361,33 @@ export default function IngredientDetailScreen() {
         >
           <View style={{ height: 150, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' }}>
             {ingredientImage ? (
-              <Image source={{ uri: ingredientImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              <TouchableOpacity
+                activeOpacity={0.92}
+                style={{ width: '100%', height: '100%' }}
+                onPress={() => {
+                  resetZoom();
+                  setShowImageViewer(true);
+                }}
+              >
+                <Image source={{ uri: ingredientImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                <View
+                  style={{
+                    position: 'absolute',
+                    right: 10,
+                    bottom: 10,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 20,
+                    backgroundColor: 'rgba(31, 31, 31, 0.78)',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 5,
+                  }}
+                >
+                  <Ionicons name="expand-outline" size={14} color="#FFFFFF" />
+                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Tap to zoom</Text>
+                </View>
+              </TouchableOpacity>
             ) : (
               <View style={{ flex: 1, backgroundColor: COLORS.chip, alignItems: 'center', justifyContent: 'center' }}>
                 <Ionicons name="leaf" size={48} color="#B87333" />
@@ -405,6 +514,65 @@ export default function IngredientDetailScreen() {
         {/* Bottom spacing */}
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      <Modal
+        visible={showImageViewer}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setShowImageViewer(false);
+          resetZoom();
+        }}
+      >
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(0, 0, 0, 0.95)',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+          >
+            <TouchableOpacity
+              style={{
+                position: 'absolute',
+                top: 52,
+                right: 24,
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 2,
+              }}
+              onPress={() => {
+                setShowImageViewer(false);
+                resetZoom();
+              }}
+            >
+              <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View
+              style={{
+                width: SCREEN_WIDTH,
+                height: '100%',
+                justifyContent: 'center',
+                alignItems: 'center',
+              }}
+            >
+              <GestureDetector gesture={imageGesture}>
+                <Animated.Image
+                  source={{ uri: ingredientImage || undefined }}
+                  resizeMode="contain"
+                  style={[{ width: '95%', height: '75%' }, animatedImageStyle]}
+                />
+              </GestureDetector>
+            </View>
+          </View>
+        </GestureHandlerRootView>
+      </Modal>
     </View>
   );
 }
