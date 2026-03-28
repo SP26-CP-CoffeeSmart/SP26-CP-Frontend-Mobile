@@ -9,11 +9,15 @@ import {
   ActivityIndicator,
   RefreshControl,
   Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Toast from 'react-native-toast-message';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
+import { useCart } from '@/context/cart-context';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
@@ -37,6 +41,7 @@ const statuses = [
   { key: 'preparing', label: 'Preparing', icon: 'cafe-outline' },
   { key: 'delivering', label: 'Delivering', icon: 'bicycle-outline' },
   { key: 'delivered', label: 'Delivered', icon: 'checkmark-circle-outline' },
+  { key: 'completed', label: 'Completed', icon: 'checkmark-done-outline' },
   { key: 'rejected', label: 'Rejected', icon: 'close-circle-outline' },
   { key: 'refunded', label: 'Refunded', icon: 'cash-outline' },
 ];
@@ -77,6 +82,7 @@ const toApiOrderStatus = (key: string): string => {
 export default function OrderScreen() {
   const router = useRouter();
   const { accountId } = useAuth();
+  const { addItem, clearCart } = useCart();
   const [orders, setOrders] = useState<OrderResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -171,6 +177,115 @@ export default function OrderScreen() {
     loadOrders({ isRefresh: true, page: 1, append: false, statusKey: selectedStatus });
   }, [loadOrders, selectedStatus]);
 
+  const handleCancelOrder = (orderId: number) => {
+    Alert.alert(
+      'Cancel Order',
+      'Are you sure you want to cancel this order?',
+      [
+        { text: 'Keep It', style: 'cancel' },
+        {
+          text: 'Cancel Order',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setLoading(true);
+              const response = await authorizedFetch(
+                API_ENDPOINTS.order.updateStatus(orderId, 'Cancelled'),
+                {
+                  method: 'PUT',
+                  headers: { Accept: '*/*' },
+                }
+              );
+              
+              if (!response.ok) {
+                 // Try POST fallback just in case
+                 const postRes = await authorizedFetch(
+                   API_ENDPOINTS.order.updateStatus(orderId, 'Cancelled'),
+                   { method: 'POST', headers: { Accept: '*/*' } }
+                 );
+                 if (!postRes.ok) throw new Error('API failed');
+              }
+
+              Toast.show({ type: 'success', text1: 'Order cancelled successfully' });
+              setSelectedOrder(null);
+              loadOrders({ page: 1, append: false, statusKey: selectedStatus });
+            } catch (err: any) {
+              Toast.show({ type: 'error', text1: 'Failed to cancel order' });
+              setLoading(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReorder = async (order: OrderResponse, e?: any) => {
+    if (e) e.stopPropagation();
+    try {
+      setLoading(true);
+      if (!order.supplierId || !order.orderDetails?.length) {
+         Toast.show({ type: 'error', text1: 'Cannot reorder', text2: 'Missing supplier or items info.' });
+         return;
+      }
+      
+      const res = await authorizedFetch(`${API_ENDPOINTS.supplierProduct.list(1, 500)}`);
+      if (!res.ok) throw new Error('API request failed');
+      
+      const data = await res.json();
+      const allProducts = Array.isArray(data) ? data : (data?.items || []);
+      const supplierProducts = allProducts.filter((p: any) => p.supplierId === order.supplierId);
+      
+      const reorderedCartItems = [];
+      let addedCount = 0;
+
+      for (const detail of order.orderDetails) {
+        const dAny = detail as any;
+        const match = supplierProducts.find((p: any) => 
+            (dAny.ingredientId && p.ingredientId === dAny.ingredientId) || 
+            (detail.ingredientName && p.ingredient?.name === detail.ingredientName) || 
+            (detail.ingredientName && p.name && String(p.name).toLowerCase().includes(String(detail.ingredientName).toLowerCase()))
+        );
+        
+        if (match) {
+          const finalImage = (match.image && match.image !== 'null') ? match.image : 
+                             (match.ingredient?.image && match.ingredient.image !== 'null') ? match.ingredient.image : 
+                             fallbackOrderImage;
+          
+          reorderedCartItems.push({
+            productId: match.productId,
+            supplierId: match.supplierId,
+            supplierName: match.supplierName || `Supplier #${match.supplierId}`,
+            name: match.name || match.ingredient?.name || detail.ingredientName || 'Product',
+            category: match.ingredient?.category || match.category || 'General',
+            image: finalImage,
+            measurement: match.measurement || match.ingredient?.measurement || 'unit',
+            packageSize: match.packageSize,
+            availableStock: match.stock - (match.holdStock || 0),
+            unitPrice: match.price,
+            quantity: detail.quantity || 1,
+          });
+          addedCount++;
+        }
+      }
+      
+      if (addedCount > 0) {
+        await AsyncStorage.setItem('checkout_reorder_data', JSON.stringify(reorderedCartItems));
+        Toast.show({ type: 'success', text1: 'Reorder init', text2: 'Navigating to checkout...' });
+        router.push({
+          pathname: '/checkout',
+          params: { source: 'reorder' }
+        });
+      } else {
+        Toast.show({ type: 'error', text1: 'Items unavailable', text2: 'Products not found in current catalog.' });
+      }
+    } catch (err) {
+      Toast.show({ type: 'error', text1: 'Reorder failed', text2: 'Unable to process reorder at this time.' });
+    } finally {
+      setSelectedOrder(null);
+      setLoading(false);
+    }
+  };
+
   // When status changes: request the first page from server with selected orderStatus.
   const handleStatusChange = (key: string) => {
     if (key === selectedStatus) return;
@@ -218,29 +333,35 @@ export default function OrderScreen() {
 
         <Text style={styles.sectionTitle}>Recent orders</Text>
 
-        <View style={styles.statusRow}>
-          {statuses.map((item) => {
-            const isActive = selectedStatus === item.key;
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={styles.statusItem}
-                onPress={() => handleStatusChange(item.key)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.statusIconWrap, isActive && styles.statusIconWrapActive]}>
-                  <Ionicons
-                    name={item.icon as any}
-                    size={18}
-                    color={isActive ? COLORS.white : COLORS.chipText}
-                  />
-                </View>
-                <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+        <View style={styles.statusScrollContainer}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            contentContainerStyle={styles.statusRow}
+          >
+            {statuses.map((item) => {
+              const isActive = selectedStatus === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={styles.statusItem}
+                  onPress={() => handleStatusChange(item.key)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.statusIconWrap, isActive && styles.statusIconWrapActive]}>
+                    <Ionicons
+                      name={item.icon as any}
+                      size={20}
+                      color={isActive ? COLORS.white : COLORS.chipText}
+                    />
+                  </View>
+                  <Text style={[styles.statusText, isActive && styles.statusTextActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
         </View>
 
         <View style={styles.cardList}>
@@ -280,9 +401,27 @@ export default function OrderScreen() {
                     </Text>
                   </View>
                   <View style={styles.actionButtons}>
-                    <TouchableOpacity style={styles.reorderButton}>
-                      <Text style={styles.reorderText}>Re-Order</Text>
-                    </TouchableOpacity>
+                    {String(order.status ?? '').toLowerCase() === 'pending' && (
+                      <TouchableOpacity
+                        style={styles.cancelButton}
+                        activeOpacity={0.7}
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          if (order.orderId) handleCancelOrder(order.orderId);
+                        }}
+                      >
+                        <Text style={styles.cancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                    )}
+                    {String(order.status ?? '').toLowerCase() === 'completed' && (
+                      <TouchableOpacity
+                        style={[styles.cancelButton, { borderColor: COLORS.text, backgroundColor: COLORS.text }]}
+                        activeOpacity={0.7}
+                        onPress={(e) => handleReorder(order, e)}
+                      >
+                        <Text style={[styles.cancelText, { color: COLORS.white }]}>Re-Order</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 </View>
 
@@ -375,49 +514,102 @@ export default function OrderScreen() {
 
               <View style={styles.divider} />
 
+              <View style={styles.divider} />
+
               <Text style={styles.sectionHeading}>Shipping Info</Text>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Expected Delivery:</Text>
-                <Text style={styles.detailValue}>
-                  {selectedOrder?.expectedDeliveryTime
-                    ? new Date(selectedOrder.expectedDeliveryTime).toLocaleString()
-                    : 'N/A'}
-                </Text>
+              
+              <View style={styles.timelineBox}>
+                <View style={[styles.timelineItem, { borderRightWidth: 1, borderColor: COLORS.border }]}>
+                  <Text style={styles.timelineLabel}>Ship Date</Text>
+                  <Text style={styles.timelineValue}>
+                    {selectedOrder?.shipDate ? new Date(selectedOrder.shipDate).toLocaleDateString() : 'Pending'}
+                  </Text>
+                </View>
+                <View style={[styles.timelineItem, { borderRightWidth: 1, borderColor: COLORS.border }]}>
+                  <Text style={styles.timelineLabel}>Receive Date</Text>
+                  <Text style={styles.timelineValue}>
+                    {selectedOrder?.receiveDate ? new Date(selectedOrder.receiveDate).toLocaleDateString() : 'Pending'}
+                  </Text>
+                </View>
+                <View style={styles.timelineItem}>
+                  <Text style={styles.timelineLabel}>Expected</Text>
+                  <Text style={styles.timelineValue}>
+                    {selectedOrder?.expectedDeliveryTime
+                      ? new Date(selectedOrder.expectedDeliveryTime).toLocaleDateString()
+                      : 'Pending'}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Ship Date:</Text>
-                <Text style={styles.detailValue}>
-                  {selectedOrder?.shipDate ? new Date(selectedOrder.shipDate).toLocaleString() : 'N/A'}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Receive Date:</Text>
-                <Text style={styles.detailValue}>
-                  {selectedOrder?.receiveDate ? new Date(selectedOrder.receiveDate).toLocaleString() : 'N/A'}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Ship Address:</Text>
-                <Text style={styles.detailValue}>{selectedOrder?.shipAddress || 'N/A'}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Receive Address:</Text>
-                <Text style={styles.detailValue}>{selectedOrder?.receiveAddress || 'N/A'}</Text>
+
+              <View style={styles.addressBlock}>
+                <View style={styles.addressItem}>
+                  <View style={styles.addressIconWrap}>
+                    <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
+                  </View>
+                  <View style={styles.addressTextWrap}>
+                    <Text style={styles.addressLabel}>Ship From</Text>
+                    <Text style={styles.addressValue}>{selectedOrder?.shipAddress || 'Pending update'}</Text>
+                  </View>
+                </View>
+                
+                <View style={styles.addressDivider} />
+
+                <View style={styles.addressItem}>
+                  <View style={styles.addressIconWrap}>
+                    <Ionicons name="home-outline" size={16} color={COLORS.textSecondary} />
+                  </View>
+                  <View style={styles.addressTextWrap}>
+                    <Text style={styles.addressLabel}>Deliver To</Text>
+                    <Text style={styles.addressValue}>{selectedOrder?.receiveAddress || 'Pending update'}</Text>
+                  </View>
+                </View>
               </View>
 
               <View style={styles.divider} />
 
               <Text style={styles.sectionHeading}>Items</Text>
-              {selectedOrder?.orderDetails?.map((item, idx) => (
-                <View key={idx} style={styles.detailItemRow}>
-                  <Text style={styles.detailItemName}>
-                    {item.quantity || 1}x {item.ingredientName}
-                  </Text>
-                  <Text style={styles.detailItemPrice}>
-                    {item.price ? formatVnd(item.price) : 0} đ
-                  </Text>
-                </View>
-              ))}
+              
+              <View style={styles.receiptBox}>
+                {selectedOrder?.orderDetails?.map((item, idx) => (
+                  <View key={idx} style={styles.receiptItemRow}>
+                    <View style={styles.receiptItemQtyWrap}>
+                      <Text style={styles.receiptItemQty}>{item.quantity || 1}x</Text>
+                    </View>
+                    <View style={styles.receiptItemNameWrap}>
+                      <Text style={styles.receiptItemName}>{item.ingredientName}</Text>
+                    </View>
+                    <Text style={styles.receiptItemPrice}>
+                      {item.price ? formatVnd(item.price) : 0} đ
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              {String(selectedOrder?.status ?? '').toLowerCase() === 'pending' && (
+                <TouchableOpacity
+                  style={styles.modalCancelButton}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (selectedOrder?.orderId) {
+                      handleCancelOrder(selectedOrder.orderId);
+                    }
+                  }}
+                >
+                  <Text style={styles.modalCancelText}>Cancel Order</Text>
+                </TouchableOpacity>
+              )}
+
+              {String(selectedOrder?.status ?? '').toLowerCase() === 'completed' && (
+                <TouchableOpacity
+                  style={[styles.modalCancelButton, { backgroundColor: COLORS.text }]}
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    if (selectedOrder) handleReorder(selectedOrder);
+                  }}
+                >
+                  <Text style={styles.modalCancelText}>Re-Order</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -425,6 +617,8 @@ export default function OrderScreen() {
     </SafeAreaView>
   );
 }
+
+const MOCK_IMAGE_URL = 'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
 
 const styles = StyleSheet.create({
   container: {
@@ -478,20 +672,23 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 12,
   },
-  statusRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
+  statusScrollContainer: {
     marginBottom: 16,
   },
+  statusRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    gap: 12,
+  },
   statusItem: {
+    width: 62,
     alignItems: 'center',
-    width: 54,
+    justifyContent: 'flex-start',
   },
   statusIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     backgroundColor: COLORS.chip,
     alignItems: 'center',
     justifyContent: 'center',
@@ -503,10 +700,11 @@ const styles = StyleSheet.create({
     borderColor: COLORS.text,
   },
   statusText: {
-    fontSize: 9,
+    fontSize: 10,
     color: COLORS.textSecondary,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: 6,
+    width: '100%',
   },
   statusTextActive: {
     color: COLORS.text,
@@ -564,14 +762,16 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     minWidth: 70,
   },
-  reorderButton: {
-    backgroundColor: COLORS.text,
-    paddingHorizontal: 10,
+  cancelButton: {
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
   },
-  reorderText: {
-    color: COLORS.white,
+  cancelText: {
+    color: COLORS.danger,
     fontSize: 10,
     fontWeight: '700',
   },
@@ -686,17 +886,106 @@ const styles = StyleSheet.create({
     color: COLORS.text,
     marginBottom: 10,
   },
-  detailItemRow: {
+  timelineBox: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 6,
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    paddingVertical: 10,
+    marginBottom: 16,
   },
-  detailItemName: {
+  timelineItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  timelineLabel: {
+    fontSize: 10,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  timelineValue: {
+    fontSize: 11,
+    color: COLORS.text,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  addressBlock: {
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    padding: 12,
+  },
+  addressItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  addressIconWrap: {
+    width: 24,
+    alignItems: 'center',
+    marginRight: 6,
+    marginTop: 2,
+  },
+  addressTextWrap: {
+    flex: 1,
+  },
+  addressLabel: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  addressValue: {
     fontSize: 13,
     color: COLORS.text,
+    lineHeight: 18,
   },
-  detailItemPrice: {
+  addressDivider: {
+    height: 1,
+    backgroundColor: COLORS.border,
+    marginVertical: 10,
+    marginLeft: 30,
+  },
+  receiptBox: {
+    backgroundColor: COLORS.bg,
+    borderRadius: 8,
+    padding: 12,
+  },
+  receiptItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  receiptItemQtyWrap: {
+    width: 24,
+  },
+  receiptItemQty: {
+    fontSize: 13,
+    color: COLORS.accent,
+    fontWeight: '600',
+  },
+  receiptItemNameWrap: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  receiptItemName: {
+    fontSize: 13,
+    color: COLORS.text,
+    lineHeight: 18,
+  },
+  receiptItemPrice: {
     fontSize: 13,
     color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  modalCancelButton: {
+    marginTop: 20,
+    backgroundColor: COLORS.danger,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

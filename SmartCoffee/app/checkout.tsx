@@ -12,6 +12,7 @@ import {
     Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import Toast from 'react-native-toast-message';
@@ -121,6 +122,7 @@ export default function CheckoutPage() {
     const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
     const [successSubmitting, setSuccessSubmitting] = useState(false);
     const [payosPurpose, setPayosPurpose] = useState<'wallet' | 'bankTransfer' | null>(null);
+    const [payosOrderCode, setPayosOrderCode] = useState<number | string | null>(null);
 
     const successTriggeredRef = useRef(false);
     const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,6 +142,26 @@ export default function CheckoutPage() {
     }, [params.selectedIds]);
 
     const isFromAi = params.source === 'ai';
+    const isFromReorder = params.source === 'reorder';
+    
+    const [reorderItems, setReorderItems] = useState<CartItem[]>([]);
+
+    useEffect(() => {
+        if (!isFromReorder) return;
+        const fetchReorderData = async () => {
+            try {
+                const stored = await AsyncStorage.getItem('checkout_reorder_data');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    setReorderItems(parsed);
+                    setSelectedIds(parsed.map((item: any) => item.productId));
+                }
+            } catch (e) {
+                console.error('Failed to parse reorderData from storage');
+            }
+        };
+        fetchReorderData();
+    }, [isFromReorder]);
 
     useEffect(() => {
         if (!isFromAi) return;
@@ -175,6 +197,9 @@ export default function CheckoutPage() {
     }, []);
 
     const sourceItems: CartItem[] = useMemo(() => {
+        if (isFromReorder) {
+            return reorderItems;
+        }
         if (!isFromAi) {
             return items;
         }
@@ -191,7 +216,7 @@ export default function CheckoutPage() {
             quantity: s.qtyNeeded > 0 ? s.qtyNeeded : 1,
         }));
         return mapped;
-    }, [isFromAi, items, suggestionItems]);
+    }, [isFromAi, isFromReorder, items, suggestionItems, reorderItems]);
 
     const selectedItems = sourceItems.filter((item) => selectedIds.includes(item.productId));
 
@@ -702,10 +727,12 @@ export default function CheckoutPage() {
                 data?.data?.paymentUrl ??
                 ''
             ).trim();
+            const payloadOrderCode = data?.orderCode ?? data?.data?.orderCode ?? null;
             if (!checkoutUrl) throw new Error('Missing checkout url. Response: ' + JSON.stringify(data));
 
             successTriggeredRef.current = false;
             setPayosPurpose('bankTransfer');
+            setPayosOrderCode(payloadOrderCode);
             setPayosUrl(checkoutUrl);
             setShowPayosModal(true);
         } catch (error: any) {
@@ -835,6 +862,35 @@ export default function CheckoutPage() {
         }
     };
 
+    const handleCancelPayos = () => {
+        setShowPayosModal(false);
+        setPayosUrl(null);
+        setLastTopupAmount(null);
+
+        if (payosPurpose === 'bankTransfer' && payosOrderCode != null) {
+            const url = API_ENDPOINTS.wallet.cancelOrderPayment(payosOrderCode);
+            console.log(`[PayOS Cancel] Calling endpoint: ${url} with orderCode: ${payosOrderCode}`);
+            
+            authorizedFetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+            })
+            .then(res => console.log(`[PayOS Cancel] API Response status: ${res.status}`))
+            .catch(err => console.error('[PayOS Cancel Error]', err));
+        }
+
+        setPayosPurpose(null);
+        setPayosOrderCode(null);
+        successTriggeredRef.current = false;
+        
+        if (closeTimerRef.current) {
+            clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = null;
+        }
+
+        Toast.show({ type: 'info', text1: 'Payment cancelled.' });
+    };
+
     const handlePayosShouldStart = (event: { url?: string }) => {
         const url = String(event?.url ?? '').toLowerCase();
         if (!url) return true;
@@ -843,12 +899,7 @@ export default function CheckoutPage() {
         const isPaidStatus = url.includes('status=paid');
 
         if (isCancelRoute) {
-            setShowPayosModal(false);
-            setPayosUrl(null);
-            setLastTopupAmount(null);
-            setPayosPurpose(null);
-            successTriggeredRef.current = false;
-            Toast.show({ type: 'info', text1: 'Payment cancelled.' });
+            handleCancelPayos();
             return false;
         }
 
@@ -916,7 +967,7 @@ export default function CheckoutPage() {
                             {group.items.map((item, index) => (
                                 <View key={item.productId} style={[styles.itemCard, index > 0 && styles.itemBorderTop]}>
                                     <Image
-                                        source={{ uri: item.image || FALLBACK_PRODUCT_IMAGE }}
+                                        source={{ uri: (item.image && item.image !== 'null') ? item.image : FALLBACK_PRODUCT_IMAGE }}
                                         style={styles.itemImage}
                                     />
                                     <View style={styles.itemDetails}>
@@ -1253,20 +1304,14 @@ export default function CheckoutPage() {
             <Modal
                 visible={showPayosModal}
                 animationType="slide"
-                onRequestClose={() => setShowPayosModal(false)}
+                onRequestClose={handleCancelPayos}
             >
                 <SafeAreaView style={styles.payosContainer} edges={['top']}>
                     <View style={styles.payosHeader}>
                         <Text style={styles.payosTitle}>Complete Payment</Text>
                         <TouchableOpacity
                             style={styles.payosCloseButton}
-                            onPress={() => {
-                                setShowPayosModal(false);
-                                if (closeTimerRef.current) {
-                                    clearTimeout(closeTimerRef.current);
-                                    closeTimerRef.current = null;
-                                }
-                            }}
+                            onPress={handleCancelPayos}
                         >
                             <Ionicons name="close" size={24} color={COLORS.text} />
                         </TouchableOpacity>

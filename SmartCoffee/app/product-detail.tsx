@@ -139,23 +139,57 @@ export default function ProductDetail() {
         setLoading(true);
         setError(null);
 
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
+        let match: SupplierProductApiItem | null = null;
+        
+        // 1. First try standard REST endpoint for a single item
+        const singleResponse = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct/${productId}`, {
           headers: {
             Accept: '*/*',
           },
         });
 
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
+        if (singleResponse.ok) {
+          const detailData = await singleResponse.json();
+          match = detailData?.data ? detailData.data : detailData;
+        } else {
+          // 2. Fallback: Search across pagination if the backend doesn't support single GET by ID
+          let found = false;
+          let currentPage = 1;
+          const pageSize = 50;
+
+          while (!found && currentPage <= 10) { // Max 10 pages * 50 = 500 items deep scan
+            const listResponse = await authorizedFetch(
+              `${AUTH_BASE_URL}/SupplierProduct?page=${currentPage}&pageSize=${pageSize}`,
+              { headers: { Accept: '*/*' } }
+            );
+            
+            if (!listResponse.ok) break;
+
+            const listData = await listResponse.json();
+            const items = Array.isArray(listData)
+              ? listData
+              : Array.isArray(listData?.items)
+                ? listData.items
+                : [];
+
+            if (items.length === 0) break;
+
+            const potentialMatch = items.find((item: SupplierProductApiItem) => item.productId === productId);
+            if (potentialMatch) {
+              match = potentialMatch;
+              found = true;
+              break;
+            }
+
+            if (items.length < pageSize) break;
+            currentPage++;
+          }
         }
 
-        const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
-        const items = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.items)
-            ? data.items
-            : [];
-        const match = items.find((item) => item.productId === productId) || null;
+        if (!match) {
+          throw new Error('Product not found on the server.');
+        }
+
         setProduct(match);
       } catch (fetchError) {
         setError('Failed to load product detail.');
