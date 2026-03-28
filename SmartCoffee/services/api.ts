@@ -174,6 +174,8 @@ export const API_ENDPOINTS = {
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
     topUpOrders: () => `${AUTH_BASE_URL}/Wallet/top-up-orders`,
+    withdraw: () => `${AUTH_BASE_URL}/Wallet/withdraw`,
+    verifyWithdraw: () => `${AUTH_BASE_URL}/Wallet/verify-withdraw`,
   },
   subscription: {
     byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,
