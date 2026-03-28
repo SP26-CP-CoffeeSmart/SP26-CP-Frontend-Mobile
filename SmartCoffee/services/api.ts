@@ -169,6 +169,7 @@ export const API_ENDPOINTS = {
   },
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
+    topUpOrders: () => `${AUTH_BASE_URL}/Wallet/top-up-orders`,
   },
   subscription: {
     byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,
@@ -186,6 +187,9 @@ export const API_ENDPOINTS = {
       `${AUTH_BASE_URL}/Feedback/MenuItem?menuId=${menuId}&page=${page}&pageSize=${pageSize}`,
     list: (page = 1, pageSize = 100) =>
       `${AUTH_BASE_URL}/Feedback/MenuItem?page=${page}&pageSize=${pageSize}`,
+  },
+  transaction: {
+    listByUser: (userId: number) => `${AUTH_BASE_URL}/Transaction/list/${userId}`,
   },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,

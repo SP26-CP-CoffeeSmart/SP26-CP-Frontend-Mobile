@@ -87,7 +87,7 @@ export default function CheckoutPage() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const { items, removeItem } = useCart();
-    const { walletBalance, refreshProfile, fullAddress, profile, shopName } = useAuth();
+    const { walletBalance, refreshProfile, fullAddress, profile, shopName, accountId } = useAuth();
 
     const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const { items: suggestionItems } = useSuggestions();
@@ -106,6 +106,10 @@ export default function CheckoutPage() {
 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // --- Payment Method Selection ---
+    const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
+    const [bankTransferSubmitting, setBankTransferSubmitting] = useState(false);
+
     // --- Top-Up Flow States ---
     const [showInsufficientModal, setShowInsufficientModal] = useState(false);
     const [showTopupModal, setShowTopupModal] = useState(false);
@@ -116,6 +120,7 @@ export default function CheckoutPage() {
     const [showPayosModal, setShowPayosModal] = useState(false);
     const [lastTopupAmount, setLastTopupAmount] = useState<number | null>(null);
     const [successSubmitting, setSuccessSubmitting] = useState(false);
+    const [payosPurpose, setPayosPurpose] = useState<'wallet' | 'bankTransfer' | null>(null);
 
     const successTriggeredRef = useRef(false);
     const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -563,23 +568,85 @@ export default function CheckoutPage() {
             return;
         }
 
+        // Show payment method selection
+        setShowPaymentMethodModal(true);
+    };
+
+    const submitWalletOrder = async () => {
+        if (isSubmitting) return;
+
+        setIsSubmitting(true);
+        try {
+            const orders = groupedItems.map((group) => {
+                const selectedOption = shippingOptions[group.supplierId];
+                const serviceId = selectedOption ? Number(selectedOption.id) : undefined;
+                const feeMap = shippingFeeBySupplierService[group.supplierId];
+                const explicitFee =
+                    serviceId && feeMap && typeof feeMap[serviceId] === 'number'
+                        ? feeMap[serviceId]
+                        : 0;
+
+                return {
+                    supplierId: group.supplierId,
+                    notes: (notes[group.supplierId] || '').trim() || 'None',
+                    shippingFee: explicitFee,
+                    items: group.items.map((item) => ({
+                        productId: item.productId,
+                        quantity: item.quantity,
+                    })),
+                };
+            });
+
+            const payload = { orders };
+
+            const response = await authorizedFetch(API_ENDPOINTS.order.fromSupplierProducts(), {
+                method: 'POST',
+                headers: {
+                    Accept: '*/*',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`Order failed: ${text || response.status}`);
+            }
+
+            if (!isFromAi) {
+                selectedItems.forEach((item) => removeItem(item.productId));
+            }
+
+            Toast.show({
+                type: 'success',
+                text1: 'Orders placed successfully!',
+                text2: 'Your orders have been submitted.',
+            });
+
+            setTimeout(() => router.replace('/(tabs)/order'), 300);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Purchase failed.';
+            Alert.alert('Checkout Error', message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleWalletPayment = () => {
+        setShowPaymentMethodModal(false);
         if (!canAfford) {
             setShowInsufficientModal(true);
             return;
         }
+        submitWalletOrder();
+    };
 
-        if (isSubmitting) {
-            return;
-        }
+    const handleBankTransfer = async () => {
+        if (bankTransferSubmitting) return;
+        setShowPaymentMethodModal(false);
 
-        setIsSubmitting(true);
         try {
-            // Build new payload shape:
-            // {
-            //   orders: [
-            //     { supplierId, notes, shippingFee, items: [{ productId, quantity }] }
-            //   ]
-            // }
+            setBankTransferSubmitting(true);
 
             const orders = groupedItems.map((group) => {
                 const selectedOption = shippingOptions[group.supplierId];
@@ -601,11 +668,11 @@ export default function CheckoutPage() {
                 };
             });
 
-            const payload = {
-                orders,
-            };
+            const payload = { orders };
 
-            const response = await authorizedFetch(API_ENDPOINTS.order.fromSupplierProducts(), {
+            console.log('[BankTransfer] Payload:', JSON.stringify(payload, null, 2));
+
+            const response = await authorizedFetch(API_ENDPOINTS.wallet.topUpOrders(), {
                 method: 'POST',
                 headers: {
                     Accept: '*/*',
@@ -615,28 +682,37 @@ export default function CheckoutPage() {
             });
 
             if (!response.ok) {
-                const text = await response.text();
-                throw new Error(`Order failed: ${text || response.status}`);
+                let errorText = '';
+                try { errorText = await response.text(); } catch { }
+                throw new Error(`Request failed: ${response.status} - ${errorText}`);
             }
 
-            // Remove purchased items from cart only for cart-based checkout
-            if (!isFromAi) {
-                selectedItems.forEach((item) => removeItem(item.productId));
-            }
+            const data = await response.json();
+            console.log('[BankTransfer] Response:', JSON.stringify(data, null, 2));
 
-            Toast.show({
-                type: 'success',
-                text1: 'Orders placed successfully!',
-                text2: 'Your orders have been submitted.',
-            });
+            const checkoutUrl = String(
+                data?.checkoutUrl ??
+                data?.url ??
+                data?.paymentUrl ??
+                data?.payment_url ??
+                data?.checkout_url ??
+                data?.link ??
+                data?.data?.checkoutUrl ??
+                data?.data?.url ??
+                data?.data?.paymentUrl ??
+                ''
+            ).trim();
+            if (!checkoutUrl) throw new Error('Missing checkout url. Response: ' + JSON.stringify(data));
 
-            setTimeout(() => router.replace('/(tabs)/order'), 300);
-
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Purchase failed.';
-            Alert.alert('Checkout Error', message);
+            successTriggeredRef.current = false;
+            setPayosPurpose('bankTransfer');
+            setPayosUrl(checkoutUrl);
+            setShowPayosModal(true);
+        } catch (error: any) {
+            console.error('[BankTransfer Error]', error);
+            Alert.alert('Bank Transfer', `Unable to create payment: ${error?.message || error}`);
         } finally {
-            setIsSubmitting(false);
+            setBankTransferSubmitting(false);
         }
     };
 
@@ -686,6 +762,7 @@ export default function CheckoutPage() {
 
             setLastTopupAmount(amount);
             successTriggeredRef.current = false;
+            setPayosPurpose('wallet');
             setPayosUrl(checkoutUrl);
             setShowTopupModal(false);
             setShowPayosModal(true);
@@ -727,6 +804,37 @@ export default function CheckoutPage() {
         }
     };
 
+    const handleBankTransferSuccess = async () => {
+        try {
+            // Remove items from cart
+            if (!isFromAi) {
+                selectedItems.forEach((item) => removeItem(item.productId));
+            }
+            await refreshProfile();
+
+            Toast.show({
+                type: 'success',
+                text1: 'Payment successful!',
+                text2: 'Your orders have been placed via bank transfer.',
+            });
+
+            if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+            closeTimerRef.current = setTimeout(() => {
+                setShowPayosModal(false);
+                setPayosUrl(null);
+                setPayosPurpose(null);
+                closeTimerRef.current = null;
+                router.replace('/(tabs)/order');
+            }, 1500);
+        } catch (_error) {
+            Toast.show({
+                type: 'info',
+                text1: 'Payment appears successful.',
+                text2: 'Please check your orders.',
+            });
+        }
+    };
+
     const handlePayosShouldStart = (event: { url?: string }) => {
         const url = String(event?.url ?? '').toLowerCase();
         if (!url) return true;
@@ -738,14 +846,19 @@ export default function CheckoutPage() {
             setShowPayosModal(false);
             setPayosUrl(null);
             setLastTopupAmount(null);
+            setPayosPurpose(null);
             successTriggeredRef.current = false;
-            Toast.show({ type: 'info', text1: 'Top up cancelled.' });
+            Toast.show({ type: 'info', text1: 'Payment cancelled.' });
             return false;
         }
 
         if (isPaidStatus && !successTriggeredRef.current) {
             successTriggeredRef.current = true;
-            handleTopupSuccess();
+            if (payosPurpose === 'bankTransfer') {
+                handleBankTransferSuccess();
+            } else {
+                handleTopupSuccess();
+            }
             return false;
         }
         return true;
@@ -941,17 +1054,6 @@ export default function CheckoutPage() {
                         <Text style={styles.summaryTotalLabel}>Total Payment</Text>
                         <Text style={styles.summaryTotalValue}>{formatVnd(totals.totalAmount)} VND</Text>
                     </View>
-
-                    <View style={[styles.summaryRow, { marginTop: 12 }]}>
-                        <Text style={styles.summaryLabel}>Current Wallet Balance</Text>
-                        <Text style={styles.summaryValue}>{formatVnd(walletBalance)} VND</Text>
-                    </View>
-                    <View style={styles.summaryRow}>
-                        <Text style={styles.summaryLabel}>Balance After Payment</Text>
-                        <Text style={[styles.summaryValue, { color: canAfford ? COLORS.green : COLORS.danger }]}>
-                            {canAfford ? '' : '-'}{formatVnd(Math.abs(walletBalance - totals.totalAmount))} VND
-                        </Text>
-                    </View>
                 </View>
 
                 <Text style={styles.disclaimerText}>
@@ -966,19 +1068,79 @@ export default function CheckoutPage() {
                     <Text style={styles.bottomTotalPrice}>{formatVnd(totals.totalAmount)} VND</Text>
                 </View>
 
-                {/* Allow tapping the button regardless of canAfford so it handles the modal */}
                 <TouchableOpacity
-                    style={[styles.placeOrderBtn, isSubmitting && styles.placeOrderBtnDisabled]}
+                    style={[styles.placeOrderBtn, (isSubmitting || bankTransferSubmitting) && styles.placeOrderBtnDisabled]}
                     onPress={handlePlaceOrder}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || bankTransferSubmitting}
                 >
-                    {isSubmitting ? (
+                    {(isSubmitting || bankTransferSubmitting) ? (
                         <ActivityIndicator size="small" color={COLORS.white} />
                     ) : (
                         <Text style={styles.placeOrderText}>Place Order</Text>
                     )}
                 </TouchableOpacity>
             </View>
+
+            {/* PAYMENT METHOD SELECTION MODAL */}
+            <Modal
+                visible={showPaymentMethodModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setShowPaymentMethodModal(false)}
+            >
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.payMethodCard}>
+                        <View style={styles.payMethodIconWrap}>
+                            <Ionicons name="card-outline" size={32} color={COLORS.accent} />
+                        </View>
+                        <Text style={styles.payMethodTitle}>Choose Payment Method</Text>
+                        <Text style={styles.payMethodSubtitle}>
+                            Total: <Text style={{ fontWeight: '700', color: COLORS.accent }}>{formatVnd(totals.totalAmount)} VND</Text>
+                        </Text>
+
+                        <TouchableOpacity
+                            style={styles.payMethodOption}
+                            activeOpacity={0.7}
+                            onPress={handleWalletPayment}
+                        >
+                            <View style={styles.payMethodOptionLeft}>
+                                <View style={[styles.payMethodOptionIcon, { backgroundColor: '#FFF6ED' }]}>
+                                    <Ionicons name="wallet-outline" size={22} color={COLORS.accent} />
+                                </View>
+                                <View>
+                                    <Text style={styles.payMethodOptionTitle}>Pay with Wallet</Text>
+                                    <Text style={styles.payMethodOptionDesc}>Balance: {formatVnd(walletBalance)} VND</Text>
+                                </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.payMethodOption}
+                            activeOpacity={0.7}
+                            onPress={handleBankTransfer}
+                        >
+                            <View style={styles.payMethodOptionLeft}>
+                                <View style={[styles.payMethodOptionIcon, { backgroundColor: '#EDF7FF' }]}>
+                                    <Ionicons name="business-outline" size={22} color="#2D7DD2" />
+                                </View>
+                                <View>
+                                    <Text style={styles.payMethodOptionTitle}>Bank Transfer</Text>
+                                    <Text style={styles.payMethodOptionDesc}>Pay via PayOS gateway</Text>
+                                </View>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.payMethodCancelBtn}
+                            onPress={() => setShowPaymentMethodModal(false)}
+                        >
+                            <Text style={styles.payMethodCancelText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             {/* INSUFFICIENT BALANCE WARNING MODAL */}
             <Modal
@@ -1664,5 +1826,88 @@ const styles = StyleSheet.create({
     payosFallbackText: {
         color: COLORS.textSecondary,
         fontSize: 14,
+    },
+
+    // Payment Method Modal
+    payMethodCard: {
+        width: '100%',
+        backgroundColor: COLORS.white,
+        borderRadius: 20,
+        padding: 24,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
+        elevation: 6,
+    },
+    payMethodIconWrap: {
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        backgroundColor: '#FFF6ED',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 16,
+    },
+    payMethodTitle: {
+        fontSize: 20,
+        fontFamily: 'Outfit-SemiBold',
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 6,
+    },
+    payMethodSubtitle: {
+        fontSize: 14,
+        color: COLORS.textSecondary,
+        marginBottom: 20,
+    },
+    payMethodOption: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: COLORS.bg,
+        borderRadius: 14,
+        padding: 14,
+        marginBottom: 10,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    payMethodOptionLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        flex: 1,
+    },
+    payMethodOptionIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    payMethodOptionTitle: {
+        fontSize: 15,
+        fontFamily: 'Outfit-Medium',
+        fontWeight: '600',
+        color: COLORS.text,
+    },
+    payMethodOptionDesc: {
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        marginTop: 2,
+    },
+    payMethodCancelBtn: {
+        marginTop: 6,
+        paddingVertical: 12,
+        width: '100%',
+        alignItems: 'center',
+    },
+    payMethodCancelText: {
+        fontSize: 15,
+        fontFamily: 'Outfit-Medium',
+        fontWeight: '600',
+        color: COLORS.textSecondary,
     },
 });
