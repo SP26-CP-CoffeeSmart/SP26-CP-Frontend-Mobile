@@ -10,6 +10,7 @@ import {
   Switch,
   Image,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,7 @@ export default function ProfileScreen() {
   const {
     profile,
     coffeeShopId: profileCoffeeShopId,
+    accountId,
     walletBalance,
     loading: profileLoading,
     error: profileError,
@@ -76,6 +78,11 @@ export default function ProfileScreen() {
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
   const [selectedPackageIndex, setSelectedPackageIndex] = useState(0);
   const [showAccountInfo, setShowAccountInfo] = useState(false);
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [refreshingTransactions, setRefreshingTransactions] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTriggeredRef = useRef(false);
@@ -823,6 +830,74 @@ export default function ProfileScreen() {
     }
   };
 
+  const loadTransactions = useCallback(async () => {
+    if (!accountId) {
+      setTransactionsError('Missing account ID.');
+      return;
+    }
+    try {
+      setTransactionsLoading(true);
+      setTransactionsError(null);
+      const response = await authorizedFetch(API_ENDPOINTS.transaction.listByUser(accountId));
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      const list = Array.isArray(data) ? data : (data?.items ?? data?.data ?? data?.results ?? []);
+      setTransactions(list);
+    } catch (error) {
+      setTransactionsError('Unable to load transactions.');
+      setTransactions([]);
+    } finally {
+      setTransactionsLoading(false);
+    }
+  }, [accountId]);
+
+  const handleOpenTransactions = () => {
+    setTransactions([]);
+    setTransactionsError(null);
+    setShowTransactionModal(true);
+    loadTransactions();
+  };
+
+  const handleRefreshTransactions = async () => {
+    if (refreshingTransactions) return;
+    try {
+      setRefreshingTransactions(true);
+      await loadTransactions();
+    } finally {
+      setRefreshingTransactions(false);
+    }
+  };
+
+  const formatTransactionDate = (value?: string) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return '-';
+    try {
+      return parsed.toLocaleDateString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    } catch {
+      return parsed.toISOString();
+    }
+  };
+
+  const formatPrice = (value?: number) => {
+    if (value === null || value === undefined) return '-';
+    return `${Number(value).toLocaleString('vi-VN')} vnd`;
+  };
+
+  const getTransactionStatusColor = (status?: string) => {
+    const s = String(status ?? '').toLowerCase();
+    if (s === 'paid' || s === 'completed' || s === 'success') return '#2B8A3E';
+    if (s === 'pending') return '#D38B2A';
+    if (s === 'failed' || s === 'cancelled' || s === 'canceled') return '#C51B1B';
+    return '#6B4D35';
+  };
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) {
@@ -1391,6 +1466,18 @@ export default function ProfileScreen() {
           <TouchableOpacity
             style={styles.listRow}
             activeOpacity={0.7}
+            onPress={handleOpenTransactions}
+          >
+            <View style={styles.listLeft}>
+              <Ionicons name="receipt-outline" size={18} color="#A36D2D" />
+              <Text style={styles.listText}>Transaction History</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
+          </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity
+            style={styles.listRow}
+            activeOpacity={0.7}
             onPress={() => router.push('/change-password')}
           >
             <View style={styles.listLeft}>
@@ -1412,6 +1499,98 @@ export default function ProfileScreen() {
           </Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Transaction History Modal */}
+      <Modal
+        visible={showTransactionModal}
+        animationType="slide"
+        onRequestClose={() => setShowTransactionModal(false)}
+      >
+        <SafeAreaView style={styles.txModalContainer} edges={['top']}>
+          <View style={styles.txModalHeader}>
+            <TouchableOpacity
+              style={styles.txModalBackButton}
+              onPress={() => setShowTransactionModal(false)}
+            >
+              <Ionicons name="chevron-back" size={20} color="#FFF" />
+            </TouchableOpacity>
+            <Text style={styles.txModalHeaderTitle}>Transaction History</Text>
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ flexGrow: 1 }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshingTransactions}
+                onRefresh={handleRefreshTransactions}
+              />
+            }
+          >
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={true}
+              contentContainerStyle={styles.txModalBody}
+            >
+              <View style={styles.txTableWrap}>
+                {/* Table Header */}
+                <View style={styles.txTableHeader}>
+                  <Text style={[styles.txTableHeaderText, styles.txColDate]}>Date</Text>
+                  <Text style={[styles.txTableHeaderText, styles.txColNotes]}>Notes</Text>
+                  <Text style={[styles.txTableHeaderText, styles.txColAmount]}>Amount</Text>
+                  <Text style={[styles.txTableHeaderText, styles.txColStatus]}>Status</Text>
+                </View>
+
+                {transactionsLoading ? (
+                  <View style={styles.txLoadingWrap}>
+                    <ActivityIndicator size="small" color="#A36D2D" />
+                    <Text style={styles.txFeedbackText}>Loading transactions...</Text>
+                  </View>
+                ) : transactionsError ? (
+                  <View style={styles.txLoadingWrap}>
+                    <Ionicons name="alert-circle-outline" size={24} color="#C51B1B" />
+                    <Text style={styles.txFeedbackText}>{transactionsError}</Text>
+                    <TouchableOpacity style={styles.txRetryButton} onPress={loadTransactions}>
+                      <Text style={styles.txRetryText}>Retry</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : transactions.length === 0 ? (
+                  <View style={styles.txLoadingWrap}>
+                    <Ionicons name="document-text-outline" size={32} color="#C2B6A8" />
+                    <Text style={styles.txFeedbackText}>No transactions found.</Text>
+                  </View>
+                ) : (
+                  transactions.map((tx, index) => {
+                    const statusColor = getTransactionStatusColor(tx.status);
+                    return (
+                      <View key={tx.transactionId ?? tx.id ?? index}>
+                        <View style={styles.txRow}>
+                          <Text style={[styles.txCellText, styles.txColDate]} numberOfLines={1}>
+                            {formatTransactionDate(tx.transactionDate)}
+                          </Text>
+                          <Text style={[styles.txCellText, styles.txColNotes]} numberOfLines={1}>
+                            {tx.notes || '-'}
+                          </Text>
+                          <Text style={[styles.txCellAmount, styles.txColAmount]} numberOfLines={1}>
+                            {formatPrice(tx.totalPrice)}
+                          </Text>
+                          <Text style={[styles.txCellStatus, styles.txColStatus, { color: statusColor }]} numberOfLines={1}>
+                            {tx.status || '-'}
+                          </Text>
+                        </View>
+                        {index < transactions.length - 1 ? (
+                          <View style={styles.txDivider} />
+                        ) : null}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+            </ScrollView>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
       {toastMessage ? (
         <View style={styles.toastContainer}>
           <View style={styles.toastCard}>
@@ -2376,5 +2555,118 @@ const styles = StyleSheet.create({
     color: '#FFF8F1',
     fontSize: 12,
     fontWeight: '600',
+  },
+  // Transaction History Modal styles
+  txModalContainer: {
+    flex: 1,
+    backgroundColor: '#F7F2EA',
+  },
+  txModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#3C2B20',
+  },
+  txModalBackButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txModalHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#FFF3E6',
+  },
+  txModalBody: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  txTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: '#D8C3AE',
+    marginBottom: 4,
+  },
+  txTableHeaderText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B4D35',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  txRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  txCellText: {
+    fontSize: 13,
+    color: '#3C2B20',
+    fontWeight: '500',
+  },
+  txCellAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#3C2B20',
+  },
+  txCellStatus: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  txDivider: {
+    height: 1,
+    backgroundColor: '#EADBCB',
+    marginHorizontal: 8,
+  },
+  txLoadingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    gap: 10,
+  },
+  txFeedbackText: {
+    fontSize: 13,
+    color: '#8B6B4D',
+    fontWeight: '500',
+  },
+  txRetryButton: {
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 14,
+    backgroundColor: '#F5D39C',
+    marginTop: 4,
+  },
+  txRetryText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#7A4A1B',
+  },
+  txTableWrap: {
+    minWidth: 520,
+  },
+  txColDate: {
+    width: 95,
+  },
+  txColNotes: {
+    width: 180,
+    paddingRight: 8,
+  },
+  txColAmount: {
+    width: 130,
+    textAlign: 'right',
+  },
+  txColStatus: {
+    width: 90,
+    textAlign: 'right',
   },
 });
