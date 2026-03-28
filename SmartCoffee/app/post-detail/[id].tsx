@@ -120,6 +120,7 @@ const COLORS = {
   accentSoft: '#E8D7C8',
   border: '#E3D7CD',
 };
+const COMMENT_PAGE_SIZE = 3;
 
 const parseJSON = (value: any) => {
   try {
@@ -219,6 +220,7 @@ export default function PostDetailScreen() {
   const [replyTarget, setReplyTarget] = useState<PostCommentItem | null>(null);
   const [sendingComment, setSendingComment] = useState(false);
   const [commentAuthorMap, setCommentAuthorMap] = useState<Record<number, string>>({});
+  const [visibleCommentLimit, setVisibleCommentLimit] = useState(COMMENT_PAGE_SIZE);
   const lastReportedViewKey = useRef<string | null>(null);
 
   const postId = useMemo(() => Number(id ?? 0), [id]);
@@ -363,6 +365,7 @@ export default function PostDetailScreen() {
 
       if (ids.length === 0) {
         setComments([]);
+        setVisibleCommentLimit(COMMENT_PAGE_SIZE);
         setCommentError(null);
         return;
       }
@@ -392,6 +395,7 @@ export default function PostDetailScreen() {
           .map((result) => result.value);
 
         setComments(sortCommentsByDate(loaded));
+        setVisibleCommentLimit(COMMENT_PAGE_SIZE);
         if (loaded.length === 0) {
           setCommentError('Unable to load comments right now.');
         }
@@ -399,6 +403,7 @@ export default function PostDetailScreen() {
         const message = err instanceof Error ? err.message : 'Unable to load comments.';
         setCommentError(message);
         setComments([]);
+        setVisibleCommentLimit(COMMENT_PAGE_SIZE);
       } finally {
         setLoadingComments(false);
       }
@@ -736,6 +741,14 @@ export default function PostDetailScreen() {
     },
     [commentAuthorMap]
   );
+  const visibleComments = useMemo(
+    () => comments.slice(0, visibleCommentLimit),
+    [comments, visibleCommentLimit]
+  );
+  const hasMoreComments = visibleCommentLimit < comments.length;
+  const handleLoadMoreComments = useCallback(() => {
+    setVisibleCommentLimit((prev) => Math.min(prev + COMMENT_PAGE_SIZE, comments.length));
+  }, [comments.length]);
 
   if (loading) {
     return (
@@ -1103,7 +1116,7 @@ export default function PostDetailScreen() {
 
           {comments.length > 0 ? (
             <View style={styles.commentList}>
-              {comments.map((comment) => (
+              {visibleComments.map((comment) => (
                 <View key={comment.commentId} style={styles.commentCard}>
                   <View style={styles.commentHeader}>
                     <Text style={styles.commentAuthor}>
@@ -1168,6 +1181,18 @@ export default function PostDetailScreen() {
                   ) : null}
                 </View>
               ))}
+            </View>
+          ) : null}
+          {comments.length > 0 ? (
+            <View style={styles.commentPagerRow}>
+              <Text style={styles.metaText}>
+                Showing {Math.min(visibleCommentLimit, comments.length)} / {comments.length} comments
+              </Text>
+              {hasMoreComments ? (
+                <TouchableOpacity style={styles.commentPagerButton} onPress={handleLoadMoreComments}>
+                  <Text style={styles.commentPagerText}>Load more comments</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -1766,6 +1791,24 @@ const styles = StyleSheet.create({
   replyList: {
     marginTop: 4,
     gap: 8,
+  },
+  commentPagerRow: {
+    marginTop: 2,
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  commentPagerButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#E2CBB5',
+    backgroundColor: '#F4E5D7',
+  },
+  commentPagerText: {
+    color: COLORS.accent,
+    fontSize: 12,
+    fontWeight: '700',
   },
   replyCard: {
     marginLeft: 16,
