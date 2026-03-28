@@ -33,6 +33,8 @@ interface ShopInventoryItem {
   minStock?: number;
   expirationDate?: string;
   measurement?: string;
+  imageUrl?: string;
+  image?: string;
   ingredient?: Ingredient;
 }
 
@@ -237,7 +239,7 @@ export default function InventoryScreen() {
 
     // Extract ingredient info (use ingredient object if exists, otherwise show item ID)
     const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
-    const ingredientImage = item.ingredient?.image;
+    const ingredientImage = item.image || item.imageUrl || item.ingredient?.image;
     const ingredientCategory = item.ingredient?.category || 'Unknown Category';
 
     return (
