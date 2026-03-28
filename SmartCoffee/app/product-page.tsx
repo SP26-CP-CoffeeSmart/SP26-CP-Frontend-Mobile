@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -89,6 +90,13 @@ export default function ProductPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedForSuggestion, setSelectedForSuggestion] = useState<SupplierProductApiItem[]>([]);
 
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const PAGE_SIZE = 10;
+
   const dynamicCategories = useMemo(() => {
     const cats = new Set<string>();
     products.forEach((p) => {
@@ -107,37 +115,77 @@ export default function ProductPage() {
     return new Set<number>(ids);
   }, [fromSuggestions, suggestionItems]);
 
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
-          headers: {
-            Accept: '*/*',
-          },
-        });
+  const fetchProducts = async (currentPage: number, isLoadMore = false) => {
+    try {
+      if (isLoadMore) setLoadingMore(true);
+      else setLoading(true);
+      setError(null);
 
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct?page=${currentPage}&pageSize=${PAGE_SIZE}`, {
+        headers: {
+          Accept: '*/*',
+        },
+      });
 
-        const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
-        const items = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.items)
-            ? data.items
-            : [];
-        setProducts(items);
-      } catch (fetchError) {
-        setError('Failed to load supplier products.');
-      } finally {
-        setLoading(false);
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
       }
-    };
 
-    fetchProducts();
+      const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : [];
+
+      if (items.length < PAGE_SIZE) {
+        setHasMore(false);
+      } else {
+        setHasMore(true);
+      }
+
+      setProducts((prev) => {
+        if (!isLoadMore) return items;
+        const newItems = items.filter(
+          (item: SupplierProductApiItem) => !prev.some((p) => p.productId === item.productId)
+        );
+        return [...prev, ...newItems];
+      });
+    } catch (fetchError) {
+      setError('Failed to load supplier products.');
+      setHasMore(false);
+    } finally {
+      if (isLoadMore) setLoadingMore(false);
+      else setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setPage(1);
+    fetchProducts(1, false);
   }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setSearch('');
+    setActiveCategory(null);
+    setPage(1);
+    await fetchProducts(1, false);
+    setRefreshing(false);
+  };
+
+  const handleScroll = ({ nativeEvent }: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+    // Increase threshold significantly to trigger fetch before reaching the absolute bottom
+    const paddingToBottom = 600;
+    const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
+    
+    if (isCloseToBottom && !loading && !loadingMore && hasMore) {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      fetchProducts(nextPage, true);
+    }
+  };
   const filteredProducts = useMemo(() => {
     let result = products;
 
@@ -202,7 +250,19 @@ export default function ProductPage() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[COLORS.accent]}
+            tintColor={COLORS.accent}
+          />
+        }
+      >
         <View style={styles.header}>
           <Image source={{ uri: headerImage }} style={styles.headerImage} />
           <View style={styles.headerOverlay} />
@@ -310,7 +370,7 @@ export default function ProductPage() {
           ) : filteredProducts.length === 0 ? (
             <Text style={styles.stateText}>No products found</Text>
           ) : (
-            filteredProducts.map((item) => {
+            filteredProducts.map((item, index) => {
               const name = item?.ingredient?.name ?? 'Unknown';
               const category = item?.ingredient?.category ?? 'Unknown';
               const imageUrl =
@@ -323,7 +383,7 @@ export default function ProductPage() {
                 typeof item.stock === 'number' ? String(item.stock) : 'N/A';
 
               return (
-                <View key={item.productId} style={styles.card}>
+                <View key={`${item.productId}-${index}`} style={styles.card}>
                   <TouchableOpacity
                     activeOpacity={0.9}
                     onPress={() =>
@@ -383,6 +443,22 @@ export default function ProductPage() {
             })
           )}
         </View>
+        
+        {loadingMore ? (
+          <View style={styles.loadingMoreContainer}>
+            <ActivityIndicator size="small" color={COLORS.accent} />
+            <Text style={styles.loadingMoreText}>Loading more products...</Text>
+          </View>
+        ) : hasMore && !loading && filteredProducts.length > 0 ? (
+          <View style={styles.loadingMoreContainer}>
+            <Ionicons name="swap-vertical" size={14} color={COLORS.textSecondary} style={{ marginRight: 4 }} />
+            <Text style={styles.loadingMoreText}>Scroll down to load more</Text>
+          </View>
+        ) : !hasMore && filteredProducts.length > 0 ? (
+          <View style={styles.loadingMoreContainer}>
+            <Text style={[styles.loadingMoreText, { fontStyle: 'italic' }]}>End of products</Text>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -582,5 +658,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: COLORS.chipText,
+  },
+  loadingMoreContainer: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  loadingMoreText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
 });
