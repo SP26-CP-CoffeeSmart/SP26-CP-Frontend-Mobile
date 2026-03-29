@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
-import Toast from 'react-native-toast-message';
 import { TextInput } from 'react-native';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -39,29 +38,31 @@ export interface ShopStaff {
 }
 
 const COLORS = {
-    bg: '#F7F3EF',
-    bgTint: '#FFF8F0',
-    text: '#3C2A21',
-    muted: '#8E7B6F',
-    mutedLight: '#C2B6A8',
-    border: '#E8E1D9',
-    accent: '#D38B2A',
-    accentDark: '#A36D2D',
+    bg: '#FBF8F4',
+    bgTint: '#F5EFE8',
+    text: '#2D211B',
+    muted: '#8B8179',
+    mutedLight: '#C6BDB6',
+    border: '#EFE8E1',
+    accent: '#32211E',
+    accentDark: '#231713',
     white: '#FFFFFF',
-    success: '#1F7A1F',
     error: '#C51B1B',
-    statusActive: '#E3F7E6',
-    statusInactive: '#F2F2F2',
+    iconSoft: '#F4EFE9',
 };
 
 export default function StaffManagementScreen() {
+    type SortOption = 'NAME_ASC' | 'NAME_DESC' | 'ROLE_ASC';
+
     const router = useRouter();
-    const { profile, coffeeShopId: profileCoffeeShopId } = useAuth();
+    const { coffeeShopId: profileCoffeeShopId } = useAuth();
     const [staff, setStaff] = useState<ShopStaff[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const [sortOption, setSortOption] = useState<SortOption>('NAME_ASC');
+    const [showSortOptions, setShowSortOptions] = useState(false);
 
     useEffect(() => {
         let isActive = true;
@@ -166,25 +167,53 @@ export default function StaffManagementScreen() {
         return staffMember.position ?? staffMember.role ?? 'Staff';
     };
 
-    const isStaffActive = (staffMember: ShopStaff) => {
-        const statusBool = staffMember.isActive ?? staffMember.active;
-        if (typeof statusBool === 'boolean') {
-            return statusBool;
+    const filteredStaff = React.useMemo(() => {
+        const query = searchQuery.toLowerCase().trim();
+        const list = staff.filter((staffMember) => {
+            const name = getStaffName(staffMember).toLowerCase();
+            const email = getStaffEmail(staffMember).toLowerCase();
+            const position = getStaffPosition(staffMember).toLowerCase();
+            const queryMatched =
+                !query ||
+                name.includes(query) ||
+                email.includes(query) ||
+                position.includes(query);
+            return queryMatched;
+        });
+
+        return [...list].sort((a, b) => {
+            if (sortOption === 'NAME_ASC') {
+                return getStaffName(a).localeCompare(getStaffName(b));
+            }
+            if (sortOption === 'NAME_DESC') {
+                return getStaffName(b).localeCompare(getStaffName(a));
+            }
+            return getStaffPosition(a).localeCompare(getStaffPosition(b));
+        });
+    }, [searchQuery, sortOption, staff]);
+
+    const getSortLabel = () => {
+        if (sortOption === 'NAME_DESC') {
+            return 'Name Z-A';
         }
-        return String(staffMember.status ?? '').toLowerCase() === 'active';
+        if (sortOption === 'ROLE_ASC') {
+            return 'Role A-Z';
+        }
+        return 'Name A-Z';
     };
 
-    const getStaffStatus = (staffMember: ShopStaff) => {
-        return isStaffActive(staffMember) ? 'Active' : 'Inactive';
+    const getStaffInitials = (staffMember: ShopStaff) => {
+        const name = getStaffName(staffMember).trim();
+        if (!name) {
+            return 'NA';
+        }
+        const parts = name.split(/\s+/).filter(Boolean);
+        const initials = parts
+            .slice(0, 2)
+            .map((part) => part.charAt(0).toUpperCase())
+            .join('');
+        return initials || 'NA';
     };
-
-    const filteredStaff = staff.filter((staffMember) => {
-        const name = getStaffName(staffMember).toLowerCase();
-        const email = getStaffEmail(staffMember).toLowerCase();
-        const position = getStaffPosition(staffMember).toLowerCase();
-        const query = searchQuery.toLowerCase();
-        return name.includes(query) || email.includes(query) || position.includes(query);
-    });
 
     return (
         <SafeAreaView style={styles.safeArea}>
@@ -200,29 +229,33 @@ export default function StaffManagementScreen() {
 
                 <View style={styles.header}>
                     <View style={styles.headerTop}>
-                        <View>
-                            <Text style={styles.title}>Staff Management</Text>
-                            <Text style={styles.subtitle}>Manage your coffee shop staff</Text>
-                        </View>
-                        <Pressable
-                            style={styles.createButton}
-                            onPress={() => router.push('/create-staff' as any)}
-
-                        >
-                            <Ionicons name="add" size={24} color={COLORS.white} />
-                        </Pressable>
+                        <Text style={styles.title}>Staff Management</Text>
                     </View>
                     <View style={styles.searchBox}>
                         <Ionicons name="search" size={18} color={COLORS.muted} />
                         <TextInput
                             style={styles.searchInput}
-                            placeholder="Search staff members..."
+                            placeholder="Search by name or role..."
                             placeholderTextColor={COLORS.muted}
                             value={searchQuery}
                             onChangeText={setSearchQuery}
                         />
                     </View>
                 </View>
+
+                {!loading && !error && (
+                    <View style={styles.statsWrap}>
+                        <View style={[styles.statCard, styles.totalCard]}>
+                            <View>
+                                <Text style={styles.statLabel}>TOTAL STAFF</Text>
+                                <Text style={styles.statValue}>{staff.length}</Text>
+                            </View>
+                            <View style={styles.statIconWrap}>
+                                <Ionicons name="people" size={20} color={COLORS.accent} />
+                            </View>
+                        </View> 
+                    </View>
+                )}
 
                 {loading ? (
                     <View style={styles.loadingContainer}>
@@ -240,44 +273,67 @@ export default function StaffManagementScreen() {
                 ) : filteredStaff.length === 0 ? (
                     <View style={styles.emptyContainer}>
                         <Ionicons name="people-outline" size={48} color={COLORS.mutedLight} />
-                        <Text style={styles.emptyText}>{staff.length === 0 ? 'No staff members found' : 'No results found'}</Text>
-                        <Text style={styles.emptySubtext}>{staff.length === 0 ? 'Add staff members to manage your team' : 'Try a different search'}</Text>
+                        <Text style={styles.emptyText}>{staff.length === 0 ? 'No staff members found' : 'No matching staff'}</Text>
+                        <Text style={styles.emptySubtext}>
+                            {staff.length === 0
+                                ? 'Tap + to add your first staff member'
+                                : 'Try another keyword or sort option'}
+                        </Text>
                     </View>
                 ) : (
-                    <View style={styles.staffList}>
+                    <View style={styles.directorySection}>
+                        <View style={styles.directoryHeader}>
+                            <Text style={styles.directoryTitle}>Staff Members</Text>
+                            <Pressable
+                                style={styles.sortButton}
+                                onPress={() => setShowSortOptions((prev) => !prev)}
+                            >
+                                <Ionicons name="swap-vertical-outline" size={14} color={COLORS.muted} />
+                                <Text style={styles.sortText}>{getSortLabel()}</Text>
+                            </Pressable>
+                        </View>
+                        {showSortOptions && (
+                            <View style={styles.sortOptionsRow}>
+                                <Pressable
+                                    style={[styles.sortOptionChip, sortOption === 'NAME_ASC' && styles.sortOptionChipActive]}
+                                    onPress={() => {
+                                        setSortOption('NAME_ASC');
+                                        setShowSortOptions(false);
+                                    }}
+                                >
+                                    <Text style={[styles.sortOptionText, sortOption === 'NAME_ASC' && styles.sortOptionTextActive]}>
+                                        Name A-Z
+                                    </Text>
+                                </Pressable>
+                                <Pressable
+                                    style={[styles.sortOptionChip, sortOption === 'NAME_DESC' && styles.sortOptionChipActive]}
+                                    onPress={() => {
+                                        setSortOption('NAME_DESC');
+                                        setShowSortOptions(false);
+                                    }}
+                                >
+                                    <Text style={[styles.sortOptionText, sortOption === 'NAME_DESC' && styles.sortOptionTextActive]}>
+                                        Name Z-A
+                                    </Text>
+                                </Pressable>
+                            </View>
+                        )}
+                        <View style={styles.staffList}>
                         {filteredStaff.map((staffMember, index) => {
-                            const active = isStaffActive(staffMember);
                             const staffId = staffMember.id ?? staffMember.staffId;
 
                             return (
                                 <View key={staffId ?? index} style={styles.staffCard}>
                                     <View style={styles.staffHeader}>
                                         <View style={styles.staffInfo}>
-                                            <View style={styles.staffIconWrap}>
-                                                <Ionicons name="person-circle" size={44} color={COLORS.accent} />
+                                            <View style={styles.avatarWrap}>
+                                                <Text style={styles.avatarText}>{getStaffInitials(staffMember)}</Text>
                                             </View>
                                             <View style={styles.staffDetails}>
                                                 <Text style={styles.staffName}>{getStaffName(staffMember)}</Text>
                                                 <Text style={styles.staffPosition}>{getStaffPosition(staffMember)}</Text>
                                             </View>
                                         </View>
-                                        {/* <View
-                      style={[
-                        styles.statusBadge,
-                        active ? styles.statusBadgeActive : styles.statusBadgeInactive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusBadgeText,
-                          active
-                            ? styles.statusBadgeTextActive
-                            : styles.statusBadgeTextInactive,
-                        ]}
-                      >
-                        {getStaffStatus(staffMember)}
-                      </Text>
-                    </View> */}
                                     </View>
 
                                     <View style={styles.staffMeta}>
@@ -293,11 +349,18 @@ export default function StaffManagementScreen() {
                                 </View>
                             );
                         })}
+                        </View>
                     </View>
                 )}
 
                 <View style={styles.spacer} />
             </ScrollView>
+            <Pressable
+                style={styles.floatingAddButton}
+                onPress={() => router.push('/create-staff' as any)}
+            >
+                <Ionicons name="add" size={28} color={COLORS.white} />
+            </Pressable>
         </SafeAreaView>
     );
 }
@@ -309,57 +372,94 @@ const styles = StyleSheet.create({
     },
     container: {
         flex: 1,
-        paddingHorizontal: 18,
+        paddingHorizontal: 20,
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 36,
+        height: 36,
         alignItems: 'center',
         justifyContent: 'center',
-        marginVertical: 8,
+        marginTop: 6,
+        marginBottom: 10,
     },
     header: {
-        marginBottom: 16,
+        marginBottom: 18,
     },
     headerTop: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: 12,
+        marginBottom: 16,
     },
     title: {
-        fontSize: 28,
+        fontSize: 30,
         fontWeight: '700',
         color: COLORS.text,
-    },
-    subtitle: {
-        fontSize: 14,
-        color: COLORS.muted,
-        marginTop: 4,
-    },
-    createButton: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: COLORS.accent,
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     searchBox: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: COLORS.white,
-        borderRadius: 12,
+        borderRadius: 30,
         borderWidth: 1,
         borderColor: COLORS.border,
-        paddingHorizontal: 12,
-        height: 44,
+        paddingHorizontal: 16,
+        height: 50,
+        shadowColor: '#3A2A1F',
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
     },
     searchInput: {
         flex: 1,
-        marginLeft: 8,
+        marginLeft: 10,
         fontSize: 13,
         color: COLORS.text,
+    },
+    statsWrap: {
+        marginBottom: 16,
+        gap: 12,
+    },
+    totalCard: {
+        minHeight: 92,
+    },
+    statCard: {
+        backgroundColor: COLORS.white,
+        borderRadius: 28,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        paddingHorizontal: 18,
+        paddingVertical: 16,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        shadowColor: '#3D2B20',
+        shadowOpacity: 0.07,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 2,
+    },
+    statLabel: {
+        color: COLORS.muted,
+        fontSize: 10,
+        letterSpacing: 1.4,
+        fontWeight: '600',
+    },
+    statValue: {
+        color: COLORS.text,
+        fontSize: 34,
+        fontWeight: '700',
+        lineHeight: 40,
+        marginTop: 2,
+    },
+    statIconWrap: {
+        width: 52,
+        height: 52,
+        borderRadius: 16,
+        backgroundColor: COLORS.iconSoft,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     loadingContainer: {
         flex: 1,
@@ -412,81 +512,123 @@ const styles = StyleSheet.create({
         color: COLORS.muted,
         textAlign: 'center',
     },
+    directorySection: {
+        marginTop: 4,
+    },
+    directoryHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    directoryTitle: {
+        color: COLORS.text,
+        fontSize: 28,
+        fontWeight: '700',
+    },
+    sortButton: {
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.white,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    sortText: {
+        color: COLORS.muted,
+        fontSize: 12,
+        fontWeight: '700',
+        letterSpacing: 0.2,
+    },
+    sortOptionsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 10,
+    },
+    sortOptionChip: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        backgroundColor: COLORS.white,
+    },
+    sortOptionChipActive: {
+        borderColor: COLORS.accent,
+        backgroundColor: COLORS.bgTint,
+    },
+    sortOptionText: {
+        fontSize: 12,
+        color: COLORS.muted,
+        fontWeight: '600',
+    },
+    sortOptionTextActive: {
+        color: COLORS.accent,
+    },
     staffList: {
         gap: 12,
         paddingBottom: 20,
     },
     staffCard: {
         backgroundColor: COLORS.white,
-        borderRadius: 14,
-        padding: 14,
+        borderRadius: 24,
+        paddingHorizontal: 14,
+        paddingVertical: 14,
         borderWidth: 1,
         borderColor: COLORS.border,
         shadowColor: '#3C2B20',
-        shadowOpacity: 0.08,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.07,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
         elevation: 2,
     },
     staffHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 12,
+        justifyContent: 'flex-start',
+        marginBottom: 10,
     },
     staffInfo: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 10,
         flex: 1,
     },
-    staffIconWrap: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: COLORS.bgTint,
+    avatarWrap: {
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        backgroundColor: COLORS.iconSoft,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    avatarText: {
+        color: COLORS.accent,
+        fontSize: 16,
+        fontWeight: '700',
     },
     staffDetails: {
         flex: 1,
     },
     staffName: {
-        fontSize: 14,
+        fontSize: 17,
         fontWeight: '700',
         color: COLORS.text,
     },
     staffPosition: {
-        fontSize: 12,
+        fontSize: 13,
         color: COLORS.muted,
         marginTop: 2,
     },
-    statusBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 12,
-    },
-    statusBadgeActive: {
-        backgroundColor: COLORS.statusActive,
-    },
-    statusBadgeInactive: {
-        backgroundColor: COLORS.statusInactive,
-    },
-    statusBadgeText: {
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    statusBadgeTextActive: {
-        color: COLORS.success,
-    },
-    statusBadgeTextInactive: {
-        color: '#9A9A9A',
-    },
     staffMeta: {
-        gap: 6,
-        borderTopWidth: 1,
-        borderTopColor: COLORS.border,
-        paddingTop: 10,
+        gap: 5,
+        paddingTop: 3,
+        paddingLeft: 62,
     },
     metaRow: {
         flexDirection: 'row',
@@ -499,6 +641,22 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     spacer: {
-        height: 20,
+        height: 90,
+    },
+    floatingAddButton: {
+        position: 'absolute',
+        right: 20,
+        bottom: 28,
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        backgroundColor: COLORS.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#1E1210',
+        shadowOpacity: 0.25,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 5,
     },
 });

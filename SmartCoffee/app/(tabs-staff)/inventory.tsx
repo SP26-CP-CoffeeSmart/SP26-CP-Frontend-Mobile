@@ -36,6 +36,8 @@ interface ShopInventoryItem {
     minStock?: number;
     expirationDate?: string;
     measurement?: string;
+    imageUrl?: string;
+    image?: string;
     ingredient?: Ingredient;
 }
 
@@ -203,7 +205,7 @@ export default function InventoryScreen() {
 
     const renderItem = ({ item }: { item: ShopInventoryItem }) => {
         const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
-        const ingredientImage = item.ingredient?.image;
+        const ingredientImage = item.image || item.imageUrl || item.ingredient?.image;
         const ingredientCategory = item.ingredient?.category || 'Uncategorized';
         const quantity = Number(item.quantity ?? 0);
         const measurement = item.measurement ?? 'units';
