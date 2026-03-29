@@ -149,6 +149,7 @@ export const API_ENDPOINTS = {
     },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
     updateStatus: (orderId: number, status: string) => `${AUTH_BASE_URL}/Order/${orderId}/status?status=${status}`,
+    updateStatusBody: (orderId: number) => `${AUTH_BASE_URL}/Order/${orderId}/status`,
   },
   supplier: {
     list: () => `${AUTH_BASE_URL}/Supplier`,
