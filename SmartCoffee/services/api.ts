@@ -133,7 +133,7 @@ export const API_ENDPOINTS = {
     batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
     getByMenuItem: (menuItemId: number) => `${AUTH_BASE_URL}/DailySale/by-menu-item/${menuItemId}`,
   },
-  order: {
+    order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
     byOwner: (
       ownerId: number,
@@ -148,12 +148,13 @@ export const API_ENDPOINTS = {
       return `${AUTH_BASE_URL}/Order/by-owner/${ownerId}${qs ? `?${qs}` : ''}`;
     },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
+    updateStatus: (orderId: number, status: string) => `${AUTH_BASE_URL}/Order/${orderId}/status?status=${status}`,
   },
   supplier: {
     list: () => `${AUTH_BASE_URL}/Supplier`,
   },
   supplierProduct: {
-    list: () => `${AUTH_BASE_URL}/SupplierProduct`,
+    list: (page = 1, pageSize = 500) => `${AUTH_BASE_URL}/SupplierProduct?page=${page}&pageSize=${pageSize}`,
   },
   importNote: {
     create: () => `${AUTH_BASE_URL}/ImportNote`,
@@ -176,6 +177,7 @@ export const API_ENDPOINTS = {
     topUpOrders: () => `${AUTH_BASE_URL}/Wallet/top-up-orders`,
     withdraw: () => `${AUTH_BASE_URL}/Wallet/withdraw`,
     verifyWithdraw: () => `${AUTH_BASE_URL}/Wallet/verify-withdraw`,
+    cancelOrderPayment: (orderCode: number | string) => `${AUTH_BASE_URL}/Wallet/cancel-order-payment?orderCode=${orderCode}`,
   },
   subscription: {
     byShop: (shopId: number) => `${AUTH_BASE_URL}/Subscription/by-shop/${shopId}`,

@@ -1,6 +1,9 @@
 import React from 'react';
 import {
+  Image,
+  ImageBackground,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -8,75 +11,117 @@ import {
   Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 
+// Match sign-in styles
 const COLORS = {
   bg: '#F7F3EF',
   text: '#3C2A21',
   muted: '#8E7B6F',
   border: '#B08B61',
-  accent: '#9C7A4B',
+  accent: '#5B3216',
   white: '#FFFFFF',
+  shadow: 'rgba(0,0,0,0.08)',
 };
+
+const BACKGROUND_IMAGE = require('../assets/background.png');
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
-        </Pressable>
+    <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <View style={styles.card}>
+            <Pressable style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color={COLORS.text} />
+            </Pressable>
 
-        <View style={styles.headerBlock}>
-          <Text style={styles.title}>SmartCoffee</Text>
-        </View>
+            <View style={styles.heroBlock}>
+              <Image source={BACKGROUND_IMAGE} style={styles.heroImage} resizeMode="contain" />
+              <Text style={styles.title}>Recovery Options</Text>
+              <Text style={styles.subtitle}>Enter your details to reset your password</Text>
+            </View>
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Phone Number/Email</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your email/phonenumber"
-            placeholderTextColor={COLORS.muted}
-          />
-        </View>
+            <View style={styles.fieldGroup}>
+              <Text style={styles.label}>Email/Phone</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your Email/Phone"
+                placeholderTextColor={COLORS.muted}
+                autoCapitalize="none"
+              />
+            </View>
 
-        <Pressable style={styles.primaryButton} onPress={() => router.push('/otp')}>
-          <Text style={styles.primaryButtonText}>Send</Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
+            <Pressable style={styles.primaryButton} onPress={() => router.push('/otp')}>
+              <Text style={styles.primaryButtonText}>Send OTP</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  background: {
     flex: 1,
     backgroundColor: COLORS.bg,
   },
-  container: {
+  backgroundImage: {
+    opacity: 0.18,
+  },
+  safeArea: {
     flex: 1,
-    paddingHorizontal: 28,
-    paddingVertical: 36,
+  },
+  container: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
     justifyContent: 'center',
+  },
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingTop: 16,
+    paddingBottom: 24,
+    shadowColor: COLORS.shadow,
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 40,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    marginLeft: -8,
   },
-  headerBlock: {
+  heroBlock: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 22,
+    gap: 8,
+  },
+  heroImage: {
+    width: 100,
+    height: 100,
   },
   title: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '700',
     color: COLORS.text,
+    textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: 12,
+    color: COLORS.muted,
+    textAlign: 'center',
   },
   fieldGroup: {
     marginBottom: 22,
@@ -101,6 +146,7 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     paddingVertical: 14,
     alignItems: 'center',
+    marginTop: 8,
   },
   primaryButtonText: {
     color: COLORS.white,
