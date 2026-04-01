@@ -14,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCart } from '@/context/cart-context';
 import { Swipeable } from 'react-native-gesture-handler';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -31,14 +33,22 @@ const headerImage =
 const fallbackItemImage =
   'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
 
+type StockCheckResponseItem = {
+  productId: number;
+  stock?: number | null;
+  holdStock?: number | null;
+  availableStock?: number | null;
+};
+
 export default function CartPage() {
   const router = useRouter();
   const { items, updateQuantity, removeItem, clearCart } = useCart();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [hasInitializedSelection, setHasInitializedSelection] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [stockIssueLines, setStockIssueLines] = useState<string[]>([]);
+  const [showStockIssueModal, setShowStockIssueModal] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
@@ -122,11 +132,65 @@ export default function CartPage() {
       return;
     }
 
-    const selectedIdsArray = Array.from(selectedIds);
-    router.push({
-      pathname: '/checkout',
-      params: { selectedIds: JSON.stringify(selectedIdsArray) }
-    });
+    setIsSubmitting(true);
+
+    try {
+      const productIds = selectedItems.map((item) => item.productId);
+
+      const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.checkAvailableStock(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(productIds),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Unable to verify stock: ${response.status}`);
+      }
+
+      const data = (await response.json()) as StockCheckResponseItem[];
+      const stockItems = Array.isArray(data) ? data : [];
+      const byProductId = new Map<number, StockCheckResponseItem>();
+
+      stockItems.forEach((stockItem) => {
+        if (typeof stockItem.productId === 'number') {
+          byProductId.set(stockItem.productId, stockItem);
+        }
+      });
+
+      const invalidItems: string[] = [];
+
+      selectedItems.forEach((selected) => {
+        const latest = byProductId.get(selected.productId);
+        const availableRaw =
+          latest?.availableStock ??
+          (Number(latest?.stock ?? 0) - Number(latest?.holdStock ?? 0));
+        const available = Math.max(0, Math.floor(Number(availableRaw) || 0));
+
+        if (!latest || selected.quantity > available) {
+          invalidItems.push(`${selected.name}: max ${available}`);
+        }
+      });
+
+      if (invalidItems.length > 0) {
+        setStockIssueLines(invalidItems);
+        setShowStockIssueModal(true);
+        return;
+      }
+
+      const selectedIdsArray = Array.from(selectedIds);
+      router.push({
+        pathname: '/checkout',
+        params: { selectedIds: JSON.stringify(selectedIdsArray) },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to verify stock.';
+      Alert.alert('Purchase', message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   useEffect(() => {
@@ -297,51 +361,45 @@ export default function CartPage() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.purchaseItemsBtn, !hasSelection && styles.purchaseItemsBtnDisabled]}
+              style={[
+                styles.purchaseItemsBtn,
+                (!hasSelection || isSubmitting) && styles.purchaseItemsBtnDisabled,
+              ]}
               onPress={handlePurchase}
-              disabled={!hasSelection}
+              disabled={!hasSelection || isSubmitting}
             >
               <Ionicons name="cart-outline" size={18} color={COLORS.white} style={{ marginRight: 6 }} />
               <Text style={styles.purchaseItemsText}>
-                Purchase Items
+                {isSubmitting ? 'Purchasing...' : 'Purchase Items'}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
       </View>
 
-      {/* Purchase Confirmation Modal */}
+      {/* Stock Alert Modal */}
       <Modal
-        visible={showConfirmModal}
+        visible={showStockIssueModal}
         transparent
         animationType="fade"
-        onRequestClose={() => setShowConfirmModal(false)}
+        onRequestClose={() => setShowStockIssueModal(false)}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.confirmCard}>
-            <Text style={styles.confirmTitle}>Confirm Purchase</Text>
+            <Text style={styles.confirmTitle}>Stock Limit Reached</Text>
             <Text style={styles.confirmMessage}>
-              Are you sure you want to place this order?
+              Please adjust quantity for these items:
             </Text>
-            <View style={styles.confirmActions}>
-              <TouchableOpacity
-                style={styles.confirmCancelBtn}
-                onPress={() => setShowConfirmModal(false)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.confirmCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.confirmOkBtn}
-                onPress={() => {
-                  setShowConfirmModal(false);
-                  handlePurchase();
-                }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.confirmOkText}>Confirm</Text>
-              </TouchableOpacity>
+            <View style={styles.stockIssueBox}>
+              <Text style={styles.stockIssueText}>{stockIssueLines.join('\n')}</Text>
             </View>
+            <TouchableOpacity
+              style={styles.confirmOkBtnFull}
+              onPress={() => setShowStockIssueModal(false)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.confirmOkText}>Understood</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -709,9 +767,31 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.text,
     alignItems: 'center',
   },
+  confirmOkBtnFull: {
+    width: '100%',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    backgroundColor: COLORS.text,
+    alignItems: 'center',
+  },
   confirmOkText: {
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.white,
+  },
+  stockIssueBox: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.bg,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+  },
+  stockIssueText: {
+    fontSize: 13,
+    color: COLORS.text,
+    lineHeight: 20,
   },
 });

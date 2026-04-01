@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Image, StyleSheet, View } from 'react-native';
+import { Alert, Animated, Image, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
@@ -38,6 +38,7 @@ export default function AiLoadingScreen() {
   const textOpacity = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   const isForecastErrorMode = params.mode === 'forecast-error';
+  const errorModalShownRef = useRef(false);
   const forecastErrorMessage =
     typeof params.message === 'string'
       ? params.message
@@ -133,15 +134,44 @@ export default function AiLoadingScreen() {
         }
       };
 
+      const parseErrorMessage = (error: unknown) => {
+        if (error instanceof Error && error.message) {
+          const trimmed = error.message.trim();
+          try {
+            const parsed = JSON.parse(trimmed) as { error?: string; message?: string };
+            if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+              return parsed.error.trim();
+            }
+            if (typeof parsed?.message === 'string' && parsed.message.trim()) {
+              return parsed.message.trim();
+            }
+          } catch {
+            // keep original error text
+          }
+          return trimmed;
+        }
+        return 'Không thể tải gợi ý mua hàng từ AI.';
+      };
+
+      const showErrorAndGoBack = (message: string) => {
+        if (errorModalShownRef.current) return;
+        errorModalShownRef.current = true;
+        Alert.alert('AI Order Suggestions', message, [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.replace('/product-page');
+            },
+          },
+        ]);
+      };
+
       if (!coffeeShopId) {
         if (isCancelled) return;
         clear();
         await ensureMinDisplayTime();
         if (isCancelled) return;
-        router.replace({
-          pathname: '/ai-order-suggestions',
-          params: { error: 'Không tìm thấy Coffee Shop của bạn.' },
-        });
+        showErrorAndGoBack('Không tìm thấy Coffee Shop của bạn.');
         return;
       }
 
@@ -203,15 +233,11 @@ export default function AiLoadingScreen() {
           pathname: '/ai-order-suggestions',
         });
       } catch (error) {
-        console.error('Failed to load AI order suggestions:', error);
         if (isCancelled) return;
         clear();
         await ensureMinDisplayTime();
         if (isCancelled) return;
-        router.replace({
-          pathname: '/ai-order-suggestions',
-          params: { error: 'Không thể tải gợi ý mua hàng từ AI.' },
-        });
+        showErrorAndGoBack(parseErrorMessage(error));
       }
     };
 
@@ -332,7 +358,6 @@ const styles = StyleSheet.create({
   errorMessage: {
     fontSize: 14,
     lineHeight: 20,
-    fontFamily: Fonts.regular,
     color: '#4B2E1E',
     textAlign: 'center',
   },
