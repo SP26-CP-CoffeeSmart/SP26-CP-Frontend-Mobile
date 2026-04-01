@@ -133,7 +133,7 @@ export const API_ENDPOINTS = {
     batch: () => `${AUTH_BASE_URL}/DailySale/batch`,
     getByMenuItem: (menuItemId: number) => `${AUTH_BASE_URL}/DailySale/by-menu-item/${menuItemId}`,
   },
-    order: {
+  order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
     byOwner: (
       ownerId: number,
@@ -156,6 +156,7 @@ export const API_ENDPOINTS = {
   },
   supplierProduct: {
     list: (page = 1, pageSize = 500) => `${AUTH_BASE_URL}/SupplierProduct?page=${page}&pageSize=${pageSize}`,
+    checkAvailableStock: () => `${AUTH_BASE_URL}/SupplierProduct/check-available-stock`,
   },
   importNote: {
     create: () => `${AUTH_BASE_URL}/ImportNote`,
