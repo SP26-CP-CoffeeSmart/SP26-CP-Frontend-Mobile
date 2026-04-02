@@ -22,10 +22,7 @@ type SupplierProductStockItem = {
   productId: number;
   stock?: number | null;
   holdStock?: number | null;
-};
-
-type SupplierProductListResponse = {
-  items?: SupplierProductStockItem[];
+  availableStock?: number | null;
 };
 
 export default function AIOrderSuggestionsScreen() {
@@ -36,6 +33,18 @@ export default function AIOrderSuggestionsScreen() {
   const [error] = useState<string | null>(() => (params.error ? String(params.error) : null));
   const [isReviewing, setIsReviewing] = useState(false);
   const [availableStockByProduct, setAvailableStockByProduct] = useState<Record<number, number>>({});
+  const suggestionProductIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          suggestions
+            .map((item) => item.productId)
+            .filter((productId) => typeof productId === 'number')
+        )
+      ),
+    [suggestions]
+  );
+  const suggestionIdsKey = useMemo(() => suggestionProductIds.join(','), [suggestionProductIds]);
 
   const getSafeQty = (rawQty: unknown) => {
     const num =
@@ -70,30 +79,37 @@ export default function AIOrderSuggestionsScreen() {
     let isCancelled = false;
 
     const loadLatestStock = async () => {
+      if (suggestionProductIds.length === 0) {
+        setAvailableStockByProduct({});
+        return;
+      }
+
       try {
-        const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.list(), {
+        const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.checkAvailableStock(), {
+          method: 'POST',
           headers: {
             Accept: '*/*',
+            'Content-Type': 'application/json',
           },
+          body: JSON.stringify(suggestionProductIds),
         });
 
         if (!response.ok) {
           return;
         }
 
-        const data = (await response.json()) as SupplierProductListResponse | SupplierProductStockItem[];
-        const items = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.items)
-            ? data.items
-            : [];
+        const data = (await response.json()) as SupplierProductStockItem[];
+        const items = Array.isArray(data) ? data : [];
 
         if (isCancelled) return;
 
         const nextMap: Record<number, number> = {};
         items.forEach((item) => {
           if (typeof item.productId !== 'number') return;
-          const available = Math.max(0, Number(item.stock ?? 0) - Number(item.holdStock ?? 0));
+          const available = Math.max(
+            0,
+            Number(item.availableStock ?? Number(item.stock ?? 0) - Number(item.holdStock ?? 0))
+          );
           nextMap[item.productId] = available;
         });
         setAvailableStockByProduct(nextMap);
@@ -107,7 +123,6 @@ export default function AIOrderSuggestionsScreen() {
 
             const currentQty = getSafeQty(item.qtyNeeded);
             const nextQty = limit > 0 ? Math.min(currentQty, limit) : currentQty;
-
             return {
               ...item,
               availableStock: limit,
@@ -125,7 +140,7 @@ export default function AIOrderSuggestionsScreen() {
     return () => {
       isCancelled = true;
     };
-  }, [setItems]);
+  }, [setItems, suggestionIdsKey, suggestionProductIds]);
 
   const filteredSuggestions = useMemo(() => {
     const source = suggestions;

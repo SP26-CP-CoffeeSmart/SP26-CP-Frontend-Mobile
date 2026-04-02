@@ -71,19 +71,6 @@ type GhnFeeResponse = {
     service_fee: number;
 };
 
-type SupplierProductStockItem = {
-    productId: number;
-    stock?: number | null;
-    holdStock?: number | null;
-    ingredient?: {
-        name?: string | null;
-    };
-};
-
-type SupplierProductListResponse = {
-    items?: SupplierProductStockItem[];
-};
-
 export default function CheckoutPage() {
     const router = useRouter();
     const params = useLocalSearchParams();
@@ -143,7 +130,7 @@ export default function CheckoutPage() {
 
     const isFromAi = params.source === 'ai';
     const isFromReorder = params.source === 'reorder';
-    
+
     const [reorderItems, setReorderItems] = useState<CartItem[]>([]);
 
     useEffect(() => {
@@ -520,76 +507,9 @@ export default function CheckoutPage() {
     const formatVnd = (value: number) =>
         value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
-    const validateAvailableStock = async () => {
-        const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.list(), {
-            method: 'GET',
-            headers: {
-                Accept: '*/*',
-            },
-        });
-
-        if (!response.ok) {
-            throw new Error(`Unable to verify stock: ${response.status}`);
-        }
-
-        const data = (await response.json()) as SupplierProductListResponse | SupplierProductStockItem[];
-        const apiItems = Array.isArray(data)
-            ? data
-            : Array.isArray(data?.items)
-                ? data.items
-                : [];
-
-        const byProductId = new Map<number, SupplierProductStockItem>();
-        apiItems.forEach((item) => {
-            if (typeof item.productId === 'number') {
-                byProductId.set(item.productId, item);
-            }
-        });
-
-        const invalidItems: string[] = [];
-
-        selectedItems.forEach((selected) => {
-            const latest = byProductId.get(selected.productId);
-            if (!latest) {
-                invalidItems.push(`${selected.name}: unavailable`);
-                return;
-            }
-
-            const stock = Number(latest.stock ?? 0);
-            const holdStock = Number(latest.holdStock ?? 0);
-            const available = Math.max(0, stock - holdStock);
-
-            if (selected.quantity > available) {
-                const displayName = latest.ingredient?.name?.trim() || selected.name;
-                invalidItems.push(`${displayName}: max ${available}`);
-            }
-        });
-
-        if (invalidItems.length > 0) {
-            Alert.alert(
-                'Stock limit reached',
-                `Please reduce quantity for:\n${invalidItems.join('\n')}`
-            );
-            return false;
-        }
-
-        return true;
-    };
-
-    const handlePlaceOrder = async () => {
+    const handlePlaceOrder = () => {
         if (selectedItems.length === 0) {
             Alert.alert('Checkout', 'No items selected for checkout.');
-            return;
-        }
-
-        try {
-            const canProceed = await validateAvailableStock();
-            if (!canProceed) {
-                return;
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unable to verify stock.';
-            Alert.alert('Checkout', message);
             return;
         }
 
@@ -870,19 +790,19 @@ export default function CheckoutPage() {
         if (payosPurpose === 'bankTransfer' && payosOrderCode != null) {
             const url = API_ENDPOINTS.wallet.cancelOrderPayment(payosOrderCode);
             console.log(`[PayOS Cancel] Calling endpoint: ${url} with orderCode: ${payosOrderCode}`);
-            
+
             authorizedFetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
             })
-            .then(res => console.log(`[PayOS Cancel] API Response status: ${res.status}`))
-            .catch(err => console.error('[PayOS Cancel Error]', err));
+                .then(res => console.log(`[PayOS Cancel] API Response status: ${res.status}`))
+                .catch(err => console.error('[PayOS Cancel Error]', err));
         }
 
         setPayosPurpose(null);
         setPayosOrderCode(null);
         successTriggeredRef.current = false;
-        
+
         if (closeTimerRef.current) {
             clearTimeout(closeTimerRef.current);
             closeTimerRef.current = null;
