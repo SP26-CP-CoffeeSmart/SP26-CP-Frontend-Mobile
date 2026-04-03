@@ -54,7 +54,53 @@ export default function CartPage() {
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
   const allIds = useMemo(() => items.map((item) => item.productId), [items]);
+  const idsKey = useMemo(() => allIds.join(','), [allIds]);
   const isAllSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+
+  // Fetch real-time stock
+  const [availableStockByProduct, setAvailableStockByProduct] = useState<Record<number, number | null>>({});
+
+  useEffect(() => {
+    let isCancelled = false;
+    const loadLatestStock = async () => {
+      if (allIds.length === 0) {
+        setAvailableStockByProduct({});
+        return;
+      }
+      try {
+        const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.checkAvailableStock(), {
+          method: 'POST',
+          headers: {
+            Accept: '*/*',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(allIds),
+        });
+
+        if (!response.ok) return;
+
+        const stockItems = await response.json() as StockCheckResponseItem[];
+
+        if (isCancelled) return;
+
+        const nextMap: Record<number, number> = {};
+        stockItems.forEach((item) => {
+          if (typeof item.productId !== 'number') return;
+          const availableRaw =
+            item.availableStock ??
+            (Number(item.stock ?? 0) - Number(item.holdStock ?? 0));
+          nextMap[item.productId] = Math.max(0, Math.floor(Number(availableRaw) || 0));
+        });
+        setAvailableStockByProduct(nextMap);
+      } catch {
+        // silently fail and fallback to context
+      }
+    };
+    loadLatestStock();
+    return () => {
+      isCancelled = true;
+    };
+  }, [idsKey, allIds]);
 
   useEffect(() => {
     if (!hasInitializedSelection && items.length > 0) {
@@ -150,8 +196,7 @@ export default function CartPage() {
         throw new Error(`Unable to verify stock: ${response.status}`);
       }
 
-      const data = (await response.json()) as StockCheckResponseItem[];
-      const stockItems = Array.isArray(data) ? data : [];
+      const stockItems = await response.json() as StockCheckResponseItem[];
       const byProductId = new Map<number, StockCheckResponseItem>();
 
       stockItems.forEach((stockItem) => {
@@ -278,6 +323,12 @@ export default function CartPage() {
                       <View style={styles.shopItemsContainer}>
                         {group.items.map((item, idx) => {
                           const isSelected = selectedIds.has(item.productId);
+                          const limitRaw = availableStockByProduct[item.productId];
+                          const limit = typeof limitRaw === 'number'
+                            ? limitRaw
+                            : (typeof item.availableStock === 'number' ? Math.max(0, Math.floor(item.availableStock)) : null);
+                          const isOutOfStock = limit !== null && limit === 0;
+
                           return (
                             <View key={item.productId}>
                               {idx > 0 && <View style={styles.itemDivider} />}
@@ -286,57 +337,60 @@ export default function CartPage() {
                                 rightThreshold={32}
                               >
                                 <TouchableOpacity
-                                  style={[styles.itemCard, isSelected && styles.itemCardSelected]}
+                                  style={[styles.itemCardContainer, isSelected && styles.itemCardSelected]}
                                   onPress={() => toggleItem(item.productId)}
                                   activeOpacity={0.55}
                                 >
-                                  <View style={styles.itemInfo}>
-                                    <Text style={styles.itemName}>{item.name}</Text>
-                                    <Text style={styles.itemDesc}>{item.category}</Text>
-                                    <Text style={styles.itemPrice}>
-                                      {formatVnd(item.unitPrice)}vnd/{item.measurement}
-                                    </Text>
-                                    <View style={styles.qtyRow}>
-                                      <TouchableOpacity
-                                        style={styles.qtyButton}
-                                        onPress={() =>
-                                          updateQuantity(item.productId, Math.max(1, item.quantity - 1))
-                                        }
-                                      >
-                                        <Ionicons name="remove" size={14} color={COLORS.text} />
-                                      </TouchableOpacity>
-                                      <Text style={styles.qtyValue}>{item.quantity}</Text>
-                                      <TouchableOpacity
-                                        style={styles.qtyButton}
-                                        onPress={() => {
-                                          const limit =
-                                            typeof item.availableStock === 'number'
-                                              ? Math.max(0, Math.floor(item.availableStock))
-                                              : null;
-
-                                          if (limit !== null && item.quantity >= limit) {
-                                            showToast(`Max available: ${limit}`);
-                                            return;
+                                  <View style={[styles.itemCardContent, isOutOfStock && { opacity: 0.4 }]}>
+                                    <View style={styles.itemInfo}>
+                                      <Text style={styles.itemName}>{item.name}</Text>
+                                      <Text style={styles.itemDesc}>{item.category}</Text>
+                                      <Text style={styles.itemPrice}>
+                                        {formatVnd(item.unitPrice)}vnd/{item.measurement}
+                                      </Text>
+                                      <View style={styles.qtyRow}>
+                                        <TouchableOpacity
+                                          style={styles.qtyButton}
+                                          onPress={() =>
+                                            updateQuantity(item.productId, Math.max(1, item.quantity - 1))
                                           }
+                                        >
+                                          <Ionicons name="remove" size={14} color={COLORS.text} />
+                                        </TouchableOpacity>
+                                        <Text style={styles.qtyValue}>{item.quantity}</Text>
+                                        <TouchableOpacity
+                                          style={styles.qtyButton}
+                                          onPress={() => {
+                                            if (limit !== null && item.quantity >= limit) {
+                                              showToast(`Max available: ${limit}`);
+                                              return;
+                                            }
 
-                                          updateQuantity(item.productId, item.quantity + 1);
-                                        }}
-                                      >
-                                        <Ionicons name="add" size={14} color={COLORS.text} />
-                                      </TouchableOpacity>
+                                            updateQuantity(item.productId, item.quantity + 1);
+                                          }}
+                                        >
+                                          <Ionicons name="add" size={14} color={COLORS.text} />
+                                        </TouchableOpacity>
+                                      </View>
+                                    </View>
+                                    <Image
+                                      source={{ uri: item.image ?? fallbackItemImage }}
+                                      style={styles.itemImage}
+                                    />
+                                    <View style={styles.itemSelectOverlay}>
+                                      <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
+                                        {isSelected ? (
+                                          <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                                        ) : null}
+                                      </View>
                                     </View>
                                   </View>
-                                  <Image
-                                    source={{ uri: item.image ?? fallbackItemImage }}
-                                    style={styles.itemImage}
-                                  />
-                                  <View style={styles.itemSelectOverlay}>
-                                    <View style={[styles.checkbox, isSelected && styles.checkboxChecked]}>
-                                      {isSelected ? (
-                                        <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                                      ) : null}
+
+                                  {isOutOfStock && (
+                                    <View style={styles.issueOverlayContainer}>
+                                      <Text style={styles.outOfStockBadge}>Out of Stock</Text>
                                     </View>
-                                  </View>
+                                  )}
                                 </TouchableOpacity>
                               </Swipeable>
                             </View>
@@ -524,13 +578,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
   },
-  itemCard: {
+  itemCardContainer: {
     backgroundColor: COLORS.white,
     padding: 10,
+    position: 'relative',
+  },
+  itemCardContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    position: 'relative',
   },
   itemCardSelected: {
     backgroundColor: '#FDF6EC',
@@ -793,5 +849,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.text,
     lineHeight: 20,
+  },
+  issueOverlayContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  outOfStockBadge: {
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    color: COLORS.white,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    fontFamily: 'Outfit-Bold',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
