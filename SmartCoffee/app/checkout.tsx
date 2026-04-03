@@ -24,6 +24,13 @@ import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
+type StockCheckResponseItem = {
+    productId: number;
+    stock?: number | null;
+    holdStock?: number | null;
+    availableStock?: number | null;
+};
+
 const COLORS = {
     bg: '#F7F3EF',
     text: '#3C2A21',
@@ -93,6 +100,7 @@ export default function CheckoutPage() {
     const [shippingErrorBySupplier, setShippingErrorBySupplier] = useState<Record<number, string | null>>({});
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [stockIssues, setStockIssues] = useState<Record<number, { available: number, requested: number }>>({});
 
     // --- Payment Method Selection ---
     const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
@@ -507,14 +515,74 @@ export default function CheckoutPage() {
     const formatVnd = (value: number) =>
         value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
-    const handlePlaceOrder = () => {
+    const handlePlaceOrder = async () => {
         if (selectedItems.length === 0) {
             Alert.alert('Checkout', 'No items selected for checkout.');
             return;
         }
 
-        // Show payment method selection
-        setShowPaymentMethodModal(true);
+        setIsSubmitting(true);
+        setStockIssues({});
+
+        try {
+            const productIds = selectedItems.map((item) => item.productId);
+
+            const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.checkAvailableStock(), {
+              method: 'POST',
+              headers: {
+                Accept: '*/*',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(productIds),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Unable to verify stock: ${response.status}`);
+            }
+
+            const stockItems = await response.json() as StockCheckResponseItem[];
+            const byProductId = new Map<number, StockCheckResponseItem>();
+
+            stockItems.forEach((stockItem) => {
+              if (typeof stockItem.productId === 'number') {
+                byProductId.set(stockItem.productId, stockItem);
+              }
+            });
+
+            const newStockIssues: Record<number, { available: number, requested: number }> = {};
+            let hasIssue = false;
+
+            selectedItems.forEach((selected) => {
+              const latest = byProductId.get(selected.productId);
+              const availableRaw =
+                latest?.availableStock ??
+                (Number(latest?.stock ?? 0) - Number(latest?.holdStock ?? 0));
+              const available = Math.max(0, Math.floor(Number(availableRaw) || 0));
+
+              if (!latest || selected.quantity > available) {
+                newStockIssues[selected.productId] = { available, requested: selected.quantity };
+                hasIssue = true;
+              }
+            });
+
+            if (hasIssue) {
+                setStockIssues(newStockIssues);
+                Toast.show({
+                    type: 'error',
+                    text1: 'Stock Issue',
+                    text2: 'Some items do not have enough stock. Please reduce their quantities.',
+                });
+                return;
+            }
+
+            // Show payment method selection
+            setShowPaymentMethodModal(true);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unable to verify stock.';
+            Alert.alert('Checkout', message);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const submitWalletOrder = async () => {
@@ -884,22 +952,40 @@ export default function CheckoutPage() {
                                 <Text style={styles.supplierName}>{group.supplierName}</Text>
                             </View>
 
-                            {group.items.map((item, index) => (
-                                <View key={item.productId} style={[styles.itemCard, index > 0 && styles.itemBorderTop]}>
-                                    <Image
-                                        source={{ uri: (item.image && item.image !== 'null') ? item.image : FALLBACK_PRODUCT_IMAGE }}
-                                        style={styles.itemImage}
-                                    />
-                                    <View style={styles.itemDetails}>
-                                        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                                        <Text style={styles.itemCategory}>{item.category}</Text>
-                                        <View style={styles.itemPriceRow}>
-                                            <Text style={styles.itemPrice}>{formatVnd(item.unitPrice)} VND</Text>
-                                            <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+                            {group.items.map((item, index) => {
+                                const issue = stockIssues[item.productId];
+                                const isOutOfStock = issue && issue.available === 0;
+                                const isNotEnough = issue && issue.available > 0;
+
+                                return (
+                                <View key={item.productId} style={[styles.itemCardContainer, index > 0 && styles.itemBorderTop]}>
+                                    <View style={[styles.itemCardContent, issue && { opacity: 0.4 }]}>
+                                        <Image
+                                            source={{ uri: (item.image && item.image !== 'null') ? item.image : FALLBACK_PRODUCT_IMAGE }}
+                                            style={styles.itemImage}
+                                        />
+                                        <View style={styles.itemDetails}>
+                                            <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                                            <Text style={styles.itemCategory}>{item.category}</Text>
+                                            <View style={styles.itemPriceRow}>
+                                                <Text style={styles.itemPrice}>{formatVnd(item.unitPrice)} VND</Text>
+                                                <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+                                            </View>
                                         </View>
                                     </View>
+                                    {isOutOfStock && (
+                                        <View style={styles.issueOverlayContainer}>
+                                            <Text style={styles.outOfStockBadge}>Out of Stock</Text>
+                                        </View>
+                                    )}
+                                    {isNotEnough && (
+                                        <View style={styles.issueOverlayContainer}>
+                                            <Text style={styles.notEnoughBadge}>Reduce quantity to ≤ {issue.available}</Text>
+                                        </View>
+                                    )}
                                 </View>
-                            ))}
+                                );
+                            })}
 
                             <View style={styles.noteContainer}>
                                 <Text style={styles.noteLabel}>Message for Shop</Text>
@@ -1360,11 +1446,39 @@ const styles = StyleSheet.create({
         color: COLORS.textSecondary,
         lineHeight: 18,
     },
-    itemCard: {
-        flexDirection: 'row',
+    itemCardContainer: {
         paddingVertical: 12,
         marginBottom: 8,
         backgroundColor: 'transparent',
+    },
+    itemCardContent: {
+        flexDirection: 'row',
+    },
+    issueOverlayContainer: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 10,
+    },
+    outOfStockBadge: {
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        color: COLORS.white,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        fontFamily: 'Outfit-Bold',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    notEnoughBadge: {
+        backgroundColor: 'rgba(178, 59, 59, 0.95)',
+        color: COLORS.white,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        fontFamily: 'Outfit-Bold',
+        fontWeight: 'bold',
+        fontSize: 12,
     },
     itemBorderTop: {
         borderTopWidth: 1,
