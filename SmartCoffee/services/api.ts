@@ -199,7 +199,17 @@ export const API_ENDPOINTS = {
       `${AUTH_BASE_URL}/Feedback/MenuItem?page=${page}&pageSize=${pageSize}`,
   },
   transaction: {
-    listByUser: (userId: number) => `${AUTH_BASE_URL}/Transaction/list/${userId}`,
+    listByUser: (
+      userId: number,
+      params?: { page?: number; pageSize?: number; paymentMethod?: string }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      if (params?.paymentMethod) query.set('paymentMethod', params.paymentMethod);
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Transaction/list/${userId}${qs ? `?${qs}` : ''}`;
+    },
   },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
