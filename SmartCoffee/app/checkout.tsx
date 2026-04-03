@@ -540,10 +540,7 @@ export default function CheckoutPage() {
               throw new Error(`Unable to verify stock: ${response.status}`);
             }
 
-            const responseData = await response.json();
-            const stockItems = (Array.isArray(responseData) 
-              ? responseData 
-              : (Array.isArray(responseData?.items) ? responseData.items : [])) as StockCheckResponseItem[];
+            const stockItems = await response.json() as StockCheckResponseItem[];
             const byProductId = new Map<number, StockCheckResponseItem>();
 
             stockItems.forEach((stockItem) => {

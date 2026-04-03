@@ -98,10 +98,7 @@ export default function AIOrderSuggestionsScreen() {
           return;
         }
 
-        const responseData = await response.json();
-        const items = (Array.isArray(responseData)
-          ? responseData
-          : (Array.isArray(responseData?.items) ? responseData.items : [])) as SupplierProductStockItem[];
+        const items = await response.json() as SupplierProductStockItem[];
 
         if (isCancelled) return;
 
