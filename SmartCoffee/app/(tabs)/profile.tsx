@@ -22,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 import { WebView } from 'react-native-webview';
 import { Fonts } from '@/constants/theme';
+import { resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -171,13 +172,6 @@ export default function ProfileScreen() {
   const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
   const profileHeaderName = profileShopDisplay;
   const formattedBalance = walletBalance.toLocaleString('vi-VN');
-
-  const normalizeSubscription = (value: any) => {
-    if (!value) return null;
-    if (Array.isArray(value)) return value[0] ?? null;
-    if (Array.isArray(value?.data)) return value.data[0] ?? null;
-    return value?.data ?? value?.item ?? value;
-  };
 
   const getSubscriptionName = (value: any) => {
     const name =
@@ -331,7 +325,7 @@ export default function ProfileScreen() {
     return defaultFeatures;
   };
 
-  const subscriptionValue = normalizeSubscription(subscriptionData);
+  const subscriptionValue = resolveCurrentSubscription(subscriptionData);
   const subscriptionName = getSubscriptionName(subscriptionValue);
   const subscriptionBadge = getSubscriptionBadge(subscriptionValue);
   const subscriptionStatus = getSubscriptionStatus(subscriptionValue);
@@ -377,7 +371,13 @@ export default function ProfileScreen() {
     try {
       setSubscriptionLoading(true);
       setSubscriptionError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(profileCoffeeShopId));
+      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(profileCoffeeShopId), {
+        headers: {
+          Accept: '*/*',
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
       if (!response.ok) {
         throw new Error('Failed to load subscription');
       }
@@ -960,7 +960,7 @@ export default function ProfileScreen() {
 
   const formatPrice = (value?: number) => {
     if (value === null || value === undefined) return '-';
-    return `${Number(value).toLocaleString('vi-VN')} vnd`;
+    return `${Number(value).toLocaleString('vi-VN')} VND`;
   };
 
   const getTransactionStatusColor = (status?: string) => {
@@ -1081,7 +1081,7 @@ export default function ProfileScreen() {
               <Text style={styles.walletBalanceLabel}>Wallet Balance</Text>
             </View>
             <View style={styles.walletBalanceRight}>
-              <Text style={styles.walletBalanceAmount}>{formattedBalance} vnd</Text>
+              <Text style={styles.walletBalanceAmount}>{formattedBalance} VND</Text>
               <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
             </View>
           </View>
@@ -1219,7 +1219,7 @@ export default function ProfileScreen() {
                           </Text>
                           <Text style={styles.packageCardPrice}>
                             {price !== null
-                              ? `${price.toLocaleString('vi-VN')} vnd`
+                              ? `${price.toLocaleString('vi-VN')} VND`
                               : 'Contact for pricing'}
                             {duration ? <Text style={styles.packageCardPriceUnit}>/{duration}</Text> : null}
                           </Text>

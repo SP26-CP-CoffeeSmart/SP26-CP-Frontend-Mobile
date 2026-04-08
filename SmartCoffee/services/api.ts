@@ -211,6 +211,21 @@ export const API_ENDPOINTS = {
       return `${AUTH_BASE_URL}/Transaction/list/${userId}${qs ? `?${qs}` : ''}`;
     },
   },
+  notification: {
+    listByAccount: (
+      accountId: number,
+      params?: { page?: number; pageSize?: number }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Notification/account/${accountId}${qs ? `?${qs}` : ''}`;
+    },
+    unreadCount: () => `${AUTH_BASE_URL}/Notification/unread/count`,
+    markRead: (notificationId: string | number) =>
+      `${AUTH_BASE_URL}/Notification/${encodeURIComponent(String(notificationId))}/read`,
+  },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopInventory/by-shop/${shopId}`,

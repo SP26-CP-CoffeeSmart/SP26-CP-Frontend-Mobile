@@ -377,8 +377,8 @@ export default function ProductPage() {
                 item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
               const description = String(item?.description ?? '').trim();
               const priceText = item.packageSize && item.measurement
-                ? `${formatVnd(item.price)} vnd/(${item.packageSize}${item.measurement})`
-                : `${formatVnd(item.price)} vnd/${item.measurement || 'unit'}`;
+                ? `${formatVnd(item.price)} VND/(${item.packageSize}${item.measurement})`
+                : `${formatVnd(item.price)} VND/${item.measurement || 'unit'}`;
               const stockText =
                 typeof item.stock === 'number' ? String(item.stock) : 'N/A';
 

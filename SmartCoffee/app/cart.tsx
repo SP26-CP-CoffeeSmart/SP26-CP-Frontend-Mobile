@@ -346,7 +346,7 @@ export default function CartPage() {
                                       <Text style={styles.itemName}>{item.name}</Text>
                                       <Text style={styles.itemDesc}>{item.category}</Text>
                                       <Text style={styles.itemPrice}>
-                                        {formatVnd(item.unitPrice)}vnd/{item.measurement}
+                                        {formatVnd(item.unitPrice)} VND/{item.measurement}
                                       </Text>
                                       <View style={styles.qtyRow}>
                                         <TouchableOpacity

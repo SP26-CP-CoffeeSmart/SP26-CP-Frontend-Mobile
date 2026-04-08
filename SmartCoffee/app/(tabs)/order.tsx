@@ -397,7 +397,7 @@ export default function OrderScreen() {
                       <Text style={styles.orderDesc}>{order.status ?? 'Pending'}</Text>
                     )}
                     <Text style={styles.orderPrice}>
-                      {formatVnd(order.totalPrice ?? 0)} vnd
+                      {formatVnd(order.totalPrice ?? 0)} VND
                     </Text>
                   </View>
                   <View style={styles.actionButtons}>
@@ -500,14 +500,14 @@ export default function OrderScreen() {
                 <Text style={styles.detailLabel}>Shipping Fee:</Text>
                 <Text style={styles.detailValue}>
                   {selectedOrder?.shippingFee
-                    ? `${formatVnd(selectedOrder.shippingFee)} vnd`
-                    : '0 vnd'}
+                    ? `${formatVnd(selectedOrder.shippingFee)} VND`
+                    : '0 VND'}
                 </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Total Price:</Text>
                 <Text style={[styles.detailValue, { color: COLORS.danger, fontWeight: '700' }]}>
-                  {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} vnd
+                  {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} VND
                 </Text>
               </View>
 

@@ -26,6 +26,8 @@ export default function WalletManagementScreen() {
   const router = useRouter();
   const { walletBalance, refreshProfile } = useAuth();
   
+
+  
   const [tab, setTab] = useState<'topup' | 'withdraw'>('topup');
   
   // Amounts
@@ -79,7 +81,7 @@ export default function WalletManagementScreen() {
   const handleTopupSubmit = async () => {
     if (submitting) return;
     if (amount < 10000) {
-      showToast('Minimum top-up amount is 10,000 vnd.');
+      showToast('Minimum top-up amount is 10,000 VND.');
       return;
     }
 
@@ -109,7 +111,7 @@ export default function WalletManagementScreen() {
   const handleWithdrawSubmit = async () => {
     if (submitting) return;
     if (amount < 10000) {
-      showToast('Minimum withdraw amount is 10,000 vnd.');
+      showToast('Minimum withdraw amount is 10,000 VND.');
       return;
     }
 
@@ -269,7 +271,7 @@ export default function WalletManagementScreen() {
                       </View>
                       <View>
                         <Text style={styles.walletBoxTitle}>SmartCoffee Wallet</Text>
-                        <Text style={styles.walletBoxAmount}>{formattedBalance} vnd</Text>
+                        <Text style={styles.walletBoxAmount}>{formattedBalance} VND</Text>
                       </View>
                     </View>
                   </View>
@@ -294,7 +296,7 @@ export default function WalletManagementScreen() {
                         onChangeText={handleFormatAmount}
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
-                        placeholder="0 vnd"
+                        placeholder="0 VND"
                         placeholderTextColor="#B0B0B0"
                       />
                       
@@ -310,7 +312,7 @@ export default function WalletManagementScreen() {
                   </View>
                   
                   {isError && (
-                    <Text style={styles.errorHint}>Please enter a minimum of 10,000 vnd.</Text>
+                    <Text style={styles.errorHint}>Please enter a minimum of 10,000 VND.</Text>
                   )}
                 </View>
               </View>
