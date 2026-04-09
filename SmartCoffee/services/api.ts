@@ -100,6 +100,7 @@ export const API_ENDPOINTS = {
     createMenuDetails: () => `${AUTH_BASE_URL}/AI/create-menu-p2-details`,
     createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
     analyzeMenuFeedback: (menuId: number) => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/${menuId}`,
+    updateAi: (menuId: number | string) => `${AUTH_BASE_URL}/AI/update-ai/${menuId}`,
     predictInventory: () => `${AUTH_BASE_URL}/AI/predict-inventory`,
   },
   menu: {
@@ -109,6 +110,7 @@ export const API_ENDPOINTS = {
     byHeader: (menuHeaderId: number) => `${AUTH_BASE_URL}/Menu/by-header/${menuHeaderId}`,
     activate: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
     saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
+    updateAi: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/update-ai/${menuId}`,
   },
   menuHeader: {
     getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,
