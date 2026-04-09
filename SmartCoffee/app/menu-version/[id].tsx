@@ -222,7 +222,7 @@ const MenuVersionPage = () => {
 
     const navigateToInsights = (item: MenuVersion) => {
         router.push({
-            pathname: '/menu-insights',
+            pathname: '/(tabs)/menu-insights',
             params: {
                 menuId: item.id,
                 menuName: item.name,
