@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Toast from 'react-native-toast-message';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
@@ -30,6 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 // Define MenuItem interface similar to daily-sales.tsx for proper data mapping
 interface MenuItem {
   menuItemId: number;
+  menuId?: number;
   description: string | null;
   sellingPrice: number;
   addedDate: string;
@@ -42,6 +44,7 @@ interface MenuItem {
       beverageSizeId: number;
       sizeName?: string;
       volume?: number;
+      isActive?: boolean;
     };
   }>;
   shopBeverage: {
@@ -62,6 +65,27 @@ interface MenuItem {
     recipeName: string;
     image: string | null;
   };
+  isExisting?: boolean;
+}
+
+interface SizePriceDraft {
+  itemSizeId: number;
+  beverageSizeId?: number;
+  sizeName?: string;
+  volume?: number;
+  sellingPrice: string;
+}
+
+interface MenuItemSnapshot {
+  description: string;
+  sellingPrice: number;
+  sizePrices: Array<{ key: string; price: number }>;
+}
+
+interface EditErrors {
+  description?: string;
+  sellingPrice?: string;
+  sizePrices?: Record<number, string>;
 }
 
 interface DailySaleRecord {
@@ -97,6 +121,7 @@ interface MenuData {
   menuHeaderId: number;
   versionNumber: string;
   status: string;
+  created?: string | null;
   isActive: boolean;
   image?: string | null;
   images?: string[];
@@ -196,6 +221,18 @@ export default function MenuInsightsScreen() {
   const [generatingMenu, setGeneratingMenu] = useState(false);
   const [visibleCount, setVisibleCount] = useState(MENU_PAGE_SIZE);
   const [currentViewerImageIndex, setCurrentViewerImageIndex] = useState(0);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [editDescription, setEditDescription] = useState('');
+  const [editSellingPrice, setEditSellingPrice] = useState('');
+  const [editSizePrices, setEditSizePrices] = useState<SizePriceDraft[]>([]);
+  const [savingManualEdits, setSavingManualEdits] = useState(false);
+  const [hasManualChanges, setHasManualChanges] = useState(false);
+  const [editedMenuItemIds, setEditedMenuItemIds] = useState<number[]>([]);
+  const [editErrors, setEditErrors] = useState<EditErrors>({});
+  const [showBackConfirm, setShowBackConfirm] = useState(false);
+
+  const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -214,6 +251,394 @@ export default function MenuInsightsScreen() {
     translateY.value = 0;
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
+  };
+
+  const parseNumberInput = (value: string, fallback: number) => {
+    const normalized = value.replace(/[^0-9.]/g, '');
+    if (!normalized) return fallback;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const buildMenuItemSnapshot = (item: MenuItem): MenuItemSnapshot => {
+    const sizePrices = (item.itemSizeViewModels ?? []).map((size, index) => {
+      const key = String(size.beverageSizeId ?? size.itemSizeId ?? index);
+      const price = Number(size.sellingPrice ?? 0);
+      return { key, price };
+    });
+
+    sizePrices.sort((a, b) => a.key.localeCompare(b.key));
+
+    return {
+      description: (item.description ?? '').trim(),
+      sellingPrice: Number(item.sellingPrice ?? 0),
+      sizePrices,
+    };
+  };
+
+  const isSnapshotEqual = (left: MenuItemSnapshot, right: MenuItemSnapshot) => {
+    if (left.description !== right.description) return false;
+    if (left.sellingPrice !== right.sellingPrice) return false;
+    if (left.sizePrices.length !== right.sizePrices.length) return false;
+
+    for (let i = 0; i < left.sizePrices.length; i += 1) {
+      const leftSize = left.sizePrices[i];
+      const rightSize = right.sizePrices[i];
+      if (leftSize.key !== rightSize.key) return false;
+      if (leftSize.price !== rightSize.price) return false;
+    }
+
+    return true;
+  };
+
+  const isMenuItemEdited = (item: MenuItem) => {
+    const original = originalMenuItemsRef.current.get(item.menuItemId);
+    if (!original) return false;
+    return !isSnapshotEqual(original, buildMenuItemSnapshot(item));
+  };
+
+  const handleBackPress = () => {
+    if (hasManualChanges || editedMenuItemIds.length > 0) {
+      setShowBackConfirm(true);
+      return;
+    }
+
+    router.back();
+  };
+
+  const openEditModalForItem = (item: MenuItem) => {
+    setEditingItem(item);
+    setEditDescription(item.description ?? '');
+    setEditSellingPrice(String(item.sellingPrice ?? 0));
+    setEditErrors({});
+
+    const sizeDrafts = (item.itemSizeViewModels ?? []).map((size, index) => ({
+      itemSizeId: size.itemSizeId > 0 ? size.itemSizeId : index,
+      beverageSizeId: size.beverageSizeId ?? size.beverageSize?.beverageSizeId,
+      sizeName: size.beverageSize?.sizeName,
+      volume: size.beverageSize?.volume,
+      sellingPrice: String(size.sellingPrice ?? 0),
+    }));
+
+    setEditSizePrices(sizeDrafts);
+    setShowEditModal(true);
+  };
+
+  const updateSizePriceDraft = (itemSizeId: number, value: string) => {
+    setEditSizePrices((prev) =>
+      prev.map((draft) =>
+        draft.itemSizeId === itemSizeId ? { ...draft, sellingPrice: value } : draft
+      )
+    );
+  };
+
+  const validateEditForm = () => {
+    const errors: EditErrors = {};
+    const trimmedDescription = editDescription.trim();
+    if (trimmedDescription.length > 240) {
+      errors.description = 'Description must be 240 characters or less.';
+    }
+
+    const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
+    const parsedPrice = Number(priceValue);
+    if (!priceValue || !Number.isFinite(parsedPrice)) {
+      errors.sellingPrice = 'Enter a valid price.';
+    } else if (parsedPrice < 0) {
+      errors.sellingPrice = 'Price must be 0 or higher.';
+    }
+
+    if (editSizePrices.length > 0) {
+      const sizeErrors: Record<number, string> = {};
+      editSizePrices.forEach((size) => {
+        const sizeValue = size.sellingPrice.replace(/[^0-9.]/g, '');
+        const parsedSize = Number(sizeValue);
+        if (!sizeValue || !Number.isFinite(parsedSize)) {
+          sizeErrors[size.itemSizeId] = 'Enter a valid price.';
+        } else if (parsedSize < 0) {
+          sizeErrors[size.itemSizeId] = 'Price must be 0 or higher.';
+        }
+      });
+
+      if (Object.keys(sizeErrors).length > 0) {
+        errors.sizePrices = sizeErrors;
+      }
+    }
+
+    setEditErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const applyEditChanges = () => {
+    if (!editingItem) return;
+    if (!validateEditForm()) return;
+
+    const nextDescription = editDescription.trim();
+    const nextSellingPrice = parseNumberInput(editSellingPrice, editingItem.sellingPrice ?? 0);
+
+    const updatedSizes = (editingItem.itemSizeViewModels ?? []).map((size, index) => {
+      const sizeId = size.itemSizeId > 0 ? size.itemSizeId : index;
+      const draft = editSizePrices.find((item) => item.itemSizeId === sizeId);
+      const nextSizePrice = draft
+        ? parseNumberInput(draft.sellingPrice, size.sellingPrice ?? 0)
+        : size.sellingPrice ?? 0;
+
+      return {
+        ...size,
+        itemSizeId: sizeId,
+        beverageSizeId: size.beverageSizeId ?? size.beverageSize?.beverageSizeId,
+        sellingPrice: nextSizePrice,
+      };
+    });
+
+    const updatedItem: MenuItem = {
+      ...editingItem,
+      description: nextDescription,
+      sellingPrice: nextSellingPrice,
+      itemSizeViewModels: updatedSizes.length > 0 ? updatedSizes : editingItem.itemSizeViewModels,
+    };
+
+    setMenuItems((prev) =>
+      prev.map((item) => (item.menuItemId === editingItem.menuItemId ? updatedItem : item))
+    );
+
+    const edited = isMenuItemEdited(updatedItem);
+    setEditedMenuItemIds((prev) => {
+      const next = new Set(prev);
+      if (edited) {
+        next.add(updatedItem.menuItemId);
+      } else {
+        next.delete(updatedItem.menuItemId);
+      }
+      const nextArray = Array.from(next);
+      setHasManualChanges(nextArray.length > 0);
+      return nextArray;
+    });
+
+    setShowEditModal(false);
+  };
+
+  const buildUpdatePayload = (menuIdValue: number, menuRaw: any, items: MenuItem[], images: string[]) => {
+    const configSource =
+      menuRaw?.config ??
+      menuRaw?.request?.config ??
+      menuRaw?.requestConfig ??
+      menuRaw?.menuConfig ??
+      {};
+    const menuGroupsSource = Array.isArray(menuRaw?.menuGroups) ? menuRaw.menuGroups : [];
+
+    const normalizedImageUrls = (Array.isArray(images) ? images : [])
+      .map((raw) => resolveImageUrl(raw))
+      .filter((value): value is string => Boolean(value && value.trim().length > 0));
+    const fallbackImage = resolveImageUrl(
+      menuRaw?.imageUrl ?? menuRaw?.ImageUrl ?? menuRaw?.image ?? menuRaw?.Image ?? null
+    );
+    const imageUrl = normalizedImageUrls[0] ?? fallbackImage ?? '';
+    const normalizeEnumToken = (value: unknown) =>
+      String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_-]/g, '');
+    const parseEnumIndex = (
+      value: unknown,
+      dictionary: Record<string, number>,
+      fallbackValue: number
+    ) => {
+      const asNumber = Number(value);
+      if (Number.isFinite(asNumber)) return asNumber;
+      const token = normalizeEnumToken(value);
+      return dictionary[token] ?? fallbackValue;
+    };
+    const extractGroupCategoryIds = (group: any): number[] => {
+      if (!Array.isArray(group?.menuGroupCategory)) return [];
+      return group.menuGroupCategory
+        .map((entry: any) =>
+          Number(
+            entry?.beverageCategoryId ??
+              entry?.BeverageCategoryId ??
+              entry?.categoryId ??
+              entry?.CategoryId ??
+              entry
+          )
+        )
+        .filter((categoryId: number) => Number.isFinite(categoryId) && categoryId > 0);
+    };
+
+    const topicValue = parseEnumIndex(
+      configSource?.topic ?? configSource?.theme,
+      {
+        summerrefresh: 0,
+        summer: 0,
+        winterwarmers: 1,
+        winter: 1,
+        rainydaycomfort: 2,
+        rainy: 2,
+      },
+      0
+    );
+    const layoutValue = parseEnumIndex(
+      configSource?.layout,
+      {
+        vertical: 0,
+        horizontal: 1,
+        descriptive: 2,
+      },
+      0
+    );
+    const pricingValue = parseEnumIndex(
+      configSource?.pricing,
+      {
+        budget: 0,
+        moderate: 1,
+        premium: 2,
+        luxury: 3,
+      },
+      0
+    );
+
+    return {
+      menu: {
+        menuId: menuIdValue,
+        menuHeaderId: Number(menuRaw?.menuHeaderId ?? menuRaw?.MenuHeaderId ?? 0),
+        versionNumber: String(menuRaw?.versionNumber ?? menuRaw?.VersionNumber ?? '1.0'),
+        status: String(menuRaw?.status ?? menuRaw?.Status ?? 'InActive'),
+        isActive: Boolean(menuRaw?.isActive ?? menuRaw?.IsActive ?? false),
+        imageUrl,
+        imageUrls: normalizedImageUrls.length > 0 ? normalizedImageUrls : imageUrl ? [imageUrl] : [],
+        menuItems: items.map((item) => ({
+          menuItemId: Number(item.menuItemId ?? 0),
+          beverageId: Number(item.shopBeverage?.beverageId ?? 0),
+          recipeId: Number(item.shopRecipe?.recipeId ?? 0),
+          description: item.description ?? '',
+          sellingPrice: Number(item.sellingPrice ?? 0),
+          shopBeverage: {
+            beverageId: Number(item.shopBeverage?.beverageId ?? 0),
+            name: String(item.shopBeverage?.name ?? ''),
+            beverageCategoryId: Number(
+              item.shopBeverage?.beverageCategoryId ??
+                item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+                0
+            ),
+            beverageCategory: {
+              beverageCategoryId: Number(
+                item.shopBeverage?.beverageCategoryId ??
+                  item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+                  0
+              ),
+              name: String(
+                item.shopBeverage?.beverageCategory?.name ??
+                  item.shopBeverage?.beverageCategoryName ??
+                  ''
+              ),
+            },
+          },
+          shopRecipe: {
+            recipeId: Number(item.shopRecipe?.recipeId ?? 0),
+          },
+          itemSizeViewModels: (item.itemSizeViewModels ?? []).map((size) => ({
+            beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
+            sellingPrice: Number(size.sellingPrice ?? 0),
+          })),
+        })),
+        menuGroups: menuGroupsSource.map((group: any, index: number) => ({
+          menuGroupId: Number(group?.menuGroupId ?? group?.id ?? 0),
+          name: String(group?.name ?? group?.groupName ?? `Group ${index + 1}`),
+          orderIndex: Number(group?.orderIndex ?? index + 1),
+          menuGroupCategory: Array.isArray(group?.menuGroupCategory) ? group.menuGroupCategory : [],
+        })),
+      },
+      config: {
+        title: String(configSource?.title ?? configSource?.menuTitle ?? 'MENU'),
+        menuSizeValue: Number(configSource?.menuSizeValue ?? configSource?.menuSize ?? 12),
+        numberOfOptions: Number(configSource?.numberOfOptions ?? 1),
+        topic: topicValue,
+        layout: layoutValue,
+        shopStyle: String(configSource?.shopStyle ?? configSource?.style ?? ''),
+        pricing: pricingValue,
+        useExistingShopItems: Boolean(configSource?.useExistingShopItems ?? true),
+        groups: Array.isArray(configSource?.groups)
+          ? configSource.groups.map((group: any) => ({
+              name: String(group?.name ?? group?.groupName ?? ''),
+              selectedBeverageCategories: Array.isArray(group?.selectedBeverageCategories)
+                ? group.selectedBeverageCategories
+                    .map((categoryId: any) => Number(categoryId))
+                    .filter((categoryId: number) => Number.isFinite(categoryId))
+                : [],
+            }))
+          : menuGroupsSource.map((group: any) => ({
+              name: String(group?.name ?? group?.groupName ?? ''),
+              selectedBeverageCategories: extractGroupCategoryIds(group),
+            })),
+      },
+    };
+  };
+
+  const handleSaveManualEdits = async () => {
+    if (!menuId) {
+      Alert.alert('Missing menu', 'Menu ID is missing.');
+      return;
+    }
+
+    const id = Number(menuId);
+    if (!Number.isFinite(id)) {
+      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      return;
+    }
+
+    if (!currentMenuRaw) {
+      Alert.alert('Missing menu', 'Menu data is not loaded yet.');
+      return;
+    }
+
+    try {
+      setSavingManualEdits(true);
+      const payload = buildUpdatePayload(id, currentMenuRaw, menuItems, menuImageUris);
+      const response = await authorizedFetch(API_ENDPOINTS.ai.updateAi(id), {
+        method: 'PUT',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        console.log('[Save manual edits] error response:', { status: response.status, text });
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const responsePayload = await response.json();
+      const responseImages = Array.isArray(responsePayload?.ImageUrls)
+        ? responsePayload.ImageUrls
+        : Array.isArray(responsePayload?.imageUrls)
+          ? responsePayload.imageUrls
+          : [];
+      const responsePrimary = responsePayload?.ImageUrl ?? responsePayload?.imageUrl ?? null;
+      const normalizedImages = [responsePrimary, ...responseImages]
+        .map((raw: string | null) => resolveImageUrl(raw))
+        .filter((value): value is string => Boolean(value));
+
+      if (normalizedImages.length > 0) {
+        setMenuImageUris(Array.from(new Set(normalizedImages)));
+      }
+
+      setHasManualChanges(false);
+      setEditedMenuItemIds([]);
+      originalMenuItemsRef.current = new Map(
+        menuItems.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
+      );
+      Toast.show({
+        type: 'success',
+        text1: 'Saved successfully',
+        text2: 'Manual edits were saved.',
+      });
+      await fetchMenuItems();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to save menu updates.';
+      Alert.alert('Save failed', message);
+    } finally {
+      setSavingManualEdits(false);
+    }
   };
 
   const pinchGesture = Gesture.Pinch()
@@ -370,6 +795,11 @@ export default function MenuInsightsScreen() {
       console.log('[Menu Insights] Flattened menu items:', items);
       console.log('beverageCategory:', items.map(item => item.shopBeverage.beverageCategoryName));
       setMenuItems(items);
+      originalMenuItemsRef.current = new Map(
+        items.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
+      );
+      setEditedMenuItemIds([]);
+      setHasManualChanges(false);
 
       // Fetch detailed menu items for unit cost calculation.
       // Backend summary currently can return cost = 0, so we compute on frontend.
@@ -828,6 +1258,9 @@ export default function MenuInsightsScreen() {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
+            <Ionicons name="chevron-back" size={26} color="#4a3621" />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>Menu Insights</Text>
           <TouchableOpacity
             style={styles.notificationButton}
@@ -1009,6 +1442,32 @@ export default function MenuInsightsScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.manualEditCard}>
+          <View style={styles.manualEditText}>
+            <Text style={styles.manualEditTitle}>Manual edit</Text>
+            <Text style={styles.manualEditSubtitle}>
+              Update descriptions or prices, then save changes.
+            </Text>
+            {hasManualChanges && (
+              <Text style={styles.manualEditHint}>Unsaved changes</Text>
+            )}
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.manualSaveButton,
+              (!hasManualChanges || savingManualEdits) && styles.manualSaveButtonDisabled,
+            ]}
+            onPress={handleSaveManualEdits}
+            disabled={!hasManualChanges || savingManualEdits}
+          >
+            {savingManualEdits ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Text style={styles.manualSaveButtonText}>Save edits</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
         {/* Menu Items Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
@@ -1031,7 +1490,10 @@ export default function MenuInsightsScreen() {
             </View>
           ) : (
             getFilteredMenuItems().slice(0, visibleCount).map((item) => (
-              <View key={item.menuItemId} style={styles.menuItem}>
+              <View
+                key={item.menuItemId}
+                style={[styles.menuItem, isMenuItemEdited(item) && styles.menuItemEdited]}
+              >
                 <View style={styles.menuItemImage}>
                   {item.shopRecipe?.image ? (
                     <Image
@@ -1050,6 +1512,12 @@ export default function MenuInsightsScreen() {
                     <Text style={styles.menuItemTitle} numberOfLines={2}>
                       {item.shopRecipe?.recipeName || 'Unnamed Item'}
                     </Text>
+                    <TouchableOpacity
+                      style={styles.menuItemEditButton}
+                      onPress={() => openEditModalForItem(item)}
+                    >
+                      <Ionicons name="create-outline" size={18} color="#4a3621" />
+                    </TouchableOpacity>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                     <View style={styles.cupsBadge}>
@@ -1143,6 +1611,130 @@ export default function MenuInsightsScreen() {
 
         <View style={styles.bottomSpacing} />
       </ScrollView>
+
+        <Modal
+          visible={showBackConfirm}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowBackConfirm(false)}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={styles.confirmIconWrap}>
+                <Ionicons name="alert" size={22} color="#4a3621" />
+              </View>
+              <Text style={styles.confirmTitle}>Discard changes?</Text>
+              <Text style={styles.confirmMessage}>
+                You have unsaved edits. Leave without saving?
+              </Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={styles.confirmCancelButton}
+                  onPress={() => setShowBackConfirm(false)}
+                >
+                  <Text style={styles.confirmCancelText}>Stay</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.confirmLeaveButton}
+                  onPress={() => {
+                    setShowBackConfirm(false);
+                    router.back();
+                  }}
+                >
+                  <Text style={styles.confirmLeaveText}>Discard</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showEditModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowEditModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.editModalContent]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit menu item</Text>
+                <TouchableOpacity onPress={() => setShowEditModal(false)}>
+                  <Ionicons name="close" size={24} color="#4a3621" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.editModalBody} contentContainerStyle={styles.editModalBodyContent}>
+                <Text style={styles.editItemName}>
+                  {editingItem?.shopRecipe?.recipeName || 'Menu item'}
+                </Text>
+
+                <Text style={styles.editLabel}>Description</Text>
+                <TextInput
+                  style={[styles.editInput, styles.editTextArea]}
+                  placeholder="Add a short description"
+                  placeholderTextColor="#b3a79b"
+                  multiline
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                />
+                {editErrors.description && (
+                  <Text style={styles.editErrorText}>{editErrors.description}</Text>
+                )}
+
+                <Text style={styles.editLabel}>Selling price</Text>
+                <TextInput
+                  style={styles.editInput}
+                  placeholder="0"
+                  placeholderTextColor="#b3a79b"
+                  keyboardType="numeric"
+                  value={editSellingPrice}
+                  onChangeText={setEditSellingPrice}
+                />
+                {editErrors.sellingPrice && (
+                  <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
+                )}
+
+                {editSizePrices.length > 0 && (
+                  <View style={styles.editSizesSection}>
+                    <Text style={styles.editLabel}>Size prices</Text>
+                    {editSizePrices.map((size, index) => (
+                      <View key={size.itemSizeId}>
+                        <View style={styles.sizePriceRow}>
+                          <Text style={styles.sizePriceLabel}>
+                            {size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`)}
+                          </Text>
+                          <TextInput
+                            style={styles.sizePriceInput}
+                            placeholder="0"
+                            placeholderTextColor="#b3a79b"
+                            keyboardType="numeric"
+                            value={size.sellingPrice}
+                            onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
+                          />
+                        </View>
+                        {editErrors.sizePrices?.[size.itemSizeId] && (
+                          <Text style={styles.editErrorText}>
+                            {editErrors.sizePrices?.[size.itemSizeId]}
+                          </Text>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+              <View style={styles.editModalFooter}>
+                <TouchableOpacity
+                  style={styles.editCancelButton}
+                  onPress={() => setShowEditModal(false)}
+                >
+                  <Text style={styles.editCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.editApplyButton} onPress={applyEditChanges}>
+                  <Text style={styles.editApplyText}>Apply changes</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
       {/* Date Picker Modal */}
       <Modal
@@ -1354,6 +1946,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 24,
     paddingVertical: 16,
+  },
+  backButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
   },
   headerTitle: {
     fontSize: 28,
@@ -1582,6 +2184,54 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
+  manualEditCard: {
+    marginHorizontal: 24,
+    marginTop: 4,
+    marginBottom: 12,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#eadfd3',
+    backgroundColor: '#fff7ef',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  manualEditText: {
+    flex: 1,
+  },
+  manualEditTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  manualEditSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#847362',
+  },
+  manualEditHint: {
+    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#d17a22',
+  },
+  manualSaveButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#4a3621',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  manualSaveButtonDisabled: {
+    opacity: 0.6,
+  },
+  manualSaveButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
@@ -1758,6 +2408,10 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 4,
   },
+  menuItemEdited: {
+    borderColor: '#d17a22',
+    backgroundColor: '#fff2e6',
+  },
   menuItemWarning: {
     borderLeftWidth: 4,
     borderLeftColor: '#e71008',
@@ -1790,6 +2444,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 8,
+  },
+  menuItemEditButton: {
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    backgroundColor: '#FFF',
   },
   menuItemTitle: {
     fontSize: 16,
@@ -2085,6 +2746,183 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: '70%',
     paddingBottom: 40,
+  },
+  editModalContent: {
+    maxHeight: '80%',
+  },
+  editModalBody: {
+    paddingHorizontal: 20,
+  },
+  editModalBodyContent: {
+    paddingBottom: 20,
+  },
+  editItemName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4a3621',
+    marginBottom: 10,
+  },
+  editLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#847362',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+  editInput: {
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#4a3621',
+    backgroundColor: '#FFF',
+  },
+  editTextArea: {
+    minHeight: 90,
+    textAlignVertical: 'top',
+  },
+  editSizesSection: {
+    marginTop: 4,
+  },
+  sizePriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  sizePriceLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: '#4a3621',
+  },
+  sizePriceInput: {
+    width: 110,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#4a3621',
+    textAlign: 'right',
+    backgroundColor: '#FFF',
+  },
+  editModalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e1dbd6',
+  },
+  editCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editCancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  editApplyButton: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#4a3621',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editApplyText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFF',
+  },
+  editErrorText: {
+    marginTop: 6,
+    color: '#d32f2f',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(23, 20, 17, 0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFF',
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#e8dfd6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+    alignItems: 'center',
+  },
+  confirmIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#f5eee7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  confirmTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#4a3621',
+    textAlign: 'center',
+  },
+  confirmMessage: {
+    marginTop: 8,
+    fontSize: 13,
+    color: '#7b6a5a',
+    textAlign: 'center',
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    marginTop: 18,
+    gap: 12,
+  },
+  confirmCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+  },
+  confirmCancelText: {
+    color: '#4a3621',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  confirmLeaveButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#4a3621',
+    alignItems: 'center',
+  },
+  confirmLeaveText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
   modalHeader: {
     flexDirection: 'row',
