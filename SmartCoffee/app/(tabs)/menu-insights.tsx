@@ -135,6 +135,23 @@ const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
+const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
+  if (!Array.isArray(drafts) || drafts.length === 0) return null;
+
+  const byVolume = drafts
+    .filter((draft) => Number.isFinite(Number(draft.volume)))
+    .sort((left, right) => Number(left.volume) - Number(right.volume));
+
+  if (byVolume.length > 0) {
+    return byVolume[0].itemSizeId;
+  }
+
+  return drafts[0].itemSizeId;
+};
+
+const getSizeDraftLabel = (size: SizePriceDraft, index: number) =>
+  size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`);
+
 const resolveImageUrl = (raw?: string | null) => {
   if (!raw || raw === 'null' || raw === 'undefined') return null;
   if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
@@ -227,6 +244,7 @@ export default function MenuInsightsScreen() {
   const [editSellingPrice, setEditSellingPrice] = useState('');
   const [editSizePrices, setEditSizePrices] = useState<SizePriceDraft[]>([]);
   const [savingManualEdits, setSavingManualEdits] = useState(false);
+  const [saveProgressText, setSaveProgressText] = useState('');
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [editedMenuItemIds, setEditedMenuItemIds] = useState<number[]>([]);
   const [editErrors, setEditErrors] = useState<EditErrors>({});
@@ -243,6 +261,12 @@ export default function MenuInsightsScreen() {
   
   const { categories } = useBeverageCategories();
   const menuImageUri = menuImageUris[0] ?? null;
+  const anchorSizeDraftId = getAnchorSizeDraftId(editSizePrices);
+  const anchorSizeDraft =
+    anchorSizeDraftId == null
+      ? null
+      : editSizePrices.find((draft) => draft.itemSizeId === anchorSizeDraftId) ?? null;
+  const isMultiSizeEditing = editSizePrices.length > 0;
 
   const resetZoom = () => {
     scale.value = 1;
@@ -258,6 +282,12 @@ export default function MenuInsightsScreen() {
     if (!normalized) return fallback;
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const normalizeDescriptionInput = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return trimmed.replace(/\[PRICES\][\s\S]*$/i, '').trim();
   };
 
   const buildMenuItemSnapshot = (item: MenuItem): MenuItemSnapshot => {
@@ -297,21 +327,31 @@ export default function MenuInsightsScreen() {
     return !isSnapshotEqual(original, buildMenuItemSnapshot(item));
   };
 
+  const navigateToMenuVersion = () => {
+    const menuHeaderId = Number(currentMenuRaw?.menuHeaderId ?? currentMenuRaw?.MenuHeaderId ?? 0);
+    if (Number.isFinite(menuHeaderId) && menuHeaderId > 0) {
+      router.replace({
+        pathname: '/menu-version/[id]',
+        params: {
+          id: String(menuHeaderId),
+        },
+      });
+      return;
+    }
+    router.back();
+  };
+
   const handleBackPress = () => {
     if (hasManualChanges || editedMenuItemIds.length > 0) {
       setShowBackConfirm(true);
       return;
     }
 
-    router.back();
+    navigateToMenuVersion();
   };
 
   const openEditModalForItem = (item: MenuItem) => {
     setEditingItem(item);
-    setEditDescription(item.description ?? '');
-    setEditSellingPrice(String(item.sellingPrice ?? 0));
-    setEditErrors({});
-
     const sizeDrafts = (item.itemSizeViewModels ?? []).map((size, index) => ({
       itemSizeId: size.itemSizeId > 0 ? size.itemSizeId : index,
       beverageSizeId: size.beverageSizeId ?? size.beverageSize?.beverageSizeId,
@@ -320,31 +360,49 @@ export default function MenuInsightsScreen() {
       sellingPrice: String(size.sellingPrice ?? 0),
     }));
 
+    const anchorSizeId = getAnchorSizeDraftId(sizeDrafts);
+    const anchorSizePrice =
+      anchorSizeId == null
+        ? null
+        : sizeDrafts.find((draft) => draft.itemSizeId === anchorSizeId)?.sellingPrice ?? null;
+
+    setEditDescription(item.description ?? '');
+    setEditSellingPrice(anchorSizePrice ?? String(item.sellingPrice ?? 0));
+    setEditErrors({});
     setEditSizePrices(sizeDrafts);
     setShowEditModal(true);
   };
 
   const updateSizePriceDraft = (itemSizeId: number, value: string) => {
-    setEditSizePrices((prev) =>
-      prev.map((draft) =>
+    setEditSizePrices((prev) => {
+      const nextDrafts = prev.map((draft) =>
         draft.itemSizeId === itemSizeId ? { ...draft, sellingPrice: value } : draft
-      )
-    );
+      );
+      const anchorSizeId = getAnchorSizeDraftId(nextDrafts);
+      if (anchorSizeId != null && anchorSizeId === itemSizeId) {
+        setEditSellingPrice(value);
+      }
+      return nextDrafts;
+    });
   };
 
   const validateEditForm = () => {
     const errors: EditErrors = {};
-    const trimmedDescription = editDescription.trim();
-    if (trimmedDescription.length > 240) {
+    const trimmedDescription = normalizeDescriptionInput(editDescription);
+    if (!trimmedDescription) {
+      errors.description = 'Description is required.';
+    } else if (trimmedDescription.length > 240) {
       errors.description = 'Description must be 240 characters or less.';
     }
 
-    const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
-    const parsedPrice = Number(priceValue);
-    if (!priceValue || !Number.isFinite(parsedPrice)) {
-      errors.sellingPrice = 'Enter a valid price.';
-    } else if (parsedPrice < 0) {
-      errors.sellingPrice = 'Price must be 0 or higher.';
+    if (!isMultiSizeEditing) {
+      const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
+      const parsedPrice = Number(priceValue);
+      if (!priceValue || !Number.isFinite(parsedPrice)) {
+        errors.sellingPrice = 'Enter a valid price.';
+      } else if (parsedPrice <= 0) {
+        errors.sellingPrice = 'Price must be greater than 0.';
+      }
     }
 
     if (editSizePrices.length > 0) {
@@ -354,10 +412,33 @@ export default function MenuInsightsScreen() {
         const parsedSize = Number(sizeValue);
         if (!sizeValue || !Number.isFinite(parsedSize)) {
           sizeErrors[size.itemSizeId] = 'Enter a valid price.';
-        } else if (parsedSize < 0) {
-          sizeErrors[size.itemSizeId] = 'Price must be 0 or higher.';
+        } else if (parsedSize <= 0) {
+          sizeErrors[size.itemSizeId] = 'Price must be greater than 0.';
         }
       });
+
+      const sizesSortedByVolume = [...editSizePrices].sort((left, right) => {
+        const leftVolume = Number(left.volume ?? Number.MAX_SAFE_INTEGER);
+        const rightVolume = Number(right.volume ?? Number.MAX_SAFE_INTEGER);
+        return leftVolume - rightVolume;
+      });
+
+      for (let i = 1; i < sizesSortedByVolume.length; i += 1) {
+        const prev = sizesSortedByVolume[i - 1];
+        const curr = sizesSortedByVolume[i];
+        const prevPrice = Number(prev.sellingPrice.replace(/[^0-9.]/g, ''));
+        const currPrice = Number(curr.sellingPrice.replace(/[^0-9.]/g, ''));
+
+        if (
+          Number.isFinite(prevPrice) &&
+          Number.isFinite(currPrice) &&
+          prevPrice > 0 &&
+          currPrice > 0 &&
+          currPrice < prevPrice
+        ) {
+          sizeErrors[curr.itemSizeId] = 'Larger size cannot be cheaper than smaller size.';
+        }
+      }
 
       if (Object.keys(sizeErrors).length > 0) {
         errors.sizePrices = sizeErrors;
@@ -372,8 +453,7 @@ export default function MenuInsightsScreen() {
     if (!editingItem) return;
     if (!validateEditForm()) return;
 
-    const nextDescription = editDescription.trim();
-    const nextSellingPrice = parseNumberInput(editSellingPrice, editingItem.sellingPrice ?? 0);
+    const nextDescription = normalizeDescriptionInput(editDescription);
 
     const updatedSizes = (editingItem.itemSizeViewModels ?? []).map((size, index) => {
       const sizeId = size.itemSizeId > 0 ? size.itemSizeId : index;
@@ -389,6 +469,19 @@ export default function MenuInsightsScreen() {
         sellingPrice: nextSizePrice,
       };
     });
+
+    const nextSellingPrice = (() => {
+      if (updatedSizes.length === 0) {
+        return parseNumberInput(editSellingPrice, editingItem.sellingPrice ?? 0);
+      }
+      const smallestSize = [...updatedSizes].sort((left, right) => {
+        const leftVolume = Number(left.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+        const rightVolume = Number(right.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+        return leftVolume - rightVolume;
+      })[0];
+
+      return Number(smallestSize?.sellingPrice ?? editingItem.sellingPrice ?? 0);
+    })();
 
     const updatedItem: MenuItem = {
       ...editingItem,
@@ -591,7 +684,9 @@ export default function MenuInsightsScreen() {
 
     try {
       setSavingManualEdits(true);
+      setSaveProgressText('Preparing payload...');
       const payload = buildUpdatePayload(id, currentMenuRaw, menuItems, menuImageUris);
+      setSaveProgressText('Saving menu updates...');
       const response = await authorizedFetch(API_ENDPOINTS.ai.updateAi(id), {
         method: 'PUT',
         headers: {
@@ -607,6 +702,7 @@ export default function MenuInsightsScreen() {
         throw new Error(text || `Request failed (${response.status})`);
       }
 
+      setSaveProgressText('Updating generated images...');
       const responsePayload = await response.json();
       const responseImages = Array.isArray(responsePayload?.ImageUrls)
         ? responsePayload.ImageUrls
@@ -627,6 +723,7 @@ export default function MenuInsightsScreen() {
       originalMenuItemsRef.current = new Map(
         menuItems.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
       );
+      setSaveProgressText('Refreshing latest menu...');
       Toast.show({
         type: 'success',
         text1: 'Saved successfully',
@@ -638,6 +735,7 @@ export default function MenuInsightsScreen() {
       Alert.alert('Save failed', message);
     } finally {
       setSavingManualEdits(false);
+      setSaveProgressText('');
     }
   };
 
@@ -1262,12 +1360,7 @@ export default function MenuInsightsScreen() {
             <Ionicons name="chevron-back" size={26} color="#4a3621" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Menu Insights</Text>
-          <TouchableOpacity
-            style={styles.notificationButton}
-            onPress={() => router.push('/notifications')}
-          >
-            <Ionicons name="notifications-outline" size={24} color="#4a3621" />
-          </TouchableOpacity>
+          <View style={styles.headerSpacer} />
         </View>
 
         <View style={styles.feedbackInsightsButtonWrap}>
@@ -1451,6 +1544,9 @@ export default function MenuInsightsScreen() {
             {hasManualChanges && (
               <Text style={styles.manualEditHint}>Unsaved changes</Text>
             )}
+            {savingManualEdits && saveProgressText.length > 0 && (
+              <Text style={styles.manualEditProgress}>{saveProgressText}</Text>
+            )}
           </View>
           <TouchableOpacity
             style={[
@@ -1461,7 +1557,10 @@ export default function MenuInsightsScreen() {
             disabled={!hasManualChanges || savingManualEdits}
           >
             {savingManualEdits ? (
-              <ActivityIndicator size="small" color="#FFF" />
+              <View style={styles.manualSaveLoading}>
+                <ActivityIndicator size="small" color="#FFF" />
+                <Text style={styles.manualSaveButtonText}>Saving...</Text>
+              </View>
             ) : (
               <Text style={styles.manualSaveButtonText}>Save edits</Text>
             )}
@@ -1638,7 +1737,7 @@ export default function MenuInsightsScreen() {
                   style={styles.confirmLeaveButton}
                   onPress={() => {
                     setShowBackConfirm(false);
-                    router.back();
+                    navigateToMenuVersion();
                   }}
                 >
                   <Text style={styles.confirmLeaveText}>Discard</Text>
@@ -1666,8 +1765,26 @@ export default function MenuInsightsScreen() {
                 <Text style={styles.editItemName}>
                   {editingItem?.shopRecipe?.recipeName || 'Menu item'}
                 </Text>
+                <View style={styles.editMetaCard}>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Beverage</Text>
+                    <Text style={styles.editMetaValue}>{editingItem?.shopBeverage?.name || 'Unknown'}</Text>
+                  </View>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Category</Text>
+                    <Text style={styles.editMetaValue}>
+                      {editingItem?.shopBeverage?.beverageCategory?.name ||
+                        editingItem?.shopBeverage?.beverageCategoryName ||
+                        'Unknown'}
+                    </Text>
+                  </View>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Recipe</Text>
+                    <Text style={styles.editMetaValue}>#{editingItem?.shopRecipe?.recipeId ?? 'N/A'}</Text>
+                  </View>
+                </View>
 
-                <Text style={styles.editLabel}>Description</Text>
+                <Text style={styles.editLabel}>Description (Editable)</Text>
                 <TextInput
                   style={[styles.editInput, styles.editTextArea]}
                   placeholder="Add a short description"
@@ -1680,36 +1797,55 @@ export default function MenuInsightsScreen() {
                   <Text style={styles.editErrorText}>{editErrors.description}</Text>
                 )}
 
-                <Text style={styles.editLabel}>Selling price</Text>
-                <TextInput
-                  style={styles.editInput}
-                  placeholder="0"
-                  placeholderTextColor="#b3a79b"
-                  keyboardType="numeric"
-                  value={editSellingPrice}
-                  onChangeText={setEditSellingPrice}
-                />
-                {editErrors.sellingPrice && (
-                  <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
+                {!isMultiSizeEditing ? (
+                  <>
+                    <Text style={styles.editLabel}>Selling price (Editable)</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="0"
+                      placeholderTextColor="#b3a79b"
+                      keyboardType="numeric"
+                      value={editSellingPrice}
+                      onChangeText={setEditSellingPrice}
+                    />
+                    {editErrors.sellingPrice && (
+                      <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
+                    )}
+                  </>
+                ) : (
+                  <View style={styles.basePriceInfoCard}>
+                    <Text style={styles.basePriceInfoTitle}>Base price (read-only)</Text>
+                    <Text style={styles.basePriceInfoValue}>{formatCurrency(Number(editSellingPrice || 0))}</Text>
+                    <Text style={styles.basePriceInfoHint}>
+                      Synced from smallest size: {anchorSizeDraft ? getSizeDraftLabel(anchorSizeDraft, 0) : 'N/A'}
+                    </Text>
+                  </View>
                 )}
 
                 {editSizePrices.length > 0 && (
                   <View style={styles.editSizesSection}>
-                    <Text style={styles.editLabel}>Size prices</Text>
+                    <Text style={styles.editLabel}>Size prices (Editable)</Text>
                     {editSizePrices.map((size, index) => (
                       <View key={size.itemSizeId}>
                         <View style={styles.sizePriceRow}>
-                          <Text style={styles.sizePriceLabel}>
-                            {size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`)}
-                          </Text>
-                          <TextInput
-                            style={styles.sizePriceInput}
-                            placeholder="0"
-                            placeholderTextColor="#b3a79b"
-                            keyboardType="numeric"
-                            value={size.sellingPrice}
-                            onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
-                          />
+                          <View style={styles.sizePriceLabelWrap}>
+                            <Text style={styles.sizePriceLabel}>{getSizeDraftLabel(size, index)}</Text>
+                            {anchorSizeDraftId === size.itemSizeId ? (
+                              <View style={styles.baseSizeBadge}>
+                                <Text style={styles.baseSizeBadgeText}>Base size</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={styles.sizePriceInputWrap}>
+                            <TextInput
+                              style={styles.sizePriceInput}
+                              placeholder="0"
+                              placeholderTextColor="#b3a79b"
+                              keyboardType="numeric"
+                              value={size.sellingPrice}
+                              onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
+                            />
+                          </View>
                         </View>
                         {editErrors.sizePrices?.[size.itemSizeId] && (
                           <Text style={styles.editErrorText}>
@@ -1962,9 +2098,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4a3621',
   },
-  notificationButton: {
-    padding: 8,
-    borderRadius: 50,
+  headerSpacer: {
+    width: 36,
   },
   bannerContainer: {
     paddingHorizontal: 24,
@@ -2231,6 +2366,17 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 12,
     fontWeight: '700',
+  },
+  manualEditProgress: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#2d6a4f',
+    fontWeight: '700',
+  },
+  manualSaveLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   searchBar: {
     flex: 1,
@@ -2754,13 +2900,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   editModalBodyContent: {
-    paddingBottom: 20,
+    paddingBottom: 28,
   },
   editItemName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#4a3621',
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  editMetaCard: {
+    borderWidth: 1,
+    borderColor: '#e6dbcf',
+    borderRadius: 12,
+    backgroundColor: '#faf7f3',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 7,
+  },
+  editMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  editMetaLabel: {
+    fontSize: 12,
+    color: '#847362',
+    fontWeight: '700',
+  },
+  editMetaValue: {
+    flex: 1,
+    fontSize: 12,
+    color: '#4a3621',
+    fontWeight: '600',
+    textAlign: 'right',
   },
   editLabel: {
     fontSize: 12,
@@ -2786,6 +2959,32 @@ const styles = StyleSheet.create({
   editSizesSection: {
     marginTop: 4,
   },
+  basePriceInfoCard: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e7dccf',
+    backgroundColor: '#f8f2ea',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  basePriceInfoTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#847362',
+  },
+  basePriceInfoValue: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  basePriceInfoHint: {
+    marginTop: 5,
+    fontSize: 11,
+    color: '#8b7865',
+    fontWeight: '600',
+  },
   sizePriceRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2793,13 +2992,33 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 10,
   },
-  sizePriceLabel: {
+  sizePriceLabelWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sizePriceLabel: {
     fontSize: 13,
     color: '#4a3621',
+    fontWeight: '600',
+  },
+  baseSizeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#d17a22',
+  },
+  baseSizeBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sizePriceInputWrap: {
+    width: 118,
   },
   sizePriceInput: {
-    width: 110,
+    width: '100%',
     borderWidth: 1,
     borderColor: '#e1dbd6',
     borderRadius: 10,
