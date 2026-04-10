@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   FlatList,
   Image,
   Alert,
+  BackHandler,
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useNavigationState } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
@@ -26,6 +28,7 @@ import menuPerformanceService, {
 import { API_ENDPOINTS, AUTH_BASE_URL } from '../../services/api';
 import { authorizedFetch } from '../../services/authService';
 import { useBeverageCategories } from '../../context/beverage-category-context';
+import { useAuth } from '../../context/auth-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define MenuItem interface similar to daily-sales.tsx for proper data mapping
@@ -109,6 +112,24 @@ interface MenuItemCostPayload {
   } | null;
 }
 
+interface RecipeOption {
+  recipeId: number;
+  recipeName: string;
+  image?: string | null;
+  proposedSellingPrice?: number | null;
+  beverageId?: number | null;
+  beverageName?: string | null;
+  beverageCategoryId?: number | null;
+  beverageCategoryName?: string | null;
+}
+
+interface ShopSizeOption {
+  beverageSizeId: number;
+  sizeName: string;
+  volume?: number;
+  isActive: boolean;
+}
+
 interface MenuGroup {
   menuGroupId: number;
   name: string;
@@ -134,6 +155,23 @@ const fallbackMenuImage =
 const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+
+const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
+  if (!Array.isArray(drafts) || drafts.length === 0) return null;
+
+  const byVolume = drafts
+    .filter((draft) => Number.isFinite(Number(draft.volume)))
+    .sort((left, right) => Number(left.volume) - Number(right.volume));
+
+  if (byVolume.length > 0) {
+    return byVolume[0].itemSizeId;
+  }
+
+  return drafts[0].itemSizeId;
+};
+
+const getSizeDraftLabel = (size: SizePriceDraft, index: number) =>
+  size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`);
 
 const resolveImageUrl = (raw?: string | null) => {
   if (!raw || raw === 'null' || raw === 'undefined') return null;
@@ -200,7 +238,11 @@ const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
 
 export default function MenuInsightsScreen() {
   const router = useRouter();
-  const { menuId, menuImage } = useLocalSearchParams<{ menuId?: string; menuImage?: string }>();
+  const { menuId, menuImage, menuName } = useLocalSearchParams<{
+    menuId?: string;
+    menuImage?: string;
+    menuName?: string;
+  }>();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -227,10 +269,25 @@ export default function MenuInsightsScreen() {
   const [editSellingPrice, setEditSellingPrice] = useState('');
   const [editSizePrices, setEditSizePrices] = useState<SizePriceDraft[]>([]);
   const [savingManualEdits, setSavingManualEdits] = useState(false);
+  const [saveProgressText, setSaveProgressText] = useState('');
+  const [creatingMenuVersion, setCreatingMenuVersion] = useState(false);
+  const [createVersionProgressText, setCreateVersionProgressText] = useState('');
+  const [lastSavedEditedMenuItemIds, setLastSavedEditedMenuItemIds] = useState<number[]>([]);
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [editedMenuItemIds, setEditedMenuItemIds] = useState<number[]>([]);
+  const [addedMenuItemIds, setAddedMenuItemIds] = useState<number[]>([]);
+  const [deletedMenuItemIds, setDeletedMenuItemIds] = useState<number[]>([]);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [availableRecipes, setAvailableRecipes] = useState<RecipeOption[]>([]);
+  const [shopSizes, setShopSizes] = useState<ShopSizeOption[]>([]);
+  const [loadingAvailableRecipes, setLoadingAvailableRecipes] = useState(false);
+  const [recipeSearchQuery, setRecipeSearchQuery] = useState('');
   const [editErrors, setEditErrors] = useState<EditErrors>({});
   const [showBackConfirm, setShowBackConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDuplicateItemModal, setShowDuplicateItemModal] = useState(false);
+  const [duplicateItemMessage, setDuplicateItemMessage] = useState('');
+  const [deletingItem, setDeletingItem] = useState<MenuItem | null>(null);
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -242,7 +299,28 @@ export default function MenuInsightsScreen() {
   const savedTranslateY = useSharedValue(0);
   
   const { categories } = useBeverageCategories();
+  const { coffeeShopId } = useAuth();
   const menuImageUri = menuImageUris[0] ?? null;
+  const hasEditedMenuItemsForVersion =
+    editedMenuItemIds.length > 0 ||
+    lastSavedEditedMenuItemIds.length > 0 ||
+    addedMenuItemIds.length > 0 ||
+    deletedMenuItemIds.length > 0;
+  const anchorSizeDraftId = getAnchorSizeDraftId(editSizePrices);
+  const anchorSizeDraft =
+    anchorSizeDraftId == null
+      ? null
+      : editSizePrices.find((draft) => draft.itemSizeId === anchorSizeDraftId) ?? null;
+  const isMultiSizeEditing = editSizePrices.length > 0;
+  const normalizedMenuName = useMemo(() => {
+    const raw = String(menuName ?? '').trim();
+    if (!raw) return '';
+    return raw.replace(/\s+ver\s+.+$/i, '').trim();
+  }, [menuName]);
+  const previousRouteName = useNavigationState((state) => {
+    if (!state || state.index <= 0) return '';
+    return String(state.routes[state.index - 1]?.name ?? '');
+  });
 
   const resetZoom = () => {
     scale.value = 1;
@@ -258,6 +336,12 @@ export default function MenuInsightsScreen() {
     if (!normalized) return fallback;
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const normalizeDescriptionInput = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return trimmed.replace(/\[PRICES\][\s\S]*$/i, '').trim();
   };
 
   const buildMenuItemSnapshot = (item: MenuItem): MenuItemSnapshot => {
@@ -297,21 +381,96 @@ export default function MenuInsightsScreen() {
     return !isSnapshotEqual(original, buildMenuItemSnapshot(item));
   };
 
-  const handleBackPress = () => {
-    if (hasManualChanges || editedMenuItemIds.length > 0) {
+  const hasActualUnsavedChanges = useMemo(
+    () =>
+      menuItems.some((item) => isMenuItemEdited(item)) ||
+      addedMenuItemIds.length > 0 ||
+      deletedMenuItemIds.length > 0,
+    [addedMenuItemIds.length, deletedMenuItemIds.length, menuItems]
+  );
+
+  const navigateToMenuVersion = useCallback(() => {
+    if (previousRouteName.toLowerCase().includes('menu-version') && router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    const menuHeaderId = Number(currentMenuRaw?.menuHeaderId ?? currentMenuRaw?.MenuHeaderId ?? 0);
+    if (Number.isFinite(menuHeaderId) && menuHeaderId > 0) {
+      router.replace({
+        pathname: '/menu-version/[id]',
+        params: {
+          id: String(menuHeaderId),
+          ...(normalizedMenuName ? { name: normalizedMenuName } : {}),
+        },
+      });
+      return;
+    }
+    router.replace('/(tabs)/menu');
+  }, [currentMenuRaw, normalizedMenuName, previousRouteName, router]);
+
+  const handleBackPress = useCallback(() => {
+    if (hasActualUnsavedChanges) {
       setShowBackConfirm(true);
       return;
     }
 
-    router.back();
-  };
+    if (
+      hasManualChanges ||
+      editedMenuItemIds.length > 0 ||
+      addedMenuItemIds.length > 0 ||
+      deletedMenuItemIds.length > 0
+    ) {
+      setHasManualChanges(false);
+      setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
+    }
+
+    navigateToMenuVersion();
+  }, [
+    editedMenuItemIds.length,
+    addedMenuItemIds.length,
+    deletedMenuItemIds.length,
+    hasActualUnsavedChanges,
+    hasManualChanges,
+    navigateToMenuVersion,
+  ]);
+
+  useEffect(() => {
+    const onHardwareBackPress = () => {
+      if (showEditModal) {
+        setShowEditModal(false);
+        return true;
+      }
+
+      if (showDeleteConfirm) {
+        setShowDeleteConfirm(false);
+        setDeletingItem(null);
+        return true;
+      }
+
+      if (showDuplicateItemModal) {
+        setShowDuplicateItemModal(false);
+        setDuplicateItemMessage('');
+        return true;
+      }
+
+      if (showBackConfirm) {
+        setShowBackConfirm(false);
+        return true;
+      }
+
+      handleBackPress();
+      return true;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
+    return () => subscription.remove();
+  }, [handleBackPress, showBackConfirm, showDeleteConfirm, showDuplicateItemModal, showEditModal]);
 
   const openEditModalForItem = (item: MenuItem) => {
     setEditingItem(item);
-    setEditDescription(item.description ?? '');
-    setEditSellingPrice(String(item.sellingPrice ?? 0));
-    setEditErrors({});
-
     const sizeDrafts = (item.itemSizeViewModels ?? []).map((size, index) => ({
       itemSizeId: size.itemSizeId > 0 ? size.itemSizeId : index,
       beverageSizeId: size.beverageSizeId ?? size.beverageSize?.beverageSizeId,
@@ -320,31 +479,49 @@ export default function MenuInsightsScreen() {
       sellingPrice: String(size.sellingPrice ?? 0),
     }));
 
+    const anchorSizeId = getAnchorSizeDraftId(sizeDrafts);
+    const anchorSizePrice =
+      anchorSizeId == null
+        ? null
+        : sizeDrafts.find((draft) => draft.itemSizeId === anchorSizeId)?.sellingPrice ?? null;
+
+    setEditDescription(item.description ?? '');
+    setEditSellingPrice(anchorSizePrice ?? String(item.sellingPrice ?? 0));
+    setEditErrors({});
     setEditSizePrices(sizeDrafts);
     setShowEditModal(true);
   };
 
   const updateSizePriceDraft = (itemSizeId: number, value: string) => {
-    setEditSizePrices((prev) =>
-      prev.map((draft) =>
+    setEditSizePrices((prev) => {
+      const nextDrafts = prev.map((draft) =>
         draft.itemSizeId === itemSizeId ? { ...draft, sellingPrice: value } : draft
-      )
-    );
+      );
+      const anchorSizeId = getAnchorSizeDraftId(nextDrafts);
+      if (anchorSizeId != null && anchorSizeId === itemSizeId) {
+        setEditSellingPrice(value);
+      }
+      return nextDrafts;
+    });
   };
 
   const validateEditForm = () => {
     const errors: EditErrors = {};
-    const trimmedDescription = editDescription.trim();
-    if (trimmedDescription.length > 240) {
+    const trimmedDescription = normalizeDescriptionInput(editDescription);
+    if (!trimmedDescription) {
+      errors.description = 'Description is required.';
+    } else if (trimmedDescription.length > 240) {
       errors.description = 'Description must be 240 characters or less.';
     }
 
-    const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
-    const parsedPrice = Number(priceValue);
-    if (!priceValue || !Number.isFinite(parsedPrice)) {
-      errors.sellingPrice = 'Enter a valid price.';
-    } else if (parsedPrice < 0) {
-      errors.sellingPrice = 'Price must be 0 or higher.';
+    if (!isMultiSizeEditing) {
+      const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
+      const parsedPrice = Number(priceValue);
+      if (!priceValue || !Number.isFinite(parsedPrice)) {
+        errors.sellingPrice = 'Enter a valid price.';
+      } else if (parsedPrice <= 0) {
+        errors.sellingPrice = 'Price must be greater than 0.';
+      }
     }
 
     if (editSizePrices.length > 0) {
@@ -354,10 +531,33 @@ export default function MenuInsightsScreen() {
         const parsedSize = Number(sizeValue);
         if (!sizeValue || !Number.isFinite(parsedSize)) {
           sizeErrors[size.itemSizeId] = 'Enter a valid price.';
-        } else if (parsedSize < 0) {
-          sizeErrors[size.itemSizeId] = 'Price must be 0 or higher.';
+        } else if (parsedSize <= 0) {
+          sizeErrors[size.itemSizeId] = 'Price must be greater than 0.';
         }
       });
+
+      const sizesSortedByVolume = [...editSizePrices].sort((left, right) => {
+        const leftVolume = Number(left.volume ?? Number.MAX_SAFE_INTEGER);
+        const rightVolume = Number(right.volume ?? Number.MAX_SAFE_INTEGER);
+        return leftVolume - rightVolume;
+      });
+
+      for (let i = 1; i < sizesSortedByVolume.length; i += 1) {
+        const prev = sizesSortedByVolume[i - 1];
+        const curr = sizesSortedByVolume[i];
+        const prevPrice = Number(prev.sellingPrice.replace(/[^0-9.]/g, ''));
+        const currPrice = Number(curr.sellingPrice.replace(/[^0-9.]/g, ''));
+
+        if (
+          Number.isFinite(prevPrice) &&
+          Number.isFinite(currPrice) &&
+          prevPrice > 0 &&
+          currPrice > 0 &&
+          currPrice < prevPrice
+        ) {
+          sizeErrors[curr.itemSizeId] = 'Larger size cannot be cheaper than smaller size.';
+        }
+      }
 
       if (Object.keys(sizeErrors).length > 0) {
         errors.sizePrices = sizeErrors;
@@ -372,8 +572,7 @@ export default function MenuInsightsScreen() {
     if (!editingItem) return;
     if (!validateEditForm()) return;
 
-    const nextDescription = editDescription.trim();
-    const nextSellingPrice = parseNumberInput(editSellingPrice, editingItem.sellingPrice ?? 0);
+    const nextDescription = normalizeDescriptionInput(editDescription);
 
     const updatedSizes = (editingItem.itemSizeViewModels ?? []).map((size, index) => {
       const sizeId = size.itemSizeId > 0 ? size.itemSizeId : index;
@@ -389,6 +588,19 @@ export default function MenuInsightsScreen() {
         sellingPrice: nextSizePrice,
       };
     });
+
+    const nextSellingPrice = (() => {
+      if (updatedSizes.length === 0) {
+        return parseNumberInput(editSellingPrice, editingItem.sellingPrice ?? 0);
+      }
+      const smallestSize = [...updatedSizes].sort((left, right) => {
+        const leftVolume = Number(left.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+        const rightVolume = Number(right.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+        return leftVolume - rightVolume;
+      })[0];
+
+      return Number(smallestSize?.sellingPrice ?? editingItem.sellingPrice ?? 0);
+    })();
 
     const updatedItem: MenuItem = {
       ...editingItem,
@@ -410,7 +622,9 @@ export default function MenuInsightsScreen() {
         next.delete(updatedItem.menuItemId);
       }
       const nextArray = Array.from(next);
-      setHasManualChanges(nextArray.length > 0);
+      setHasManualChanges(
+        nextArray.length > 0 || addedMenuItemIds.length > 0 || deletedMenuItemIds.length > 0
+      );
       return nextArray;
     });
 
@@ -505,7 +719,7 @@ export default function MenuInsightsScreen() {
         imageUrl,
         imageUrls: normalizedImageUrls.length > 0 ? normalizedImageUrls : imageUrl ? [imageUrl] : [],
         menuItems: items.map((item) => ({
-          menuItemId: Number(item.menuItemId ?? 0),
+          menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
           beverageId: Number(item.shopBeverage?.beverageId ?? 0),
           recipeId: Number(item.shopRecipe?.recipeId ?? 0),
           description: item.description ?? '',
@@ -573,6 +787,11 @@ export default function MenuInsightsScreen() {
   };
 
   const handleSaveManualEdits = async () => {
+    if (!hasActualUnsavedChanges) {
+      Alert.alert('No changes', 'There are no pending menu item changes to save.');
+      return;
+    }
+
     if (!menuId) {
       Alert.alert('Missing menu', 'Menu ID is missing.');
       return;
@@ -591,7 +810,9 @@ export default function MenuInsightsScreen() {
 
     try {
       setSavingManualEdits(true);
+      setSaveProgressText('Preparing payload...');
       const payload = buildUpdatePayload(id, currentMenuRaw, menuItems, menuImageUris);
+      setSaveProgressText('Saving menu updates...');
       const response = await authorizedFetch(API_ENDPOINTS.ai.updateAi(id), {
         method: 'PUT',
         headers: {
@@ -607,6 +828,7 @@ export default function MenuInsightsScreen() {
         throw new Error(text || `Request failed (${response.status})`);
       }
 
+      setSaveProgressText('Updating generated images...');
       const responsePayload = await response.json();
       const responseImages = Array.isArray(responsePayload?.ImageUrls)
         ? responsePayload.ImageUrls
@@ -622,11 +844,20 @@ export default function MenuInsightsScreen() {
         setMenuImageUris(Array.from(new Set(normalizedImages)));
       }
 
+      const savedEditedIds = [
+        ...new Set(
+          [...editedMenuItemIds, ...addedMenuItemIds, ...deletedMenuItemIds].filter((id) => id > 0)
+        ),
+      ];
       setHasManualChanges(false);
       setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
+      setLastSavedEditedMenuItemIds(savedEditedIds);
       originalMenuItemsRef.current = new Map(
         menuItems.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
       );
+      setSaveProgressText('Refreshing latest menu...');
       Toast.show({
         type: 'success',
         text1: 'Saved successfully',
@@ -638,6 +869,545 @@ export default function MenuInsightsScreen() {
       Alert.alert('Save failed', message);
     } finally {
       setSavingManualEdits(false);
+      setSaveProgressText('');
+    }
+  };
+
+  const fetchShopRecipes = useCallback(async () => {
+    if (!coffeeShopId) {
+      Alert.alert('Missing coffee shop', 'Could not determine coffee shop for this account.');
+      return;
+    }
+
+    try {
+      setLoadingAvailableRecipes(true);
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipe.getByShop(coffeeShopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : [];
+      const mapped: RecipeOption[] = list.map((item: any) => ({
+        recipeId: Number(item?.recipeId ?? item?.RecipeId ?? 0),
+        recipeName: String(item?.recipeName ?? item?.RecipeName ?? 'Unnamed recipe'),
+        image: item?.image ?? item?.Image ?? null,
+        proposedSellingPrice: Number(item?.proposedSellingPrice ?? item?.ProposedSellingPrice ?? 0),
+        beverageId: Number(item?.beverage?.beverageId ?? item?.beverageId ?? 0),
+        beverageName: String(item?.beverage?.name ?? item?.beverageName ?? item?.recipeName ?? 'Unknown'),
+        beverageCategoryId: Number(
+          item?.beverage?.beverageCategory?.beverageCategoryId ??
+            item?.beverage?.beverageCategoryId ??
+            item?.beverageCategoryId ??
+            0
+        ),
+        beverageCategoryName: String(
+          item?.beverage?.beverageCategory?.name ??
+            item?.beverage?.beverageCategoryName ??
+            item?.beverageCategoryName ??
+            ''
+        ),
+      }));
+      setAvailableRecipes(mapped.filter((item) => Number.isFinite(item.recipeId) && item.recipeId > 0));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load recipes.';
+      Alert.alert('Load recipes failed', message);
+    } finally {
+      setLoadingAvailableRecipes(false);
+    }
+  }, [coffeeShopId]);
+
+  const fetchShopSizes = useCallback(async () => {
+    if (!coffeeShopId) return;
+
+    try {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.getByShop(coffeeShopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const list = Array.isArray(payload) ? payload : [];
+      const mapped: ShopSizeOption[] = list
+        .map((item: any) => ({
+          beverageSizeId: Number(item?.beverageSizeId ?? item?.id ?? 0),
+          sizeName: String(item?.sizeName ?? item?.name ?? `Size ${item?.beverageSizeId ?? ''}`),
+          volume: Number(item?.volume ?? item?.capacity ?? 0),
+          isActive:
+            typeof item?.isActive === 'boolean'
+              ? item.isActive
+              : String(item?.status ?? '').toLowerCase() !== 'inactive',
+        }))
+        .filter((item) => Number.isFinite(item.beverageSizeId) && item.beverageSizeId > 0);
+
+      mapped.sort((left, right) => {
+        const leftVolume = Number.isFinite(Number(left.volume)) ? Number(left.volume) : Number.MAX_SAFE_INTEGER;
+        const rightVolume = Number.isFinite(Number(right.volume))
+          ? Number(right.volume)
+          : Number.MAX_SAFE_INTEGER;
+        if (leftVolume !== rightVolume) return leftVolume - rightVolume;
+        return left.sizeName.localeCompare(right.sizeName);
+      });
+
+      setShopSizes(mapped);
+    } catch (error) {
+      console.log('[Menu Insights] Failed to fetch shop sizes', error);
+    }
+  }, [coffeeShopId]);
+
+  const openAddItemModal = useCallback(async () => {
+    setRecipeSearchQuery('');
+    setShowAddItemModal(true);
+    if (availableRecipes.length === 0) {
+      await fetchShopRecipes();
+    }
+    if (shopSizes.length === 0) {
+      await fetchShopSizes();
+    }
+  }, [availableRecipes.length, fetchShopRecipes, fetchShopSizes, shopSizes.length]);
+
+  const normalizeMenuItemName = (value: unknown) =>
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const existingMenuItemNameSet = useMemo(() => {
+    const names = new Set<string>();
+
+    menuItems.forEach((item) => {
+      const recipeName = normalizeMenuItemName(item.shopRecipe?.recipeName);
+      const beverageName = normalizeMenuItemName(item.shopBeverage?.name);
+      if (recipeName) names.add(recipeName);
+      if (beverageName) names.add(beverageName);
+    });
+
+    return names;
+  }, [menuItems]);
+
+  const availableRecipesForAdd = useMemo(() => {
+    const existingRecipeIds = new Set(
+      menuItems.map((item) => Number(item.shopRecipe?.recipeId ?? 0)).filter((value) => value > 0)
+    );
+    const filtered = availableRecipes.filter(
+      (recipe) => !existingRecipeIds.has(Number(recipe.recipeId ?? 0))
+    );
+    const query = recipeSearchQuery.trim().toLowerCase();
+    if (!query) return filtered;
+    return filtered.filter((recipe) => {
+      const recipeName = String(recipe.recipeName ?? '').toLowerCase();
+      const beverageName = String(recipe.beverageName ?? '').toLowerCase();
+      const categoryName = String(recipe.beverageCategoryName ?? '').toLowerCase();
+      return (
+        recipeName.includes(query) || beverageName.includes(query) || categoryName.includes(query)
+      );
+    });
+  }, [availableRecipes, menuItems, recipeSearchQuery]);
+
+  const handleAddMenuItem = useCallback(
+    (recipe: RecipeOption) => {
+      const candidateRecipeName = normalizeMenuItemName(recipe.recipeName);
+      const candidateBeverageName = normalizeMenuItemName(recipe.beverageName);
+      const isDuplicateByName =
+        (candidateRecipeName && existingMenuItemNameSet.has(candidateRecipeName)) ||
+        (candidateBeverageName && existingMenuItemNameSet.has(candidateBeverageName));
+
+      if (isDuplicateByName) {
+        setDuplicateItemMessage(`"${recipe.recipeName}" already exists in the menu item list.`);
+        setShowDuplicateItemModal(true);
+        return;
+      }
+
+      const nextTempId = -(Date.now() + Math.floor(Math.random() * 1000));
+      const defaultPrice = Number(recipe.proposedSellingPrice ?? 0);
+      const nowIso = new Date().toISOString();
+      const basePrice = Number.isFinite(defaultPrice) && defaultPrice > 0 ? defaultPrice : 10000;
+
+      const sizeOptions = shopSizes.filter((size) => size.isActive);
+      const generatedSizeViewModels =
+        sizeOptions.length > 0
+          ? sizeOptions.map((size, index) => ({
+              itemSizeId: -(Math.abs(nextTempId) + index + 1),
+              beverageSizeId: size.beverageSizeId,
+              menuItemId: nextTempId,
+              sellingPrice: basePrice,
+              beverageSize: {
+                beverageSizeId: size.beverageSizeId,
+                sizeName: size.sizeName,
+                volume: Number(size.volume ?? 0),
+                isActive: size.isActive,
+              },
+            }))
+          : [];
+
+      const nextItem: MenuItem = {
+        menuItemId: nextTempId,
+        menuId: Number(menuId ?? 0) || undefined,
+        description: '',
+        sellingPrice: basePrice,
+        addedDate: nowIso,
+        itemSizeViewModels: generatedSizeViewModels,
+        shopBeverage: {
+          beverageId: Number(recipe.beverageId ?? 0),
+          name: String(recipe.beverageName ?? recipe.recipeName ?? 'New beverage'),
+          beverageCategoryId: Number(recipe.beverageCategoryId ?? 0),
+          beverageCategoryName: String(recipe.beverageCategoryName ?? ''),
+          beverageCategory: {
+            beverageCategoryId: Number(recipe.beverageCategoryId ?? 0),
+            name: String(recipe.beverageCategoryName ?? ''),
+          },
+        },
+        shopRecipe: {
+          recipeId: Number(recipe.recipeId ?? 0),
+          recipeName: String(recipe.recipeName ?? 'New recipe'),
+          image: recipe.image ? String(recipe.image) : null,
+        },
+        isExisting: true,
+      };
+
+      setMenuItems((prev) => [nextItem, ...prev]);
+      setEditedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
+      setAddedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
+      setHasManualChanges(true);
+      setShowAddItemModal(false);
+      openEditModalForItem(nextItem);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Item added',
+        text2:
+          generatedSizeViewModels.length > 0
+            ? `${nextItem.shopRecipe.recipeName} was added. You can edit description and size prices now.`
+            : `${nextItem.shopRecipe.recipeName} was added. No active beverage sizes found for this shop.`,
+      });
+    },
+    [existingMenuItemNameSet, menuId, openEditModalForItem, shopSizes]
+  );
+
+  const handleDeleteMenuItem = useCallback((item: MenuItem) => {
+    setDeletingItem(item);
+    setShowDeleteConfirm(true);
+  }, []);
+
+  const confirmDeleteMenuItem = useCallback(() => {
+    if (!deletingItem) return;
+
+    const targetItem = deletingItem;
+    setShowDeleteConfirm(false);
+    setDeletingItem(null);
+
+    setMenuItems((prev) => prev.filter((menuItem) => menuItem.menuItemId !== targetItem.menuItemId));
+    setItemSalesMap((prev) => {
+      const next = new Map(prev);
+      next.delete(targetItem.menuItemId);
+      return next;
+    });
+    setItemUnitCostMap((prev) => {
+      const next = new Map(prev);
+      next.delete(targetItem.menuItemId);
+      return next;
+    });
+    setEditedMenuItemIds((prev) =>
+      targetItem.menuItemId > 0
+        ? Array.from(new Set([...prev, targetItem.menuItemId]))
+        : prev.filter((id) => id !== targetItem.menuItemId)
+    );
+    setAddedMenuItemIds((prev) => prev.filter((id) => id !== targetItem.menuItemId));
+    if (targetItem.menuItemId > 0) {
+      setDeletedMenuItemIds((prev) => Array.from(new Set([...prev, targetItem.menuItemId])));
+    }
+    setHasManualChanges(true);
+  }, [deletingItem]);
+
+  const buildCreateMenuVersionPayload = (menuIdValue: number, menuRaw: any, items: MenuItem[]) => {
+    const basePayload = buildUpdatePayload(menuIdValue, menuRaw, items, menuImageUris);
+    const sourceMenuId = menuIdValue;
+    const createdValue =
+      menuRaw?.created ??
+      menuRaw?.Created ??
+      menuRaw?.createdAt ??
+      menuRaw?.createDate ??
+      menuRaw?.CreateDate ??
+      new Date().toISOString();
+
+    const menuItemsForRender = items.map((item) => ({
+      menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
+      menuId: sourceMenuId,
+      description: item.description ?? '',
+      sellingPrice: Number(item.sellingPrice ?? 0),
+      addedDate: item.addedDate ?? new Date().toISOString(),
+      itemSizeViewModels: (item.itemSizeViewModels ?? []).map((size, index) => ({
+        itemSizeId: Number(size.itemSizeId > 0 ? size.itemSizeId : index),
+        beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
+        menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
+        sellingPrice: Number(size.sellingPrice ?? 0),
+        beverageSize: size.beverageSize
+          ? {
+              beverageSizeId: Number(size.beverageSize.beverageSizeId ?? size.beverageSizeId ?? 0),
+              coffeeShopId: Number((size.beverageSize as any)?.coffeeShopId ?? 0),
+              sizeName: size.beverageSize.sizeName ?? '',
+              volume: Number(size.beverageSize.volume ?? 0),
+              isActive: Boolean(size.beverageSize.isActive ?? true),
+            }
+          : undefined,
+      })),
+      shopBeverage: {
+        beverageId: Number(item.shopBeverage?.beverageId ?? 0),
+        name: item.shopBeverage?.name ?? '',
+        status: item.shopBeverage?.status ?? '',
+        createDate: new Date().toISOString(),
+        beverageCategoryId: Number(
+          item.shopBeverage?.beverageCategoryId ??
+            item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+            0
+        ),
+        coffeeShopId: Number((item.shopBeverage as any)?.coffeeShopId ?? 0),
+        imageUrl: item.shopBeverage?.imageUrl ?? null,
+        image: item.shopBeverage?.image ?? null,
+        beverageCategory: {
+          beverageCategoryId: Number(
+            item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+              item.shopBeverage?.beverageCategoryId ??
+              0
+          ),
+          coffeeShopId: Number(
+            (item.shopBeverage?.beverageCategory as any)?.coffeeShopId ??
+              (item.shopBeverage as any)?.coffeeShopId ??
+              0
+          ),
+          name:
+            item.shopBeverage?.beverageCategory?.name ??
+            item.shopBeverage?.beverageCategoryName ??
+            'Unknown',
+          image: (item.shopBeverage?.beverageCategory as any)?.image ?? null,
+          menuGroupId: Number((item.shopBeverage?.beverageCategory as any)?.menuGroupId ?? 0),
+          createDate:
+            (item.shopBeverage?.beverageCategory as any)?.createDate ?? new Date().toISOString(),
+        },
+      },
+      isExisting: item.isExisting ?? true,
+      shopRecipe: item.shopRecipe
+        ? {
+            recipeId: Number(item.shopRecipe.recipeId ?? 0),
+            recipeName: item.shopRecipe.recipeName ?? '',
+            image: item.shopRecipe.image ?? null,
+          }
+        : undefined,
+    }));
+
+    const averagePrice =
+      menuItemsForRender.length > 0
+        ? menuItemsForRender.reduce((sum, item) => sum + Number(item.sellingPrice ?? 0), 0) /
+          menuItemsForRender.length
+        : Number(menuRaw?.averagePrice ?? 0);
+    const modifiedMenuItemIds = Array.from(
+      new Set([...lastSavedEditedMenuItemIds, ...editedMenuItemIds, ...deletedMenuItemIds])
+    ).filter((id) => id > 0);
+
+    return {
+      menu: {
+        ...basePayload.menu,
+        menuId: sourceMenuId,
+        created: createdValue,
+        menuItems: menuItemsForRender,
+        visualTheme: menuRaw?.visualTheme ?? menuRaw?.VisualTheme ?? undefined,
+        menuGroups: Array.isArray(menuRaw?.menuGroups) ? menuRaw.menuGroups : basePayload.menu.menuGroups,
+        averagePrice,
+        note: String(menuRaw?.note ?? ''),
+        modifiedMenuItemIds,
+      },
+      config: basePayload.config,
+    };
+  };
+
+  const handleCreateNewMenuVersion = async () => {
+    if (!hasEditedMenuItemsForVersion) {
+      Alert.alert(
+        'No menu changes',
+        'Please add, delete, or edit at least one menu item before creating a new version.'
+      );
+      return;
+    }
+
+    if (!menuId) {
+      Alert.alert('Missing menu', 'Menu ID is missing.');
+      return;
+    }
+
+    const id = Number(menuId);
+    if (!Number.isFinite(id)) {
+      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      return;
+    }
+
+    if (!currentMenuRaw) {
+      Alert.alert('Missing menu', 'Menu data is not loaded yet.');
+      return;
+    }
+
+    try {
+      setCreatingMenuVersion(true);
+      setCreateVersionProgressText('Preparing version payload...');
+      const payload = buildCreateMenuVersionPayload(id, currentMenuRaw, menuItems);
+      setCreateVersionProgressText('Step 1/2: Creating new menu version...');
+      const createVersionResponse = await authorizedFetch(API_ENDPOINTS.menu.saveAi(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload.menu),
+      });
+
+      const createVersionResponseText = await createVersionResponse.text();
+      let createVersionPayload: any = null;
+      if (createVersionResponseText) {
+        try {
+          createVersionPayload = JSON.parse(createVersionResponseText);
+        } catch {
+          createVersionPayload = createVersionResponseText;
+        }
+      }
+
+      if (!createVersionResponse.ok) {
+        const backendError =
+          createVersionPayload?.error ?? createVersionPayload?.message ?? createVersionResponseText;
+        console.log('[Create menu version] save-ai error response:', {
+          status: createVersionResponse.status,
+          text: createVersionResponseText,
+        });
+        throw new Error(backendError || `Request failed (${createVersionResponse.status})`);
+      }
+
+      const newMenuId = Number(createVersionPayload?.MenuId ?? createVersionPayload?.menuId ?? 0);
+      if (!Number.isFinite(newMenuId) || newMenuId <= 0) {
+        throw new Error('New menu version was created but no MenuId was returned.');
+      }
+
+      // Fetch the newly-created menu to preserve server-assigned VersionNumber (e.g. 2.0, 3.0).
+      let resolvedNewVersionNumber = '';
+      try {
+        const newMenuResponse = await authorizedFetch(API_ENDPOINTS.menu.getById(newMenuId), {
+          headers: { Accept: '*/*' },
+        });
+        if (newMenuResponse.ok) {
+          const newMenuPayload = await newMenuResponse.json();
+          resolvedNewVersionNumber = String(
+            newMenuPayload?.versionNumber ?? newMenuPayload?.VersionNumber ?? ''
+          );
+        }
+      } catch {
+        resolvedNewVersionNumber = '';
+      }
+
+      setCreateVersionProgressText('Step 2/2: Rendering image for new version...');
+      const renderPayload = {
+        ...payload,
+        menu: {
+          ...payload.menu,
+          menuId: newMenuId,
+          versionNumber:
+            resolvedNewVersionNumber.trim().length > 0
+              ? resolvedNewVersionNumber
+              : payload.menu?.versionNumber,
+          menuItems: Array.isArray(payload.menu?.menuItems)
+            ? payload.menu.menuItems.map((item: any) => ({
+                ...item,
+                menuId: newMenuId,
+                itemSizeViewModels: Array.isArray(item?.itemSizeViewModels)
+                  ? item.itemSizeViewModels.map((size: any) => ({
+                      ...size,
+                      menuItemId: Number(item?.menuItemId ?? 0),
+                    }))
+                  : [],
+              }))
+            : [],
+        },
+      };
+
+      const renderResponse = await authorizedFetch(API_ENDPOINTS.ai.createMenuRender(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(renderPayload),
+      });
+
+      const renderResponseText = await renderResponse.text();
+      let renderResponsePayload: any = null;
+      if (renderResponseText) {
+        try {
+          renderResponsePayload = JSON.parse(renderResponseText);
+        } catch {
+          renderResponsePayload = renderResponseText;
+        }
+      }
+
+      if (!renderResponse.ok) {
+        const backendError =
+          renderResponsePayload?.error ?? renderResponsePayload?.message ?? renderResponseText;
+        console.log('[Create menu version] create-menu-p3-render error response:', {
+          status: renderResponse.status,
+          text: renderResponseText,
+        });
+        throw new Error(
+          backendError ||
+            `Version ${newMenuId} was created but rendering failed (${renderResponse.status}).`
+        );
+      }
+
+      const responseImages = Array.isArray(renderResponsePayload?.ImageUrls)
+        ? renderResponsePayload.ImageUrls
+        : Array.isArray(renderResponsePayload?.imageUrls)
+          ? renderResponsePayload.imageUrls
+          : [];
+      const responsePrimary =
+        renderResponsePayload?.ImageUrl ?? renderResponsePayload?.imageUrl ?? null;
+      const normalizedImages = [responsePrimary, ...responseImages]
+        .map((raw: string | null) => resolveImageUrl(raw))
+        .filter((value): value is string => Boolean(value));
+      if (normalizedImages.length > 0) {
+        setMenuImageUris(Array.from(new Set(normalizedImages)));
+      }
+
+      setCreateVersionProgressText('Done. Redirecting to menu versions...');
+      Toast.show({
+        type: 'success',
+        text1: 'Created new menu version',
+        text2: `Version created (ID: ${newMenuId}).`,
+      });
+
+      const menuHeaderId = Number(currentMenuRaw?.menuHeaderId ?? currentMenuRaw?.MenuHeaderId ?? 0);
+      if (Number.isFinite(menuHeaderId) && menuHeaderId > 0) {
+        router.replace({
+          pathname: '/menu-version/[id]',
+          params: {
+            id: String(menuHeaderId),
+            ...(normalizedMenuName ? { name: normalizedMenuName } : {}),
+          },
+        });
+        return;
+      }
+      router.replace('/(tabs)/menu');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create menu version.';
+      Alert.alert('Create failed', message);
+    } finally {
+      setCreatingMenuVersion(false);
+      setCreateVersionProgressText('');
     }
   };
 
@@ -799,10 +1569,11 @@ export default function MenuInsightsScreen() {
         items.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
       );
       setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
       setHasManualChanges(false);
 
       // Fetch detailed menu items for unit cost calculation.
-      // Backend summary currently can return cost = 0, so we compute on frontend.
       const byMenuResponse = await authorizedFetch(API_ENDPOINTS.menuItem.getByMenu(id), {
         headers: {
           Accept: '*/*',
@@ -1262,12 +2033,7 @@ export default function MenuInsightsScreen() {
             <Ionicons name="chevron-back" size={26} color="#4a3621" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Menu Insights</Text>
-          <TouchableOpacity
-            style={styles.notificationButton}
-            onPress={() => router.push('/notifications')}
-          >
-            <Ionicons name="notifications-outline" size={24} color="#4a3621" />
-          </TouchableOpacity>
+          <View style={styles.headerSpacer} />
         </View>
 
         <View style={styles.feedbackInsightsButtonWrap}>
@@ -1446,32 +2212,74 @@ export default function MenuInsightsScreen() {
           <View style={styles.manualEditText}>
             <Text style={styles.manualEditTitle}>Manual edit</Text>
             <Text style={styles.manualEditSubtitle}>
-              Update descriptions or prices, then save changes.
+              Choose an action: overwrite current menu, or create a new version.
             </Text>
-            {hasManualChanges && (
+            {hasActualUnsavedChanges && (
               <Text style={styles.manualEditHint}>Unsaved changes</Text>
             )}
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.manualSaveButton,
-              (!hasManualChanges || savingManualEdits) && styles.manualSaveButtonDisabled,
-            ]}
-            onPress={handleSaveManualEdits}
-            disabled={!hasManualChanges || savingManualEdits}
-          >
-            {savingManualEdits ? (
-              <ActivityIndicator size="small" color="#FFF" />
-            ) : (
-              <Text style={styles.manualSaveButtonText}>Save edits</Text>
+            {savingManualEdits && saveProgressText.length > 0 && (
+              <Text style={styles.manualEditProgress}>{saveProgressText}</Text>
             )}
-          </TouchableOpacity>
+            {creatingMenuVersion && createVersionProgressText.length > 0 && (
+              <Text style={styles.manualEditProgress}>{createVersionProgressText}</Text>
+            )}
+          </View>
+          <View style={styles.manualActionColumn}>
+            <TouchableOpacity
+              style={[
+                styles.manualSaveButton,
+                (!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion) &&
+                  styles.manualSaveButtonDisabled,
+              ]}
+              onPress={handleSaveManualEdits}
+              disabled={!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion}
+            >
+              {savingManualEdits ? (
+                <View style={styles.manualSaveLoading}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Saving...</Text>
+                </View>
+              ) : (
+                <Text style={styles.manualSaveButtonText}>Save edits</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.manualCreateVersionButton,
+                (!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits) &&
+                  styles.manualSaveButtonDisabled,
+              ]}
+              onPress={handleCreateNewMenuVersion}
+              disabled={!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits}
+            >
+              {creatingMenuVersion ? (
+                <View style={styles.manualSaveLoading}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Creating...</Text>
+                </View>
+              ) : (
+                <Text style={styles.manualSaveButtonText}>Create new version</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Menu Items Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
-          <Text style={styles.sectionSubtitle}>Quick view of item performance and sales.</Text>
+          <View style={styles.menuItemsSectionHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
+              <Text style={styles.sectionSubtitle}>Quick view of item performance and sales.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.addMenuItemButton}
+              onPress={openAddItemModal}
+              disabled={loadingItems}
+            >
+              <Ionicons name="add" size={18} color="#FFF" />
+              <Text style={styles.addMenuItemButtonText}>Add item</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Menu Items List */}
@@ -1512,12 +2320,20 @@ export default function MenuInsightsScreen() {
                     <Text style={styles.menuItemTitle} numberOfLines={2}>
                       {item.shopRecipe?.recipeName || 'Unnamed Item'}
                     </Text>
-                    <TouchableOpacity
-                      style={styles.menuItemEditButton}
-                      onPress={() => openEditModalForItem(item)}
-                    >
-                      <Ionicons name="create-outline" size={18} color="#4a3621" />
-                    </TouchableOpacity>
+                    <View style={styles.menuItemActionGroup}>
+                      <TouchableOpacity
+                        style={styles.menuItemEditButton}
+                        onPress={() => openEditModalForItem(item)}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#4a3621" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.menuItemDeleteButton}
+                        onPress={() => handleDeleteMenuItem(item)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#a13e2a" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                     <View style={styles.cupsBadge}>
@@ -1613,6 +2429,141 @@ export default function MenuInsightsScreen() {
       </ScrollView>
 
         <Modal
+          visible={showAddItemModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowAddItemModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.addItemModalContent]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add menu item</Text>
+                <TouchableOpacity onPress={() => setShowAddItemModal(false)}>
+                  <Ionicons name="close" size={24} color="#4a3621" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.addItemSearchWrap}>
+                <Ionicons name="search" size={18} color="#847362" />
+                <TextInput
+                  style={styles.addItemSearchInput}
+                  placeholder="Search recipe or beverage..."
+                  placeholderTextColor="#847362"
+                  value={recipeSearchQuery}
+                  onChangeText={setRecipeSearchQuery}
+                />
+              </View>
+
+              {loadingAvailableRecipes ? (
+                <View style={styles.addItemLoadingWrap}>
+                  <ActivityIndicator size="small" color="#4a3621" />
+                  <Text style={styles.addItemLoadingText}>Loading recipes...</Text>
+                </View>
+              ) : availableRecipesForAdd.length === 0 ? (
+                <View style={styles.addItemEmptyWrap}>
+                  <Ionicons name="albums-outline" size={28} color="#847362" />
+                  <Text style={styles.addItemEmptyText}>No available recipe to add.</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={availableRecipesForAdd}
+                  keyExtractor={(item) => String(item.recipeId)}
+                  contentContainerStyle={styles.addItemList}
+                  renderItem={({ item }) => (
+                    <View style={styles.addItemRow}>
+                      <View style={styles.addItemRowInfo}>
+                        <Text style={styles.addItemRowTitle} numberOfLines={1}>
+                          {item.recipeName}
+                        </Text>
+                        <Text style={styles.addItemRowSubtitle} numberOfLines={1}>
+                          {item.beverageName || 'Unknown beverage'}
+                          {item.beverageCategoryName ? ` • ${item.beverageCategoryName}` : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.addItemRowButton}
+                        onPress={() => handleAddMenuItem(item)}
+                      >
+                        <Ionicons name="add" size={18} color="#FFF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showDuplicateItemModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDuplicateItemModal(false);
+            setDuplicateItemMessage('');
+          }}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={[styles.confirmIconWrap, styles.duplicateConfirmIconWrap]}>
+                <Ionicons name="alert-circle-outline" size={22} color="#d17a22" />
+              </View>
+              <Text style={styles.confirmTitle}>Duplicate menu item</Text>
+              <Text style={styles.confirmMessage}>
+                {duplicateItemMessage || 'This item already exists in the menu item list.'}
+              </Text>
+              <View style={[styles.confirmActions, styles.confirmSingleAction]}>
+                <TouchableOpacity
+                  style={styles.confirmLeaveButton}
+                  onPress={() => {
+                    setShowDuplicateItemModal(false);
+                    setDuplicateItemMessage('');
+                  }}
+                >
+                  <Text style={styles.confirmLeaveText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showDeleteConfirm}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDeleteConfirm(false);
+            setDeletingItem(null);
+          }}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={[styles.confirmIconWrap, styles.deleteConfirmIconWrap]}>
+                <Ionicons name="trash-outline" size={22} color="#d63a2f" />
+              </View>
+              <Text style={styles.confirmTitle}>Delete menu item?</Text>
+              <Text style={styles.confirmMessage}>
+                Remove "{deletingItem?.shopRecipe?.recipeName ?? 'this item'}" from this menu version.
+              </Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={styles.confirmCancelButton}
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletingItem(null);
+                  }}
+                >
+                  <Text style={styles.confirmCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteConfirmButton} onPress={confirmDeleteMenuItem}>
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
           visible={showBackConfirm}
           transparent
           animationType="fade"
@@ -1638,7 +2589,7 @@ export default function MenuInsightsScreen() {
                   style={styles.confirmLeaveButton}
                   onPress={() => {
                     setShowBackConfirm(false);
-                    router.back();
+                    navigateToMenuVersion();
                   }}
                 >
                   <Text style={styles.confirmLeaveText}>Discard</Text>
@@ -1666,8 +2617,26 @@ export default function MenuInsightsScreen() {
                 <Text style={styles.editItemName}>
                   {editingItem?.shopRecipe?.recipeName || 'Menu item'}
                 </Text>
+                <View style={styles.editMetaCard}>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Beverage</Text>
+                    <Text style={styles.editMetaValue}>{editingItem?.shopBeverage?.name || 'Unknown'}</Text>
+                  </View>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Category</Text>
+                    <Text style={styles.editMetaValue}>
+                      {editingItem?.shopBeverage?.beverageCategory?.name ||
+                        editingItem?.shopBeverage?.beverageCategoryName ||
+                        'Unknown'}
+                    </Text>
+                  </View>
+                  <View style={styles.editMetaRow}>
+                    <Text style={styles.editMetaLabel}>Recipe</Text>
+                    <Text style={styles.editMetaValue}>#{editingItem?.shopRecipe?.recipeId ?? 'N/A'}</Text>
+                  </View>
+                </View>
 
-                <Text style={styles.editLabel}>Description</Text>
+                <Text style={styles.editLabel}>Description (Editable)</Text>
                 <TextInput
                   style={[styles.editInput, styles.editTextArea]}
                   placeholder="Add a short description"
@@ -1680,36 +2649,55 @@ export default function MenuInsightsScreen() {
                   <Text style={styles.editErrorText}>{editErrors.description}</Text>
                 )}
 
-                <Text style={styles.editLabel}>Selling price</Text>
-                <TextInput
-                  style={styles.editInput}
-                  placeholder="0"
-                  placeholderTextColor="#b3a79b"
-                  keyboardType="numeric"
-                  value={editSellingPrice}
-                  onChangeText={setEditSellingPrice}
-                />
-                {editErrors.sellingPrice && (
-                  <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
+                {!isMultiSizeEditing ? (
+                  <>
+                    <Text style={styles.editLabel}>Selling price (Editable)</Text>
+                    <TextInput
+                      style={styles.editInput}
+                      placeholder="0"
+                      placeholderTextColor="#b3a79b"
+                      keyboardType="numeric"
+                      value={editSellingPrice}
+                      onChangeText={setEditSellingPrice}
+                    />
+                    {editErrors.sellingPrice && (
+                      <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
+                    )}
+                  </>
+                ) : (
+                  <View style={styles.basePriceInfoCard}>
+                    <Text style={styles.basePriceInfoTitle}>Base price (read-only)</Text>
+                    <Text style={styles.basePriceInfoValue}>{formatCurrency(Number(editSellingPrice || 0))}</Text>
+                    <Text style={styles.basePriceInfoHint}>
+                      Synced from smallest size: {anchorSizeDraft ? getSizeDraftLabel(anchorSizeDraft, 0) : 'N/A'}
+                    </Text>
+                  </View>
                 )}
 
                 {editSizePrices.length > 0 && (
                   <View style={styles.editSizesSection}>
-                    <Text style={styles.editLabel}>Size prices</Text>
+                    <Text style={styles.editLabel}>Size prices (Editable)</Text>
                     {editSizePrices.map((size, index) => (
                       <View key={size.itemSizeId}>
                         <View style={styles.sizePriceRow}>
-                          <Text style={styles.sizePriceLabel}>
-                            {size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`)}
-                          </Text>
-                          <TextInput
-                            style={styles.sizePriceInput}
-                            placeholder="0"
-                            placeholderTextColor="#b3a79b"
-                            keyboardType="numeric"
-                            value={size.sellingPrice}
-                            onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
-                          />
+                          <View style={styles.sizePriceLabelWrap}>
+                            <Text style={styles.sizePriceLabel}>{getSizeDraftLabel(size, index)}</Text>
+                            {anchorSizeDraftId === size.itemSizeId ? (
+                              <View style={styles.baseSizeBadge}>
+                                <Text style={styles.baseSizeBadgeText}>Base size</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={styles.sizePriceInputWrap}>
+                            <TextInput
+                              style={styles.sizePriceInput}
+                              placeholder="0"
+                              placeholderTextColor="#b3a79b"
+                              keyboardType="numeric"
+                              value={size.sellingPrice}
+                              onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
+                            />
+                          </View>
                         </View>
                         {editErrors.sizePrices?.[size.itemSizeId] && (
                           <Text style={styles.editErrorText}>
@@ -1962,9 +2950,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4a3621',
   },
-  notificationButton: {
-    padding: 8,
-    borderRadius: 50,
+  headerSpacer: {
+    width: 36,
   },
   bannerContainer: {
     paddingHorizontal: 24,
@@ -2003,10 +2990,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4a3621',
   },
+  menuItemsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   sectionSubtitle: {
     marginTop: 6,
     fontSize: 12,
     color: '#847362',
+  },
+  addMenuItemButton: {
+    backgroundColor: '#4a3621',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addMenuItemButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   menuImageSection: {
     paddingHorizontal: 24,
@@ -2232,6 +3238,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  manualEditProgress: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#2d6a4f',
+    fontWeight: '700',
+  },
+  manualSaveLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  manualActionColumn: {
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  manualCreateVersionButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#2D6A4F',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
@@ -2445,12 +3474,24 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 8,
   },
+  menuItemActionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   menuItemEditButton: {
     padding: 6,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e1dbd6',
     backgroundColor: '#FFF',
+  },
+  menuItemDeleteButton: {
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f0d6cf',
+    backgroundColor: '#fff5f2',
   },
   menuItemTitle: {
     fontSize: 16,
@@ -2750,17 +3791,126 @@ const styles = StyleSheet.create({
   editModalContent: {
     maxHeight: '80%',
   },
+  addItemModalContent: {
+    maxHeight: '75%',
+  },
+  addItemSearchWrap: {
+    marginHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  addItemSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#4a3621',
+  },
+  addItemLoadingWrap: {
+    paddingVertical: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addItemLoadingText: {
+    fontSize: 13,
+    color: '#847362',
+    fontWeight: '600',
+  },
+  addItemEmptyWrap: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addItemEmptyText: {
+    fontSize: 13,
+    color: '#847362',
+    fontWeight: '600',
+  },
+  addItemList: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  addItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#eadfd3',
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  addItemRowInfo: {
+    flex: 1,
+  },
+  addItemRowTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  addItemRowSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    color: '#847362',
+  },
+  addItemRowButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4a3621',
+  },
   editModalBody: {
     paddingHorizontal: 20,
   },
   editModalBodyContent: {
-    paddingBottom: 20,
+    paddingBottom: 28,
   },
   editItemName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '700',
     color: '#4a3621',
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  editMetaCard: {
+    borderWidth: 1,
+    borderColor: '#e6dbcf',
+    borderRadius: 12,
+    backgroundColor: '#faf7f3',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 7,
+  },
+  editMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  editMetaLabel: {
+    fontSize: 12,
+    color: '#847362',
+    fontWeight: '700',
+  },
+  editMetaValue: {
+    flex: 1,
+    fontSize: 12,
+    color: '#4a3621',
+    fontWeight: '600',
+    textAlign: 'right',
   },
   editLabel: {
     fontSize: 12,
@@ -2786,6 +3936,32 @@ const styles = StyleSheet.create({
   editSizesSection: {
     marginTop: 4,
   },
+  basePriceInfoCard: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e7dccf',
+    backgroundColor: '#f8f2ea',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  basePriceInfoTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#847362',
+  },
+  basePriceInfoValue: {
+    marginTop: 4,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  basePriceInfoHint: {
+    marginTop: 5,
+    fontSize: 11,
+    color: '#8b7865',
+    fontWeight: '600',
+  },
   sizePriceRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2793,13 +3969,33 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 10,
   },
-  sizePriceLabel: {
+  sizePriceLabelWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sizePriceLabel: {
     fontSize: 13,
     color: '#4a3621',
+    fontWeight: '600',
+  },
+  baseSizeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#d17a22',
+  },
+  baseSizeBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  sizePriceInputWrap: {
+    width: 118,
   },
   sizePriceInput: {
-    width: 110,
+    width: '100%',
     borderWidth: 1,
     borderColor: '#e1dbd6',
     borderRadius: 10,
@@ -2881,6 +4077,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
+  deleteConfirmIconWrap: {
+    backgroundColor: '#fdebea',
+  },
+  duplicateConfirmIconWrap: {
+    backgroundColor: '#fff2e6',
+  },
   confirmTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -2897,6 +4099,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 18,
     gap: 12,
+  },
+  confirmSingleAction: {
+    width: '100%',
   },
   confirmCancelButton: {
     flex: 1,
@@ -2920,6 +4125,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmLeaveText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#d63a2f',
+    alignItems: 'center',
+  },
+  deleteConfirmText: {
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700',

@@ -55,6 +55,7 @@ export const API_ENDPOINTS = {
   },
   shopRecipe: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopRecipe/${id}`,
+    getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopRecipe/by-shop/${shopId}`,
     enablePublic: (shopRecipeId: number) => `${AUTH_BASE_URL}/ShopRecipe/${shopRecipeId}/enable-public`,
   },
   postCategory: {
