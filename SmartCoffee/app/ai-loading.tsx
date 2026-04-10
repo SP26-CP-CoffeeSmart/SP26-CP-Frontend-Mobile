@@ -208,7 +208,6 @@ export default function AiLoadingScreen() {
               supplierId: item.supplierId,
               supplierName: item.supplierName ?? null,
               name: item.ingredientName || 'Unknown ingredient',
-              category: item.measurement || 'Other',
               image: image || '',
               subtitle: shortDescription || 'Recommended by inventory AI.',
               qtyNeeded,
