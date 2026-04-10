@@ -22,7 +22,7 @@ import { useCart, CartItem } from '@/context/cart-context';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
+import { useSuggestions } from '@/context/suggestion-context';
 
 type StockCheckResponseItem = {
     productId: number;
@@ -203,7 +203,7 @@ export default function CheckoutPage() {
             supplierId: s.supplierId,
             supplierName: s.supplierName ?? undefined,
             name: s.name,
-            category: s.category,
+            category: '',
             image: s.image || FALLBACK_PRODUCT_IMAGE,
             measurement: s.measurement || 'unit',
             packageSize: s.packageSize ?? null,
@@ -378,7 +378,7 @@ export default function CheckoutPage() {
                     width: 0,
                     height: 0,
                 };
-console.log('[GHN Fee Payload]', feePayload)
+                console.log('[GHN Fee Payload]', feePayload)
                 try {
                     const feeRes = await authorizedFetch(API_ENDPOINTS.order.ghnFee(), {
                         method: 'POST',
