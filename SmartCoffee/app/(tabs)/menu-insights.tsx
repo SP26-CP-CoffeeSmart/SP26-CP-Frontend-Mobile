@@ -28,6 +28,7 @@ import menuPerformanceService, {
 import { API_ENDPOINTS, AUTH_BASE_URL } from '../../services/api';
 import { authorizedFetch } from '../../services/authService';
 import { useBeverageCategories } from '../../context/beverage-category-context';
+import { useAuth } from '../../context/auth-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define MenuItem interface similar to daily-sales.tsx for proper data mapping
@@ -109,6 +110,24 @@ interface MenuItemCostPayload {
       cost?: number | null;
     }> | null;
   } | null;
+}
+
+interface RecipeOption {
+  recipeId: number;
+  recipeName: string;
+  image?: string | null;
+  proposedSellingPrice?: number | null;
+  beverageId?: number | null;
+  beverageName?: string | null;
+  beverageCategoryId?: number | null;
+  beverageCategoryName?: string | null;
+}
+
+interface ShopSizeOption {
+  beverageSizeId: number;
+  sizeName: string;
+  volume?: number;
+  isActive: boolean;
 }
 
 interface MenuGroup {
@@ -256,8 +275,19 @@ export default function MenuInsightsScreen() {
   const [lastSavedEditedMenuItemIds, setLastSavedEditedMenuItemIds] = useState<number[]>([]);
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [editedMenuItemIds, setEditedMenuItemIds] = useState<number[]>([]);
+  const [addedMenuItemIds, setAddedMenuItemIds] = useState<number[]>([]);
+  const [deletedMenuItemIds, setDeletedMenuItemIds] = useState<number[]>([]);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [availableRecipes, setAvailableRecipes] = useState<RecipeOption[]>([]);
+  const [shopSizes, setShopSizes] = useState<ShopSizeOption[]>([]);
+  const [loadingAvailableRecipes, setLoadingAvailableRecipes] = useState(false);
+  const [recipeSearchQuery, setRecipeSearchQuery] = useState('');
   const [editErrors, setEditErrors] = useState<EditErrors>({});
   const [showBackConfirm, setShowBackConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDuplicateItemModal, setShowDuplicateItemModal] = useState(false);
+  const [duplicateItemMessage, setDuplicateItemMessage] = useState('');
+  const [deletingItem, setDeletingItem] = useState<MenuItem | null>(null);
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -269,9 +299,13 @@ export default function MenuInsightsScreen() {
   const savedTranslateY = useSharedValue(0);
   
   const { categories } = useBeverageCategories();
+  const { coffeeShopId } = useAuth();
   const menuImageUri = menuImageUris[0] ?? null;
   const hasEditedMenuItemsForVersion =
-    editedMenuItemIds.length > 0 || lastSavedEditedMenuItemIds.length > 0;
+    editedMenuItemIds.length > 0 ||
+    lastSavedEditedMenuItemIds.length > 0 ||
+    addedMenuItemIds.length > 0 ||
+    deletedMenuItemIds.length > 0;
   const anchorSizeDraftId = getAnchorSizeDraftId(editSizePrices);
   const anchorSizeDraft =
     anchorSizeDraftId == null
@@ -348,8 +382,11 @@ export default function MenuInsightsScreen() {
   };
 
   const hasActualUnsavedChanges = useMemo(
-    () => menuItems.some((item) => isMenuItemEdited(item)),
-    [menuItems]
+    () =>
+      menuItems.some((item) => isMenuItemEdited(item)) ||
+      addedMenuItemIds.length > 0 ||
+      deletedMenuItemIds.length > 0,
+    [addedMenuItemIds.length, deletedMenuItemIds.length, menuItems]
   );
 
   const navigateToMenuVersion = useCallback(() => {
@@ -378,14 +415,23 @@ export default function MenuInsightsScreen() {
       return;
     }
 
-    if (hasManualChanges || editedMenuItemIds.length > 0) {
+    if (
+      hasManualChanges ||
+      editedMenuItemIds.length > 0 ||
+      addedMenuItemIds.length > 0 ||
+      deletedMenuItemIds.length > 0
+    ) {
       setHasManualChanges(false);
       setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
     }
 
     navigateToMenuVersion();
   }, [
     editedMenuItemIds.length,
+    addedMenuItemIds.length,
+    deletedMenuItemIds.length,
     hasActualUnsavedChanges,
     hasManualChanges,
     navigateToMenuVersion,
@@ -395,6 +441,18 @@ export default function MenuInsightsScreen() {
     const onHardwareBackPress = () => {
       if (showEditModal) {
         setShowEditModal(false);
+        return true;
+      }
+
+      if (showDeleteConfirm) {
+        setShowDeleteConfirm(false);
+        setDeletingItem(null);
+        return true;
+      }
+
+      if (showDuplicateItemModal) {
+        setShowDuplicateItemModal(false);
+        setDuplicateItemMessage('');
         return true;
       }
 
@@ -409,7 +467,7 @@ export default function MenuInsightsScreen() {
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
     return () => subscription.remove();
-  }, [handleBackPress, showBackConfirm, showEditModal]);
+  }, [handleBackPress, showBackConfirm, showDeleteConfirm, showDuplicateItemModal, showEditModal]);
 
   const openEditModalForItem = (item: MenuItem) => {
     setEditingItem(item);
@@ -564,7 +622,9 @@ export default function MenuInsightsScreen() {
         next.delete(updatedItem.menuItemId);
       }
       const nextArray = Array.from(next);
-      setHasManualChanges(nextArray.length > 0);
+      setHasManualChanges(
+        nextArray.length > 0 || addedMenuItemIds.length > 0 || deletedMenuItemIds.length > 0
+      );
       return nextArray;
     });
 
@@ -659,7 +719,7 @@ export default function MenuInsightsScreen() {
         imageUrl,
         imageUrls: normalizedImageUrls.length > 0 ? normalizedImageUrls : imageUrl ? [imageUrl] : [],
         menuItems: items.map((item) => ({
-          menuItemId: Number(item.menuItemId ?? 0),
+          menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
           beverageId: Number(item.shopBeverage?.beverageId ?? 0),
           recipeId: Number(item.shopRecipe?.recipeId ?? 0),
           description: item.description ?? '',
@@ -727,6 +787,11 @@ export default function MenuInsightsScreen() {
   };
 
   const handleSaveManualEdits = async () => {
+    if (!hasActualUnsavedChanges) {
+      Alert.alert('No changes', 'There are no pending menu item changes to save.');
+      return;
+    }
+
     if (!menuId) {
       Alert.alert('Missing menu', 'Menu ID is missing.');
       return;
@@ -779,9 +844,15 @@ export default function MenuInsightsScreen() {
         setMenuImageUris(Array.from(new Set(normalizedImages)));
       }
 
-      const savedEditedIds = [...editedMenuItemIds];
+      const savedEditedIds = [
+        ...new Set(
+          [...editedMenuItemIds, ...addedMenuItemIds, ...deletedMenuItemIds].filter((id) => id > 0)
+        ),
+      ];
       setHasManualChanges(false);
       setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
       setLastSavedEditedMenuItemIds(savedEditedIds);
       originalMenuItemsRef.current = new Map(
         menuItems.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
@@ -802,6 +873,264 @@ export default function MenuInsightsScreen() {
     }
   };
 
+  const fetchShopRecipes = useCallback(async () => {
+    if (!coffeeShopId) {
+      Alert.alert('Missing coffee shop', 'Could not determine coffee shop for this account.');
+      return;
+    }
+
+    try {
+      setLoadingAvailableRecipes(true);
+      const response = await authorizedFetch(API_ENDPOINTS.shopRecipe.getByShop(coffeeShopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const list = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : [];
+      const mapped: RecipeOption[] = list.map((item: any) => ({
+        recipeId: Number(item?.recipeId ?? item?.RecipeId ?? 0),
+        recipeName: String(item?.recipeName ?? item?.RecipeName ?? 'Unnamed recipe'),
+        image: item?.image ?? item?.Image ?? null,
+        proposedSellingPrice: Number(item?.proposedSellingPrice ?? item?.ProposedSellingPrice ?? 0),
+        beverageId: Number(item?.beverage?.beverageId ?? item?.beverageId ?? 0),
+        beverageName: String(item?.beverage?.name ?? item?.beverageName ?? item?.recipeName ?? 'Unknown'),
+        beverageCategoryId: Number(
+          item?.beverage?.beverageCategory?.beverageCategoryId ??
+            item?.beverage?.beverageCategoryId ??
+            item?.beverageCategoryId ??
+            0
+        ),
+        beverageCategoryName: String(
+          item?.beverage?.beverageCategory?.name ??
+            item?.beverage?.beverageCategoryName ??
+            item?.beverageCategoryName ??
+            ''
+        ),
+      }));
+      setAvailableRecipes(mapped.filter((item) => Number.isFinite(item.recipeId) && item.recipeId > 0));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load recipes.';
+      Alert.alert('Load recipes failed', message);
+    } finally {
+      setLoadingAvailableRecipes(false);
+    }
+  }, [coffeeShopId]);
+
+  const fetchShopSizes = useCallback(async () => {
+    if (!coffeeShopId) return;
+
+    try {
+      const response = await authorizedFetch(API_ENDPOINTS.beverageSize.getByShop(coffeeShopId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      const payload = await response.json();
+      const list = Array.isArray(payload) ? payload : [];
+      const mapped: ShopSizeOption[] = list
+        .map((item: any) => ({
+          beverageSizeId: Number(item?.beverageSizeId ?? item?.id ?? 0),
+          sizeName: String(item?.sizeName ?? item?.name ?? `Size ${item?.beverageSizeId ?? ''}`),
+          volume: Number(item?.volume ?? item?.capacity ?? 0),
+          isActive:
+            typeof item?.isActive === 'boolean'
+              ? item.isActive
+              : String(item?.status ?? '').toLowerCase() !== 'inactive',
+        }))
+        .filter((item) => Number.isFinite(item.beverageSizeId) && item.beverageSizeId > 0);
+
+      mapped.sort((left, right) => {
+        const leftVolume = Number.isFinite(Number(left.volume)) ? Number(left.volume) : Number.MAX_SAFE_INTEGER;
+        const rightVolume = Number.isFinite(Number(right.volume))
+          ? Number(right.volume)
+          : Number.MAX_SAFE_INTEGER;
+        if (leftVolume !== rightVolume) return leftVolume - rightVolume;
+        return left.sizeName.localeCompare(right.sizeName);
+      });
+
+      setShopSizes(mapped);
+    } catch (error) {
+      console.log('[Menu Insights] Failed to fetch shop sizes', error);
+    }
+  }, [coffeeShopId]);
+
+  const openAddItemModal = useCallback(async () => {
+    setRecipeSearchQuery('');
+    setShowAddItemModal(true);
+    if (availableRecipes.length === 0) {
+      await fetchShopRecipes();
+    }
+    if (shopSizes.length === 0) {
+      await fetchShopSizes();
+    }
+  }, [availableRecipes.length, fetchShopRecipes, fetchShopSizes, shopSizes.length]);
+
+  const normalizeMenuItemName = (value: unknown) =>
+    String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const existingMenuItemNameSet = useMemo(() => {
+    const names = new Set<string>();
+
+    menuItems.forEach((item) => {
+      const recipeName = normalizeMenuItemName(item.shopRecipe?.recipeName);
+      const beverageName = normalizeMenuItemName(item.shopBeverage?.name);
+      if (recipeName) names.add(recipeName);
+      if (beverageName) names.add(beverageName);
+    });
+
+    return names;
+  }, [menuItems]);
+
+  const availableRecipesForAdd = useMemo(() => {
+    const existingRecipeIds = new Set(
+      menuItems.map((item) => Number(item.shopRecipe?.recipeId ?? 0)).filter((value) => value > 0)
+    );
+    const filtered = availableRecipes.filter(
+      (recipe) => !existingRecipeIds.has(Number(recipe.recipeId ?? 0))
+    );
+    const query = recipeSearchQuery.trim().toLowerCase();
+    if (!query) return filtered;
+    return filtered.filter((recipe) => {
+      const recipeName = String(recipe.recipeName ?? '').toLowerCase();
+      const beverageName = String(recipe.beverageName ?? '').toLowerCase();
+      const categoryName = String(recipe.beverageCategoryName ?? '').toLowerCase();
+      return (
+        recipeName.includes(query) || beverageName.includes(query) || categoryName.includes(query)
+      );
+    });
+  }, [availableRecipes, menuItems, recipeSearchQuery]);
+
+  const handleAddMenuItem = useCallback(
+    (recipe: RecipeOption) => {
+      const candidateRecipeName = normalizeMenuItemName(recipe.recipeName);
+      const candidateBeverageName = normalizeMenuItemName(recipe.beverageName);
+      const isDuplicateByName =
+        (candidateRecipeName && existingMenuItemNameSet.has(candidateRecipeName)) ||
+        (candidateBeverageName && existingMenuItemNameSet.has(candidateBeverageName));
+
+      if (isDuplicateByName) {
+        setDuplicateItemMessage(`"${recipe.recipeName}" already exists in the menu item list.`);
+        setShowDuplicateItemModal(true);
+        return;
+      }
+
+      const nextTempId = -(Date.now() + Math.floor(Math.random() * 1000));
+      const defaultPrice = Number(recipe.proposedSellingPrice ?? 0);
+      const nowIso = new Date().toISOString();
+      const basePrice = Number.isFinite(defaultPrice) && defaultPrice > 0 ? defaultPrice : 10000;
+
+      const sizeOptions = shopSizes.filter((size) => size.isActive);
+      const generatedSizeViewModels =
+        sizeOptions.length > 0
+          ? sizeOptions.map((size, index) => ({
+              itemSizeId: -(Math.abs(nextTempId) + index + 1),
+              beverageSizeId: size.beverageSizeId,
+              menuItemId: nextTempId,
+              sellingPrice: basePrice,
+              beverageSize: {
+                beverageSizeId: size.beverageSizeId,
+                sizeName: size.sizeName,
+                volume: Number(size.volume ?? 0),
+                isActive: size.isActive,
+              },
+            }))
+          : [];
+
+      const nextItem: MenuItem = {
+        menuItemId: nextTempId,
+        menuId: Number(menuId ?? 0) || undefined,
+        description: '',
+        sellingPrice: basePrice,
+        addedDate: nowIso,
+        itemSizeViewModels: generatedSizeViewModels,
+        shopBeverage: {
+          beverageId: Number(recipe.beverageId ?? 0),
+          name: String(recipe.beverageName ?? recipe.recipeName ?? 'New beverage'),
+          beverageCategoryId: Number(recipe.beverageCategoryId ?? 0),
+          beverageCategoryName: String(recipe.beverageCategoryName ?? ''),
+          beverageCategory: {
+            beverageCategoryId: Number(recipe.beverageCategoryId ?? 0),
+            name: String(recipe.beverageCategoryName ?? ''),
+          },
+        },
+        shopRecipe: {
+          recipeId: Number(recipe.recipeId ?? 0),
+          recipeName: String(recipe.recipeName ?? 'New recipe'),
+          image: recipe.image ? String(recipe.image) : null,
+        },
+        isExisting: true,
+      };
+
+      setMenuItems((prev) => [nextItem, ...prev]);
+      setEditedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
+      setAddedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
+      setHasManualChanges(true);
+      setShowAddItemModal(false);
+      openEditModalForItem(nextItem);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Item added',
+        text2:
+          generatedSizeViewModels.length > 0
+            ? `${nextItem.shopRecipe.recipeName} was added. You can edit description and size prices now.`
+            : `${nextItem.shopRecipe.recipeName} was added. No active beverage sizes found for this shop.`,
+      });
+    },
+    [existingMenuItemNameSet, menuId, openEditModalForItem, shopSizes]
+  );
+
+  const handleDeleteMenuItem = useCallback((item: MenuItem) => {
+    setDeletingItem(item);
+    setShowDeleteConfirm(true);
+  }, []);
+
+  const confirmDeleteMenuItem = useCallback(() => {
+    if (!deletingItem) return;
+
+    const targetItem = deletingItem;
+    setShowDeleteConfirm(false);
+    setDeletingItem(null);
+
+    setMenuItems((prev) => prev.filter((menuItem) => menuItem.menuItemId !== targetItem.menuItemId));
+    setItemSalesMap((prev) => {
+      const next = new Map(prev);
+      next.delete(targetItem.menuItemId);
+      return next;
+    });
+    setItemUnitCostMap((prev) => {
+      const next = new Map(prev);
+      next.delete(targetItem.menuItemId);
+      return next;
+    });
+    setEditedMenuItemIds((prev) =>
+      targetItem.menuItemId > 0
+        ? Array.from(new Set([...prev, targetItem.menuItemId]))
+        : prev.filter((id) => id !== targetItem.menuItemId)
+    );
+    setAddedMenuItemIds((prev) => prev.filter((id) => id !== targetItem.menuItemId));
+    if (targetItem.menuItemId > 0) {
+      setDeletedMenuItemIds((prev) => Array.from(new Set([...prev, targetItem.menuItemId])));
+    }
+    setHasManualChanges(true);
+  }, [deletingItem]);
+
   const buildCreateMenuVersionPayload = (menuIdValue: number, menuRaw: any, items: MenuItem[]) => {
     const basePayload = buildUpdatePayload(menuIdValue, menuRaw, items, menuImageUris);
     const sourceMenuId = menuIdValue;
@@ -814,7 +1143,7 @@ export default function MenuInsightsScreen() {
       new Date().toISOString();
 
     const menuItemsForRender = items.map((item) => ({
-      menuItemId: Number(item.menuItemId ?? 0),
+      menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
       menuId: sourceMenuId,
       description: item.description ?? '',
       sellingPrice: Number(item.sellingPrice ?? 0),
@@ -822,7 +1151,7 @@ export default function MenuInsightsScreen() {
       itemSizeViewModels: (item.itemSizeViewModels ?? []).map((size, index) => ({
         itemSizeId: Number(size.itemSizeId > 0 ? size.itemSizeId : index),
         beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
-        menuItemId: Number(item.menuItemId ?? 0),
+        menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
         sellingPrice: Number(size.sellingPrice ?? 0),
         beverageSize: size.beverageSize
           ? {
@@ -884,8 +1213,8 @@ export default function MenuInsightsScreen() {
           menuItemsForRender.length
         : Number(menuRaw?.averagePrice ?? 0);
     const modifiedMenuItemIds = Array.from(
-      new Set([...lastSavedEditedMenuItemIds, ...editedMenuItemIds])
-    );
+      new Set([...lastSavedEditedMenuItemIds, ...editedMenuItemIds, ...deletedMenuItemIds])
+    ).filter((id) => id > 0);
 
     return {
       menu: {
@@ -906,8 +1235,8 @@ export default function MenuInsightsScreen() {
   const handleCreateNewMenuVersion = async () => {
     if (!hasEditedMenuItemsForVersion) {
       Alert.alert(
-        'No edited items',
-        'Please edit at least one menu item before creating a new version.'
+        'No menu changes',
+        'Please add, delete, or edit at least one menu item before creating a new version.'
       );
       return;
     }
@@ -1240,10 +1569,11 @@ export default function MenuInsightsScreen() {
         items.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
       );
       setEditedMenuItemIds([]);
+      setAddedMenuItemIds([]);
+      setDeletedMenuItemIds([]);
       setHasManualChanges(false);
 
       // Fetch detailed menu items for unit cost calculation.
-      // Backend summary currently can return cost = 0, so we compute on frontend.
       const byMenuResponse = await authorizedFetch(API_ENDPOINTS.menuItem.getByMenu(id), {
         headers: {
           Accept: '*/*',
@@ -1884,7 +2214,7 @@ export default function MenuInsightsScreen() {
             <Text style={styles.manualEditSubtitle}>
               Choose an action: overwrite current menu, or create a new version.
             </Text>
-            {hasManualChanges && (
+            {hasActualUnsavedChanges && (
               <Text style={styles.manualEditHint}>Unsaved changes</Text>
             )}
             {savingManualEdits && saveProgressText.length > 0 && (
@@ -1898,11 +2228,11 @@ export default function MenuInsightsScreen() {
             <TouchableOpacity
               style={[
                 styles.manualSaveButton,
-                (!hasManualChanges || savingManualEdits || creatingMenuVersion) &&
+                (!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion) &&
                   styles.manualSaveButtonDisabled,
               ]}
               onPress={handleSaveManualEdits}
-              disabled={!hasManualChanges || savingManualEdits || creatingMenuVersion}
+              disabled={!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion}
             >
               {savingManualEdits ? (
                 <View style={styles.manualSaveLoading}>
@@ -1936,8 +2266,20 @@ export default function MenuInsightsScreen() {
 
         {/* Menu Items Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
-          <Text style={styles.sectionSubtitle}>Quick view of item performance and sales.</Text>
+          <View style={styles.menuItemsSectionHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>Menu Items ({getFilteredMenuItems().length})</Text>
+              <Text style={styles.sectionSubtitle}>Quick view of item performance and sales.</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.addMenuItemButton}
+              onPress={openAddItemModal}
+              disabled={loadingItems}
+            >
+              <Ionicons name="add" size={18} color="#FFF" />
+              <Text style={styles.addMenuItemButtonText}>Add item</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Menu Items List */}
@@ -1978,12 +2320,20 @@ export default function MenuInsightsScreen() {
                     <Text style={styles.menuItemTitle} numberOfLines={2}>
                       {item.shopRecipe?.recipeName || 'Unnamed Item'}
                     </Text>
-                    <TouchableOpacity
-                      style={styles.menuItemEditButton}
-                      onPress={() => openEditModalForItem(item)}
-                    >
-                      <Ionicons name="create-outline" size={18} color="#4a3621" />
-                    </TouchableOpacity>
+                    <View style={styles.menuItemActionGroup}>
+                      <TouchableOpacity
+                        style={styles.menuItemEditButton}
+                        onPress={() => openEditModalForItem(item)}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#4a3621" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.menuItemDeleteButton}
+                        onPress={() => handleDeleteMenuItem(item)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color="#a13e2a" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                     <View style={styles.cupsBadge}>
@@ -2077,6 +2427,141 @@ export default function MenuInsightsScreen() {
 
         <View style={styles.bottomSpacing} />
       </ScrollView>
+
+        <Modal
+          visible={showAddItemModal}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowAddItemModal(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, styles.addItemModalContent]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add menu item</Text>
+                <TouchableOpacity onPress={() => setShowAddItemModal(false)}>
+                  <Ionicons name="close" size={24} color="#4a3621" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.addItemSearchWrap}>
+                <Ionicons name="search" size={18} color="#847362" />
+                <TextInput
+                  style={styles.addItemSearchInput}
+                  placeholder="Search recipe or beverage..."
+                  placeholderTextColor="#847362"
+                  value={recipeSearchQuery}
+                  onChangeText={setRecipeSearchQuery}
+                />
+              </View>
+
+              {loadingAvailableRecipes ? (
+                <View style={styles.addItemLoadingWrap}>
+                  <ActivityIndicator size="small" color="#4a3621" />
+                  <Text style={styles.addItemLoadingText}>Loading recipes...</Text>
+                </View>
+              ) : availableRecipesForAdd.length === 0 ? (
+                <View style={styles.addItemEmptyWrap}>
+                  <Ionicons name="albums-outline" size={28} color="#847362" />
+                  <Text style={styles.addItemEmptyText}>No available recipe to add.</Text>
+                </View>
+              ) : (
+                <FlatList
+                  data={availableRecipesForAdd}
+                  keyExtractor={(item) => String(item.recipeId)}
+                  contentContainerStyle={styles.addItemList}
+                  renderItem={({ item }) => (
+                    <View style={styles.addItemRow}>
+                      <View style={styles.addItemRowInfo}>
+                        <Text style={styles.addItemRowTitle} numberOfLines={1}>
+                          {item.recipeName}
+                        </Text>
+                        <Text style={styles.addItemRowSubtitle} numberOfLines={1}>
+                          {item.beverageName || 'Unknown beverage'}
+                          {item.beverageCategoryName ? ` • ${item.beverageCategoryName}` : ''}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.addItemRowButton}
+                        onPress={() => handleAddMenuItem(item)}
+                      >
+                        <Ionicons name="add" size={18} color="#FFF" />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                />
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showDuplicateItemModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDuplicateItemModal(false);
+            setDuplicateItemMessage('');
+          }}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={[styles.confirmIconWrap, styles.duplicateConfirmIconWrap]}>
+                <Ionicons name="alert-circle-outline" size={22} color="#d17a22" />
+              </View>
+              <Text style={styles.confirmTitle}>Duplicate menu item</Text>
+              <Text style={styles.confirmMessage}>
+                {duplicateItemMessage || 'This item already exists in the menu item list.'}
+              </Text>
+              <View style={[styles.confirmActions, styles.confirmSingleAction]}>
+                <TouchableOpacity
+                  style={styles.confirmLeaveButton}
+                  onPress={() => {
+                    setShowDuplicateItemModal(false);
+                    setDuplicateItemMessage('');
+                  }}
+                >
+                  <Text style={styles.confirmLeaveText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showDeleteConfirm}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            setShowDeleteConfirm(false);
+            setDeletingItem(null);
+          }}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={[styles.confirmIconWrap, styles.deleteConfirmIconWrap]}>
+                <Ionicons name="trash-outline" size={22} color="#d63a2f" />
+              </View>
+              <Text style={styles.confirmTitle}>Delete menu item?</Text>
+              <Text style={styles.confirmMessage}>
+                Remove "{deletingItem?.shopRecipe?.recipeName ?? 'this item'}" from this menu version.
+              </Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={styles.confirmCancelButton}
+                  onPress={() => {
+                    setShowDeleteConfirm(false);
+                    setDeletingItem(null);
+                  }}
+                >
+                  <Text style={styles.confirmCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteConfirmButton} onPress={confirmDeleteMenuItem}>
+                  <Text style={styles.deleteConfirmText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <Modal
           visible={showBackConfirm}
@@ -2505,10 +2990,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4a3621',
   },
+  menuItemsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   sectionSubtitle: {
     marginTop: 6,
     fontSize: 12,
     color: '#847362',
+  },
+  addMenuItemButton: {
+    backgroundColor: '#4a3621',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  addMenuItemButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   menuImageSection: {
     paddingHorizontal: 24,
@@ -2970,12 +3474,24 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 8,
   },
+  menuItemActionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   menuItemEditButton: {
     padding: 6,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e1dbd6',
     backgroundColor: '#FFF',
+  },
+  menuItemDeleteButton: {
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f0d6cf',
+    backgroundColor: '#fff5f2',
   },
   menuItemTitle: {
     fontSize: 16,
@@ -3275,6 +3791,88 @@ const styles = StyleSheet.create({
   editModalContent: {
     maxHeight: '80%',
   },
+  addItemModalContent: {
+    maxHeight: '75%',
+  },
+  addItemSearchWrap: {
+    marginHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    borderRadius: 10,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  addItemSearchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#4a3621',
+  },
+  addItemLoadingWrap: {
+    paddingVertical: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addItemLoadingText: {
+    fontSize: 13,
+    color: '#847362',
+    fontWeight: '600',
+  },
+  addItemEmptyWrap: {
+    paddingVertical: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  addItemEmptyText: {
+    fontSize: 13,
+    color: '#847362',
+    fontWeight: '600',
+  },
+  addItemList: {
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 10,
+  },
+  addItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#eadfd3',
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  addItemRowInfo: {
+    flex: 1,
+  },
+  addItemRowTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4a3621',
+  },
+  addItemRowSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    color: '#847362',
+  },
+  addItemRowButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4a3621',
+  },
   editModalBody: {
     paddingHorizontal: 20,
   },
@@ -3479,6 +4077,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 12,
   },
+  deleteConfirmIconWrap: {
+    backgroundColor: '#fdebea',
+  },
+  duplicateConfirmIconWrap: {
+    backgroundColor: '#fff2e6',
+  },
   confirmTitle: {
     fontSize: 18,
     fontWeight: '700',
@@ -3495,6 +4099,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 18,
     gap: 12,
+  },
+  confirmSingleAction: {
+    width: '100%',
   },
   confirmCancelButton: {
     flex: 1,
@@ -3518,6 +4125,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmLeaveText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#d63a2f',
+    alignItems: 'center',
+  },
+  deleteConfirmText: {
     color: '#FFF',
     fontSize: 14,
     fontWeight: '700',
