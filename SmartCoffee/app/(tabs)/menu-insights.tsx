@@ -270,6 +270,8 @@ export default function MenuInsightsScreen() {
   
   const { categories } = useBeverageCategories();
   const menuImageUri = menuImageUris[0] ?? null;
+  const hasEditedMenuItemsForVersion =
+    editedMenuItemIds.length > 0 || lastSavedEditedMenuItemIds.length > 0;
   const anchorSizeDraftId = getAnchorSizeDraftId(editSizePrices);
   const anchorSizeDraft =
     anchorSizeDraftId == null
@@ -902,6 +904,14 @@ export default function MenuInsightsScreen() {
   };
 
   const handleCreateNewMenuVersion = async () => {
+    if (!hasEditedMenuItemsForVersion) {
+      Alert.alert(
+        'No edited items',
+        'Please edit at least one menu item before creating a new version.'
+      );
+      return;
+    }
+
     if (!menuId) {
       Alert.alert('Missing menu', 'Menu ID is missing.');
       return;
@@ -1906,10 +1916,11 @@ export default function MenuInsightsScreen() {
             <TouchableOpacity
               style={[
                 styles.manualCreateVersionButton,
-                (creatingMenuVersion || savingManualEdits) && styles.manualSaveButtonDisabled,
+                (!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits) &&
+                  styles.manualSaveButtonDisabled,
               ]}
               onPress={handleCreateNewMenuVersion}
-              disabled={creatingMenuVersion || savingManualEdits}
+              disabled={!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits}
             >
               {creatingMenuVersion ? (
                 <View style={styles.manualSaveLoading}>
