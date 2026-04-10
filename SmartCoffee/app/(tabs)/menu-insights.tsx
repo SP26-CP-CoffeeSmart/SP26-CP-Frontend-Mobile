@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   FlatList,
   Image,
   Alert,
+  BackHandler,
   Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useNavigationState } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
@@ -217,7 +219,11 @@ const encodeFirebaseImageUrl = (url: unknown): string | undefined => {
 
 export default function MenuInsightsScreen() {
   const router = useRouter();
-  const { menuId, menuImage } = useLocalSearchParams<{ menuId?: string; menuImage?: string }>();
+  const { menuId, menuImage, menuName } = useLocalSearchParams<{
+    menuId?: string;
+    menuImage?: string;
+    menuName?: string;
+  }>();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -245,6 +251,9 @@ export default function MenuInsightsScreen() {
   const [editSizePrices, setEditSizePrices] = useState<SizePriceDraft[]>([]);
   const [savingManualEdits, setSavingManualEdits] = useState(false);
   const [saveProgressText, setSaveProgressText] = useState('');
+  const [creatingMenuVersion, setCreatingMenuVersion] = useState(false);
+  const [createVersionProgressText, setCreateVersionProgressText] = useState('');
+  const [lastSavedEditedMenuItemIds, setLastSavedEditedMenuItemIds] = useState<number[]>([]);
   const [hasManualChanges, setHasManualChanges] = useState(false);
   const [editedMenuItemIds, setEditedMenuItemIds] = useState<number[]>([]);
   const [editErrors, setEditErrors] = useState<EditErrors>({});
@@ -267,6 +276,15 @@ export default function MenuInsightsScreen() {
       ? null
       : editSizePrices.find((draft) => draft.itemSizeId === anchorSizeDraftId) ?? null;
   const isMultiSizeEditing = editSizePrices.length > 0;
+  const normalizedMenuName = useMemo(() => {
+    const raw = String(menuName ?? '').trim();
+    if (!raw) return '';
+    return raw.replace(/\s+ver\s+.+$/i, '').trim();
+  }, [menuName]);
+  const previousRouteName = useNavigationState((state) => {
+    if (!state || state.index <= 0) return '';
+    return String(state.routes[state.index - 1]?.name ?? '');
+  });
 
   const resetZoom = () => {
     scale.value = 1;
@@ -327,28 +345,69 @@ export default function MenuInsightsScreen() {
     return !isSnapshotEqual(original, buildMenuItemSnapshot(item));
   };
 
-  const navigateToMenuVersion = () => {
+  const hasActualUnsavedChanges = useMemo(
+    () => menuItems.some((item) => isMenuItemEdited(item)),
+    [menuItems]
+  );
+
+  const navigateToMenuVersion = useCallback(() => {
+    if (previousRouteName.toLowerCase().includes('menu-version') && router.canGoBack()) {
+      router.back();
+      return;
+    }
+
     const menuHeaderId = Number(currentMenuRaw?.menuHeaderId ?? currentMenuRaw?.MenuHeaderId ?? 0);
     if (Number.isFinite(menuHeaderId) && menuHeaderId > 0) {
       router.replace({
         pathname: '/menu-version/[id]',
         params: {
           id: String(menuHeaderId),
+          ...(normalizedMenuName ? { name: normalizedMenuName } : {}),
         },
       });
       return;
     }
-    router.back();
-  };
+    router.replace('/(tabs)/menu');
+  }, [currentMenuRaw, normalizedMenuName, previousRouteName, router]);
 
-  const handleBackPress = () => {
-    if (hasManualChanges || editedMenuItemIds.length > 0) {
+  const handleBackPress = useCallback(() => {
+    if (hasActualUnsavedChanges) {
       setShowBackConfirm(true);
       return;
     }
 
+    if (hasManualChanges || editedMenuItemIds.length > 0) {
+      setHasManualChanges(false);
+      setEditedMenuItemIds([]);
+    }
+
     navigateToMenuVersion();
-  };
+  }, [
+    editedMenuItemIds.length,
+    hasActualUnsavedChanges,
+    hasManualChanges,
+    navigateToMenuVersion,
+  ]);
+
+  useEffect(() => {
+    const onHardwareBackPress = () => {
+      if (showEditModal) {
+        setShowEditModal(false);
+        return true;
+      }
+
+      if (showBackConfirm) {
+        setShowBackConfirm(false);
+        return true;
+      }
+
+      handleBackPress();
+      return true;
+    };
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
+    return () => subscription.remove();
+  }, [handleBackPress, showBackConfirm, showEditModal]);
 
   const openEditModalForItem = (item: MenuItem) => {
     setEditingItem(item);
@@ -718,8 +777,10 @@ export default function MenuInsightsScreen() {
         setMenuImageUris(Array.from(new Set(normalizedImages)));
       }
 
+      const savedEditedIds = [...editedMenuItemIds];
       setHasManualChanges(false);
       setEditedMenuItemIds([]);
+      setLastSavedEditedMenuItemIds(savedEditedIds);
       originalMenuItemsRef.current = new Map(
         menuItems.map((item) => [item.menuItemId, buildMenuItemSnapshot(item)])
       );
@@ -736,6 +797,278 @@ export default function MenuInsightsScreen() {
     } finally {
       setSavingManualEdits(false);
       setSaveProgressText('');
+    }
+  };
+
+  const buildCreateMenuVersionPayload = (menuIdValue: number, menuRaw: any, items: MenuItem[]) => {
+    const basePayload = buildUpdatePayload(menuIdValue, menuRaw, items, menuImageUris);
+    const sourceMenuId = menuIdValue;
+    const createdValue =
+      menuRaw?.created ??
+      menuRaw?.Created ??
+      menuRaw?.createdAt ??
+      menuRaw?.createDate ??
+      menuRaw?.CreateDate ??
+      new Date().toISOString();
+
+    const menuItemsForRender = items.map((item) => ({
+      menuItemId: Number(item.menuItemId ?? 0),
+      menuId: sourceMenuId,
+      description: item.description ?? '',
+      sellingPrice: Number(item.sellingPrice ?? 0),
+      addedDate: item.addedDate ?? new Date().toISOString(),
+      itemSizeViewModels: (item.itemSizeViewModels ?? []).map((size, index) => ({
+        itemSizeId: Number(size.itemSizeId > 0 ? size.itemSizeId : index),
+        beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
+        menuItemId: Number(item.menuItemId ?? 0),
+        sellingPrice: Number(size.sellingPrice ?? 0),
+        beverageSize: size.beverageSize
+          ? {
+              beverageSizeId: Number(size.beverageSize.beverageSizeId ?? size.beverageSizeId ?? 0),
+              coffeeShopId: Number((size.beverageSize as any)?.coffeeShopId ?? 0),
+              sizeName: size.beverageSize.sizeName ?? '',
+              volume: Number(size.beverageSize.volume ?? 0),
+              isActive: Boolean(size.beverageSize.isActive ?? true),
+            }
+          : undefined,
+      })),
+      shopBeverage: {
+        beverageId: Number(item.shopBeverage?.beverageId ?? 0),
+        name: item.shopBeverage?.name ?? '',
+        status: item.shopBeverage?.status ?? '',
+        createDate: new Date().toISOString(),
+        beverageCategoryId: Number(
+          item.shopBeverage?.beverageCategoryId ??
+            item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+            0
+        ),
+        coffeeShopId: Number((item.shopBeverage as any)?.coffeeShopId ?? 0),
+        imageUrl: item.shopBeverage?.imageUrl ?? null,
+        image: item.shopBeverage?.image ?? null,
+        beverageCategory: {
+          beverageCategoryId: Number(
+            item.shopBeverage?.beverageCategory?.beverageCategoryId ??
+              item.shopBeverage?.beverageCategoryId ??
+              0
+          ),
+          coffeeShopId: Number(
+            (item.shopBeverage?.beverageCategory as any)?.coffeeShopId ??
+              (item.shopBeverage as any)?.coffeeShopId ??
+              0
+          ),
+          name:
+            item.shopBeverage?.beverageCategory?.name ??
+            item.shopBeverage?.beverageCategoryName ??
+            'Unknown',
+          image: (item.shopBeverage?.beverageCategory as any)?.image ?? null,
+          menuGroupId: Number((item.shopBeverage?.beverageCategory as any)?.menuGroupId ?? 0),
+          createDate:
+            (item.shopBeverage?.beverageCategory as any)?.createDate ?? new Date().toISOString(),
+        },
+      },
+      isExisting: item.isExisting ?? true,
+      shopRecipe: item.shopRecipe
+        ? {
+            recipeId: Number(item.shopRecipe.recipeId ?? 0),
+            recipeName: item.shopRecipe.recipeName ?? '',
+            image: item.shopRecipe.image ?? null,
+          }
+        : undefined,
+    }));
+
+    const averagePrice =
+      menuItemsForRender.length > 0
+        ? menuItemsForRender.reduce((sum, item) => sum + Number(item.sellingPrice ?? 0), 0) /
+          menuItemsForRender.length
+        : Number(menuRaw?.averagePrice ?? 0);
+    const modifiedMenuItemIds = Array.from(
+      new Set([...lastSavedEditedMenuItemIds, ...editedMenuItemIds])
+    );
+
+    return {
+      menu: {
+        ...basePayload.menu,
+        menuId: sourceMenuId,
+        created: createdValue,
+        menuItems: menuItemsForRender,
+        visualTheme: menuRaw?.visualTheme ?? menuRaw?.VisualTheme ?? undefined,
+        menuGroups: Array.isArray(menuRaw?.menuGroups) ? menuRaw.menuGroups : basePayload.menu.menuGroups,
+        averagePrice,
+        note: String(menuRaw?.note ?? ''),
+        modifiedMenuItemIds,
+      },
+      config: basePayload.config,
+    };
+  };
+
+  const handleCreateNewMenuVersion = async () => {
+    if (!menuId) {
+      Alert.alert('Missing menu', 'Menu ID is missing.');
+      return;
+    }
+
+    const id = Number(menuId);
+    if (!Number.isFinite(id)) {
+      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      return;
+    }
+
+    if (!currentMenuRaw) {
+      Alert.alert('Missing menu', 'Menu data is not loaded yet.');
+      return;
+    }
+
+    try {
+      setCreatingMenuVersion(true);
+      setCreateVersionProgressText('Preparing version payload...');
+      const payload = buildCreateMenuVersionPayload(id, currentMenuRaw, menuItems);
+      setCreateVersionProgressText('Step 1/2: Creating new menu version...');
+      const createVersionResponse = await authorizedFetch(API_ENDPOINTS.menu.saveAi(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload.menu),
+      });
+
+      const createVersionResponseText = await createVersionResponse.text();
+      let createVersionPayload: any = null;
+      if (createVersionResponseText) {
+        try {
+          createVersionPayload = JSON.parse(createVersionResponseText);
+        } catch {
+          createVersionPayload = createVersionResponseText;
+        }
+      }
+
+      if (!createVersionResponse.ok) {
+        const backendError =
+          createVersionPayload?.error ?? createVersionPayload?.message ?? createVersionResponseText;
+        console.log('[Create menu version] save-ai error response:', {
+          status: createVersionResponse.status,
+          text: createVersionResponseText,
+        });
+        throw new Error(backendError || `Request failed (${createVersionResponse.status})`);
+      }
+
+      const newMenuId = Number(createVersionPayload?.MenuId ?? createVersionPayload?.menuId ?? 0);
+      if (!Number.isFinite(newMenuId) || newMenuId <= 0) {
+        throw new Error('New menu version was created but no MenuId was returned.');
+      }
+
+      // Fetch the newly-created menu to preserve server-assigned VersionNumber (e.g. 2.0, 3.0).
+      let resolvedNewVersionNumber = '';
+      try {
+        const newMenuResponse = await authorizedFetch(API_ENDPOINTS.menu.getById(newMenuId), {
+          headers: { Accept: '*/*' },
+        });
+        if (newMenuResponse.ok) {
+          const newMenuPayload = await newMenuResponse.json();
+          resolvedNewVersionNumber = String(
+            newMenuPayload?.versionNumber ?? newMenuPayload?.VersionNumber ?? ''
+          );
+        }
+      } catch {
+        resolvedNewVersionNumber = '';
+      }
+
+      setCreateVersionProgressText('Step 2/2: Rendering image for new version...');
+      const renderPayload = {
+        ...payload,
+        menu: {
+          ...payload.menu,
+          menuId: newMenuId,
+          versionNumber:
+            resolvedNewVersionNumber.trim().length > 0
+              ? resolvedNewVersionNumber
+              : payload.menu?.versionNumber,
+          menuItems: Array.isArray(payload.menu?.menuItems)
+            ? payload.menu.menuItems.map((item: any) => ({
+                ...item,
+                menuId: newMenuId,
+                itemSizeViewModels: Array.isArray(item?.itemSizeViewModels)
+                  ? item.itemSizeViewModels.map((size: any) => ({
+                      ...size,
+                      menuItemId: Number(item?.menuItemId ?? 0),
+                    }))
+                  : [],
+              }))
+            : [],
+        },
+      };
+
+      const renderResponse = await authorizedFetch(API_ENDPOINTS.ai.createMenuRender(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(renderPayload),
+      });
+
+      const renderResponseText = await renderResponse.text();
+      let renderResponsePayload: any = null;
+      if (renderResponseText) {
+        try {
+          renderResponsePayload = JSON.parse(renderResponseText);
+        } catch {
+          renderResponsePayload = renderResponseText;
+        }
+      }
+
+      if (!renderResponse.ok) {
+        const backendError =
+          renderResponsePayload?.error ?? renderResponsePayload?.message ?? renderResponseText;
+        console.log('[Create menu version] create-menu-p3-render error response:', {
+          status: renderResponse.status,
+          text: renderResponseText,
+        });
+        throw new Error(
+          backendError ||
+            `Version ${newMenuId} was created but rendering failed (${renderResponse.status}).`
+        );
+      }
+
+      const responseImages = Array.isArray(renderResponsePayload?.ImageUrls)
+        ? renderResponsePayload.ImageUrls
+        : Array.isArray(renderResponsePayload?.imageUrls)
+          ? renderResponsePayload.imageUrls
+          : [];
+      const responsePrimary =
+        renderResponsePayload?.ImageUrl ?? renderResponsePayload?.imageUrl ?? null;
+      const normalizedImages = [responsePrimary, ...responseImages]
+        .map((raw: string | null) => resolveImageUrl(raw))
+        .filter((value): value is string => Boolean(value));
+      if (normalizedImages.length > 0) {
+        setMenuImageUris(Array.from(new Set(normalizedImages)));
+      }
+
+      setCreateVersionProgressText('Done. Redirecting to menu versions...');
+      Toast.show({
+        type: 'success',
+        text1: 'Created new menu version',
+        text2: `Version created (ID: ${newMenuId}).`,
+      });
+
+      const menuHeaderId = Number(currentMenuRaw?.menuHeaderId ?? currentMenuRaw?.MenuHeaderId ?? 0);
+      if (Number.isFinite(menuHeaderId) && menuHeaderId > 0) {
+        router.replace({
+          pathname: '/menu-version/[id]',
+          params: {
+            id: String(menuHeaderId),
+            ...(normalizedMenuName ? { name: normalizedMenuName } : {}),
+          },
+        });
+        return;
+      }
+      router.replace('/(tabs)/menu');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create menu version.';
+      Alert.alert('Create failed', message);
+    } finally {
+      setCreatingMenuVersion(false);
+      setCreateVersionProgressText('');
     }
   };
 
@@ -1539,7 +1872,7 @@ export default function MenuInsightsScreen() {
           <View style={styles.manualEditText}>
             <Text style={styles.manualEditTitle}>Manual edit</Text>
             <Text style={styles.manualEditSubtitle}>
-              Update descriptions or prices, then save changes.
+              Choose an action: overwrite current menu, or create a new version.
             </Text>
             {hasManualChanges && (
               <Text style={styles.manualEditHint}>Unsaved changes</Text>
@@ -1547,24 +1880,47 @@ export default function MenuInsightsScreen() {
             {savingManualEdits && saveProgressText.length > 0 && (
               <Text style={styles.manualEditProgress}>{saveProgressText}</Text>
             )}
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.manualSaveButton,
-              (!hasManualChanges || savingManualEdits) && styles.manualSaveButtonDisabled,
-            ]}
-            onPress={handleSaveManualEdits}
-            disabled={!hasManualChanges || savingManualEdits}
-          >
-            {savingManualEdits ? (
-              <View style={styles.manualSaveLoading}>
-                <ActivityIndicator size="small" color="#FFF" />
-                <Text style={styles.manualSaveButtonText}>Saving...</Text>
-              </View>
-            ) : (
-              <Text style={styles.manualSaveButtonText}>Save edits</Text>
+            {creatingMenuVersion && createVersionProgressText.length > 0 && (
+              <Text style={styles.manualEditProgress}>{createVersionProgressText}</Text>
             )}
-          </TouchableOpacity>
+          </View>
+          <View style={styles.manualActionColumn}>
+            <TouchableOpacity
+              style={[
+                styles.manualSaveButton,
+                (!hasManualChanges || savingManualEdits || creatingMenuVersion) &&
+                  styles.manualSaveButtonDisabled,
+              ]}
+              onPress={handleSaveManualEdits}
+              disabled={!hasManualChanges || savingManualEdits || creatingMenuVersion}
+            >
+              {savingManualEdits ? (
+                <View style={styles.manualSaveLoading}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Saving...</Text>
+                </View>
+              ) : (
+                <Text style={styles.manualSaveButtonText}>Save edits</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.manualCreateVersionButton,
+                (creatingMenuVersion || savingManualEdits) && styles.manualSaveButtonDisabled,
+              ]}
+              onPress={handleCreateNewMenuVersion}
+              disabled={creatingMenuVersion || savingManualEdits}
+            >
+              {creatingMenuVersion ? (
+                <View style={styles.manualSaveLoading}>
+                  <ActivityIndicator size="small" color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Creating...</Text>
+                </View>
+              ) : (
+                <Text style={styles.manualSaveButtonText}>Create new version</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Menu Items Section */}
@@ -2377,6 +2733,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  manualActionColumn: {
+    gap: 8,
+    alignItems: 'stretch',
+  },
+  manualCreateVersionButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#2D6A4F',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   searchBar: {
     flex: 1,
