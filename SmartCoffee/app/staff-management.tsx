@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-    SafeAreaView,
     StyleSheet,
     Text,
     View,
@@ -9,6 +8,7 @@ import {
     ActivityIndicator,
     RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { TextInput } from 'react-native';
@@ -38,17 +38,17 @@ export interface ShopStaff {
 }
 
 const COLORS = {
-    bg: '#FBF8F4',
-    bgTint: '#F5EFE8',
-    text: '#2D211B',
-    muted: '#8B8179',
-    mutedLight: '#C6BDB6',
-    border: '#EFE8E1',
-    accent: '#32211E',
-    accentDark: '#231713',
+    bg: '#F9F6F0',
+    bgTint: '#F0EBE1',
+    text: '#2C1E16',
+    muted: '#8C7E72',
+    mutedLight: '#C4B9B1',
+    border: '#E6DED6',
+    accent: '#432C1E',
+    accentDark: '#2C1E16',
     white: '#FFFFFF',
-    error: '#C51B1B',
-    iconSoft: '#F4EFE9',
+    error: '#C54A4A',
+    iconSoft: '#E6DED6',
 };
 
 export default function StaffManagementScreen() {

@@ -76,7 +76,7 @@ const getMenuSubtitle = (menu: any, flow?: string) => {
 const getAveragePrice = (menu: any): string => {
   const price = menu?.averagePrice;
   if (!price) return '-';
-  return Number(price).toLocaleString('vi-VN') + ' VNĐ';
+  return Number(price).toLocaleString('vi-VN') + ' VND';
 };
 
 const getVisualTheme = (menu: any) => {

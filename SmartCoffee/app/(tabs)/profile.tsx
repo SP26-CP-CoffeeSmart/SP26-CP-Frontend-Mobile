@@ -22,6 +22,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 import { WebView } from 'react-native-webview';
 import { Fonts } from '@/constants/theme';
+import { resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 const purchaseStatuses = [
   { label: 'Pending confirmation', icon: 'wallet-outline' },
@@ -83,6 +84,13 @@ export default function ProfileScreen() {
   const [transactionsLoading, setTransactionsLoading] = useState(false);
   const [transactionsError, setTransactionsError] = useState<string | null>(null);
   const [refreshingTransactions, setRefreshingTransactions] = useState(false);
+  const [txPage, setTxPage] = useState(1);
+  const [txHasMore, setTxHasMore] = useState(false);
+  const [txPaymentMethod, setTxPaymentMethod] = useState('');
+  const [txTotalWallet, setTxTotalWallet] = useState(0);
+  const [txTotalEbank, setTxTotalEbank] = useState(0);
+  const [txTotalTransaction, setTxTotalTransaction] = useState(0);
+  const [txLoadingMore, setTxLoadingMore] = useState(false);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTriggeredRef = useRef(false);
@@ -164,13 +172,6 @@ export default function ProfileScreen() {
   const profilePhoneDisplay = profileLoading ? 'Loading...' : profilePhone;
   const profileHeaderName = profileShopDisplay;
   const formattedBalance = walletBalance.toLocaleString('vi-VN');
-
-  const normalizeSubscription = (value: any) => {
-    if (!value) return null;
-    if (Array.isArray(value)) return value[0] ?? null;
-    if (Array.isArray(value?.data)) return value.data[0] ?? null;
-    return value?.data ?? value?.item ?? value;
-  };
 
   const getSubscriptionName = (value: any) => {
     const name =
@@ -288,20 +289,43 @@ export default function ProfileScreen() {
   };
 
   const getPackageFeatures = (value: any) => {
+    const defaultFeatures: string[] = [];
+    if (typeof value === 'object' && value !== null) {
+      if (value.staffQuantity !== undefined) {
+        defaultFeatures.push(`Staff Accounts: ${value.staffQuantity}`);
+      }
+      if (value.menuSuggestLimit !== undefined) {
+        defaultFeatures.push(`Menu Suggestions Limit: ${value.menuSuggestLimit}`);
+      }
+      if (value.recipeRecommendLimit !== undefined) {
+        defaultFeatures.push(`Recipe Recommendations Limit: ${value.recipeRecommendLimit}`);
+      }
+      if (value.productRecommendLimit !== undefined) {
+        defaultFeatures.push(`Product Recommendations Limit: ${value.productRecommendLimit}`);
+      }
+      if (value.menuAnalyzeFeedbackLimit !== undefined) {
+        defaultFeatures.push(`Menu Feedback Analysis Limit: ${value.menuAnalyzeFeedbackLimit}`);
+      }
+      if (value.inventoryForecastLimit !== undefined) {
+        defaultFeatures.push(`Inventory Forecasts Limit: ${value.inventoryForecastLimit}`);
+      }
+    }
+
     const raw = value?.features ?? value?.featureList ?? value?.benefits ?? value?.details;
     if (Array.isArray(raw)) {
-      return raw.map((item) => String(item)).filter(Boolean);
+      return [...defaultFeatures, ...raw.map((item) => String(item)).filter(Boolean)];
     }
     if (typeof raw === 'string') {
-      return raw
+      const parsed = raw
         .split(/\n|;|\r|\r\n/)
         .map((item) => item.trim())
         .filter(Boolean);
+      return [...defaultFeatures, ...parsed];
     }
-    return [] as string[];
+    return defaultFeatures;
   };
 
-  const subscriptionValue = normalizeSubscription(subscriptionData);
+  const subscriptionValue = resolveCurrentSubscription(subscriptionData);
   const subscriptionName = getSubscriptionName(subscriptionValue);
   const subscriptionBadge = getSubscriptionBadge(subscriptionValue);
   const subscriptionStatus = getSubscriptionStatus(subscriptionValue);
@@ -347,7 +371,13 @@ export default function ProfileScreen() {
     try {
       setSubscriptionLoading(true);
       setSubscriptionError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(profileCoffeeShopId));
+      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(profileCoffeeShopId), {
+        headers: {
+          Accept: '*/*',
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+        },
+      });
       if (!response.ok) {
         throw new Error('Failed to load subscription');
       }
@@ -830,44 +860,83 @@ export default function ProfileScreen() {
     }
   };
 
-  const loadTransactions = useCallback(async () => {
+  const loadTransactions = useCallback(async (page = 1, method = '', isLoadMore = false) => {
     if (!accountId) {
       setTransactionsError('Missing account ID.');
       return;
     }
     try {
-      setTransactionsLoading(true);
+      if (isLoadMore) {
+        setTxLoadingMore(true);
+      } else {
+        setTransactionsLoading(true);
+      }
       setTransactionsError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.transaction.listByUser(accountId));
+      const params: any = { page, pageSize: 20 };
+      if (method) {
+        params.paymentMethod = method;
+      }
+      
+      const response = await authorizedFetch(API_ENDPOINTS.transaction.listByUser(accountId, params));
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
       }
       const data = await response.json();
       const list = Array.isArray(data) ? data : (data?.items ?? data?.data ?? data?.results ?? []);
-      setTransactions(list);
+      
+      if (isLoadMore) {
+        setTransactions((prev) => [...prev, ...list]);
+      } else {
+        setTransactions(list);
+      }
+      
+      if (!Array.isArray(data)) {
+        setTxTotalWallet(data?.totalWalletAmount ?? 0);
+        setTxTotalEbank(data?.totalEbankAmount ?? 0);
+        setTxTotalTransaction(data?.totalTransaction ?? 0);
+      }
+      
+      setTxHasMore(list.length === 20);
+      setTxPage(page);
     } catch (error) {
       setTransactionsError('Unable to load transactions.');
-      setTransactions([]);
+      if (!isLoadMore) {
+        setTransactions([]);
+      }
     } finally {
       setTransactionsLoading(false);
+      setTxLoadingMore(false);
     }
   }, [accountId]);
 
   const handleOpenTransactions = () => {
     setTransactions([]);
     setTransactionsError(null);
+    setTxPage(1);
+    setTxPaymentMethod('');
     setShowTransactionModal(true);
-    loadTransactions();
+    loadTransactions(1, '');
   };
 
   const handleRefreshTransactions = async () => {
     if (refreshingTransactions) return;
     try {
       setRefreshingTransactions(true);
-      await loadTransactions();
+      await loadTransactions(1, txPaymentMethod, false);
     } finally {
       setRefreshingTransactions(false);
     }
+  };
+
+  const handleLoadMoreTransactions = async () => {
+    if (transactionsLoading || txLoadingMore || !txHasMore) return;
+    await loadTransactions(txPage + 1, txPaymentMethod, true);
+  };
+
+  const handleSelectTxMethod = (method: string) => {
+    if (transactionsLoading || txLoadingMore) return;
+    setTxPaymentMethod(method);
+    loadTransactions(1, method, false);
   };
 
   const handleWalletCardPress = () => {
@@ -891,7 +960,7 @@ export default function ProfileScreen() {
 
   const formatPrice = (value?: number) => {
     if (value === null || value === undefined) return '-';
-    return `${Number(value).toLocaleString('vi-VN')} vnd`;
+    return `${Number(value).toLocaleString('vi-VN')} VND`;
   };
 
   const getTransactionStatusColor = (status?: string) => {
@@ -1012,7 +1081,7 @@ export default function ProfileScreen() {
               <Text style={styles.walletBalanceLabel}>Wallet Balance</Text>
             </View>
             <View style={styles.walletBalanceRight}>
-              <Text style={styles.walletBalanceAmount}>{formattedBalance} vnd</Text>
+              <Text style={styles.walletBalanceAmount}>{formattedBalance} VND</Text>
               <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
             </View>
           </View>
@@ -1150,7 +1219,7 @@ export default function ProfileScreen() {
                           </Text>
                           <Text style={styles.packageCardPrice}>
                             {price !== null
-                              ? `${price.toLocaleString('vi-VN')} vnd`
+                              ? `${price.toLocaleString('vi-VN')} VND`
                               : 'Contact for pricing'}
                             {duration ? <Text style={styles.packageCardPriceUnit}>/{duration}</Text> : null}
                           </Text>
@@ -1481,6 +1550,36 @@ export default function ProfileScreen() {
               />
             }
           >
+            <View style={styles.txFilterContainer}>
+              <TouchableOpacity
+                style={[styles.txFilterBtn, txPaymentMethod === '' && styles.txFilterBtnActive]}
+                onPress={() => handleSelectTxMethod('')}
+              >
+                <Text style={[styles.txFilterText, txPaymentMethod === '' && styles.txFilterTextActive]}>All</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.txFilterBtn, txPaymentMethod === 'WALLET' && styles.txFilterBtnActive]}
+                onPress={() => handleSelectTxMethod('WALLET')}
+              >
+                <Text style={[styles.txFilterText, txPaymentMethod === 'WALLET' && styles.txFilterTextActive]}>Wallet</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.txFilterBtn, txPaymentMethod === 'E-BANK' && styles.txFilterBtnActive]}
+                onPress={() => handleSelectTxMethod('E-BANK')}
+              >
+                <Text style={[styles.txFilterText, txPaymentMethod === 'E-BANK' && styles.txFilterTextActive]}>E-Bank</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.txSummaryContainer}>
+              <Text style={styles.txSummaryLabel}>
+                {txPaymentMethod === 'WALLET' ? 'Total Wallet:' : txPaymentMethod === 'E-BANK' ? 'Total E-Bank:' : 'Total Amount:'}
+              </Text>
+              <Text style={styles.txSummaryValue}>
+                {formatPrice(txPaymentMethod === 'WALLET' ? txTotalWallet : txPaymentMethod === 'E-BANK' ? txTotalEbank : txTotalTransaction)}
+              </Text>
+            </View>
+
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={true}
@@ -1504,7 +1603,7 @@ export default function ProfileScreen() {
                   <View style={styles.txLoadingWrap}>
                     <Ionicons name="alert-circle-outline" size={24} color="#C51B1B" />
                     <Text style={styles.txFeedbackText}>{transactionsError}</Text>
-                    <TouchableOpacity style={styles.txRetryButton} onPress={loadTransactions}>
+                    <TouchableOpacity style={styles.txRetryButton} onPress={() => loadTransactions(1, txPaymentMethod, false)}>
                       <Text style={styles.txRetryText}>Retry</Text>
                     </TouchableOpacity>
                   </View>
@@ -1541,6 +1640,21 @@ export default function ProfileScreen() {
                 )}
               </View>
             </ScrollView>
+            
+            {txHasMore && (
+              <TouchableOpacity
+                style={styles.txLoadMoreBtn}
+                onPress={handleLoadMoreTransactions}
+                disabled={txLoadingMore}
+              >
+                {txLoadingMore ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.txLoadMoreText}>Load More</Text>
+                )}
+              </TouchableOpacity>
+            )}
+            
           </ScrollView>
         </SafeAreaView>
       </Modal>
@@ -2653,5 +2767,63 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#3C2B20',
+  },
+  txFilterContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EADBCB',
+  },
+  txFilterBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#EADBCB',
+  },
+  txFilterBtnActive: {
+    backgroundColor: '#8B6B4D',
+  },
+  txFilterText: {
+    fontSize: 14,
+    color: '#6B4D35',
+    fontWeight: '600',
+  },
+  txFilterTextActive: {
+    color: '#FFF',
+  },
+  txSummaryContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#F7F2EA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EADBCB',
+  },
+  txSummaryLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#3C2B20',
+  },
+  txSummaryValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#A36D2D',
+  },
+  txLoadMoreBtn: {
+    alignSelf: 'center',
+    marginVertical: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#A36D2D',
+    borderRadius: 8,
+  },
+  txLoadMoreText: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

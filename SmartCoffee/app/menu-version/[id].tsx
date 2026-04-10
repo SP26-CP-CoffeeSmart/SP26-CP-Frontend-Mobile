@@ -231,6 +231,19 @@ const MenuVersionPage = () => {
         });
     };
 
+    const handleBackToMenuTab = () => {
+        const routerWithDismiss = router as typeof router & {
+            dismissTo?: (href: string) => void;
+        };
+
+        if (typeof routerWithDismiss.dismissTo === 'function') {
+            routerWithDismiss.dismissTo('/(tabs)/menu');
+            return;
+        }
+
+        router.replace('/(tabs)/menu');
+    };
+
     const renderSkeleton = () => (
         <View style={styles.cardContainer}>
             <Animated.View
@@ -267,7 +280,7 @@ const MenuVersionPage = () => {
                 {/* Header */}
                 <View style={styles.headerWrapper}>
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={() => router.back()}>
+                        <TouchableOpacity onPress={handleBackToMenuTab}>
                             <Ionicons name="chevron-back" size={40} color={stylesVars.espresso} />
                         </TouchableOpacity>
                         <View style={{ width: 24 }} />
