@@ -152,6 +152,7 @@ export const API_ENDPOINTS = {
     },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
     updateStatus: (orderId: number, status: string) => `${AUTH_BASE_URL}/Order/${orderId}/status?status=${status}`,
+    updateStatusBody: (orderId: number) => `${AUTH_BASE_URL}/Order/${orderId}/status`,
   },
   supplier: {
     list: () => `${AUTH_BASE_URL}/Supplier`,
@@ -178,6 +179,7 @@ export const API_ENDPOINTS = {
   },
   wallet: {
     topUp: () => `${AUTH_BASE_URL}/Wallet/top-up`,
+    zaloPayTopUp: () => `${AUTH_BASE_URL}/ZaloPay/top-up`,
     topUpOrders: () => `${AUTH_BASE_URL}/Wallet/top-up-orders`,
     withdraw: () => `${AUTH_BASE_URL}/Wallet/withdraw`,
     verifyWithdraw: () => `${AUTH_BASE_URL}/Wallet/verify-withdraw`,
@@ -201,7 +203,32 @@ export const API_ENDPOINTS = {
       `${AUTH_BASE_URL}/Feedback/MenuItem?page=${page}&pageSize=${pageSize}`,
   },
   transaction: {
-    listByUser: (userId: number) => `${AUTH_BASE_URL}/Transaction/list/${userId}`,
+    listByUser: (
+      userId: number,
+      params?: { page?: number; pageSize?: number; paymentMethod?: string }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      if (params?.paymentMethod) query.set('paymentMethod', params.paymentMethod);
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Transaction/list/${userId}${qs ? `?${qs}` : ''}`;
+    },
+  },
+  notification: {
+    listByAccount: (
+      accountId: number,
+      params?: { page?: number; pageSize?: number }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Notification/account/${accountId}${qs ? `?${qs}` : ''}`;
+    },
+    unreadCount: () => `${AUTH_BASE_URL}/Notification/unread/count`,
+    markRead: (notificationId: string | number) =>
+      `${AUTH_BASE_URL}/Notification/${encodeURIComponent(String(notificationId))}/read`,
   },
   shopInventory: {
     getById: (id: number) => `${AUTH_BASE_URL}/ShopInventory/${id}`,

@@ -26,6 +26,8 @@ export default function WalletManagementScreen() {
   const router = useRouter();
   const { walletBalance, refreshProfile } = useAuth();
   
+
+  
   const [tab, setTab] = useState<'topup' | 'withdraw'>('topup');
   
   // Amounts
@@ -43,6 +45,7 @@ export default function WalletManagementScreen() {
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [topupMethod, setTopupMethod] = useState<'payos' | 'zalopay'>('payos');
 
   // Withdraw specific (OTP)
   const [withdrawId, setWithdrawId] = useState<number | null>(null);
@@ -79,13 +82,17 @@ export default function WalletManagementScreen() {
   const handleTopupSubmit = async () => {
     if (submitting) return;
     if (amount < 10000) {
-      showToast('Minimum top-up amount is 10,000 vnd.');
+      showToast('Minimum top-up amount is 10,000 VND.');
       return;
     }
 
     try {
       setSubmitting(true);
-      const response = await authorizedFetch(API_ENDPOINTS.wallet.topUp(), {
+      const topupUrl =
+        topupMethod === 'zalopay'
+          ? API_ENDPOINTS.wallet.zaloPayTopUp()
+          : API_ENDPOINTS.wallet.topUp();
+      const response = await authorizedFetch(topupUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ amount, isMobile: true }),
@@ -93,7 +100,9 @@ export default function WalletManagementScreen() {
       if (!response.ok) throw new Error('Payment request failed.');
       
       const data = await response.json();
-      const checkoutUrl = data?.checkoutUrl?.trim();
+      const checkoutUrl = String(
+        topupMethod === 'zalopay' ? data?.orderUrl : data?.checkoutUrl
+      ).trim();
       if (!checkoutUrl) throw new Error('Checkout link not found.');
       
       setPayosUrl(checkoutUrl);
@@ -109,7 +118,7 @@ export default function WalletManagementScreen() {
   const handleWithdrawSubmit = async () => {
     if (submitting) return;
     if (amount < 10000) {
-      showToast('Minimum withdraw amount is 10,000 vnd.');
+      showToast('Minimum withdraw amount is 10,000 VND.');
       return;
     }
 
@@ -269,7 +278,7 @@ export default function WalletManagementScreen() {
                       </View>
                       <View>
                         <Text style={styles.walletBoxTitle}>SmartCoffee Wallet</Text>
-                        <Text style={styles.walletBoxAmount}>{formattedBalance} vnd</Text>
+                        <Text style={styles.walletBoxAmount}>{formattedBalance} VND</Text>
                       </View>
                     </View>
                   </View>
@@ -294,7 +303,7 @@ export default function WalletManagementScreen() {
                         onChangeText={handleFormatAmount}
                         onFocus={() => setIsFocused(true)}
                         onBlur={() => setIsFocused(false)}
-                        placeholder="0 vnd"
+                        placeholder="0 VND"
                         placeholderTextColor="#B0B0B0"
                       />
                       
@@ -310,8 +319,48 @@ export default function WalletManagementScreen() {
                   </View>
                   
                   {isError && (
-                    <Text style={styles.errorHint}>Please enter a minimum of 10,000 vnd.</Text>
+                    <Text style={styles.errorHint}>Please enter a minimum of 10,000 VND.</Text>
                   )}
+
+                  {tab === 'topup' ? (
+                    <View style={styles.methodSection}>
+                      <Text style={styles.methodLabel}>Payment method</Text>
+                      <View style={styles.methodRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.methodChip,
+                            topupMethod === 'payos' && styles.methodChipActive,
+                          ]}
+                          onPress={() => setTopupMethod('payos')}
+                        >
+                          <Text
+                            style={[
+                              styles.methodChipText,
+                              topupMethod === 'payos' && styles.methodChipTextActive,
+                            ]}
+                          >
+                            PayOS
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.methodChip,
+                            topupMethod === 'zalopay' && styles.methodChipActive,
+                          ]}
+                          onPress={() => setTopupMethod('zalopay')}
+                        >
+                          <Text
+                            style={[
+                              styles.methodChipText,
+                              topupMethod === 'zalopay' && styles.methodChipTextActive,
+                            ]}
+                          >
+                            ZaloPay (Sandbox)
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
               </View>
 
@@ -359,13 +408,21 @@ export default function WalletManagementScreen() {
         <Modal visible={showPayosModal} animationType="slide" onRequestClose={() => setShowPayosModal(false)}>
           <SafeAreaView style={styles.payosContainer}>
             <View style={styles.payosHeader}>
-              <Text style={styles.payosTitle}>PayOS Checkout</Text>
+              <Text style={styles.payosTitle}>
+                {topupMethod === 'zalopay' ? 'ZaloPay Checkout' : 'PayOS Checkout'}
+              </Text>
               <TouchableOpacity onPress={() => setShowPayosModal(false)} style={styles.payosClose}>
                 <Ionicons name="close" size={22} color="#333" />
               </TouchableOpacity>
             </View>
             {payosUrl ? (
-              <WebView source={{ uri: payosUrl }} style={{ flex: 1 }} onShouldStartLoadWithRequest={handlePayosShouldStart} />
+              <WebView
+                source={{ uri: payosUrl }}
+                style={{ flex: 1 }}
+                onShouldStartLoadWithRequest={
+                  topupMethod === 'payos' ? handlePayosShouldStart : undefined
+                }
+              />
             ) : (
               <View style={styles.payosFallback}>
                 <Text>Missing checkout URL.</Text>
@@ -598,6 +655,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  methodSection: {
+    marginTop: 16,
+  },
+  methodLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#555',
+    marginBottom: 8,
+  },
+  methodRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  methodChip: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E1D6C8',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: '#FAF6F1',
+  },
+  methodChipActive: {
+    borderColor: '#A36D2D',
+    backgroundColor: '#FFF1E1',
+  },
+  methodChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#7A6A5E',
+  },
+  methodChipTextActive: {
+    color: '#A36D2D',
   },
   inputActionIcon: {
     marginRight: 4,

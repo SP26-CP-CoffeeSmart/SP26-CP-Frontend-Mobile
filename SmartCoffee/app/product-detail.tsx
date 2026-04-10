@@ -253,7 +253,7 @@ export default function ProductDetail() {
 
             <View style={styles.priceRow}>
               <Text style={styles.priceText}>
-                {totalPrice.toLocaleString('vi-VN')}vnd/
+                {totalPrice.toLocaleString('vi-VN')} VND/
                 {packageSize && measurement
                   ? `(${packageSize} ${measurement})`
                   : measurement}

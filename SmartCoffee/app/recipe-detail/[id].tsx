@@ -380,7 +380,7 @@ export default function RecipeDetailScreen() {
             occasions: recipeData.suggestedOccasions || '',
             presentation: getPresentationData(),
             cogs: '',
-            price: recipeData.proposedSellingPrice ? `${recipeData.proposedSellingPrice.toLocaleString()} đ` : '',
+            price: recipeData.proposedSellingPrice ? `${recipeData.proposedSellingPrice.toLocaleString()} VND` : '',
             margin: recipeData.profitMarginPercent ? `${recipeData.profitMarginPercent}%` : '',
         };
     };
@@ -846,7 +846,7 @@ export default function RecipeDetailScreen() {
                                                 <Text className={`text-sm mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-[#6A6764]'}`}>
                                                     {item.quantity}{item.measurement ? ` ${item.measurement}` : ''}
                                                 </Text>
-                                                <Text className={`text-[24px] mt-1 font-bold text-center ${isDark ? 'text-[#F3AA4F]' : 'text-[#D38B2A]'}`}>{item.cost?.toLocaleString()} VNĐ</Text>
+                                                <Text className={`text-[24px] mt-1 font-bold text-center ${isDark ? 'text-[#F3AA4F]' : 'text-[#D38B2A]'}`}>{item.cost?.toLocaleString()} VND</Text>
                                             </View>
                                         ))}
                                     </View>

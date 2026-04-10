@@ -23,6 +23,7 @@ import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { resolveCurrentSubscription } from '@/services/subscriptionResolver';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -253,7 +254,7 @@ export default function AiCreateScreen() {
           throw new Error(`Request failed: ${response.status}`);
         }
         const data = await response.json();
-        const resolved = Array.isArray(data) ? data[0] : Array.isArray(data?.data) ? data.data[0] : data;
+        const resolved = resolveCurrentSubscription(data);
         const name =
           resolved?.package?.name ??
           resolved?.subscriptionPackage?.name ??

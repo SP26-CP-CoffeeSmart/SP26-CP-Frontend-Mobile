@@ -385,7 +385,7 @@ export default function CreateRecipeScreen() {
                   value={price}
                   onChangeText={setPrice}
                 />
-                <Text style={styles.inputSuffix}>đ</Text>
+                <Text style={styles.inputSuffix}>VND</Text>
               </View>
             </View>
             <View style={styles.flexItem}>

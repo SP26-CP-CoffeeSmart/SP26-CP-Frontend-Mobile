@@ -378,7 +378,7 @@ export default function CheckoutPage() {
                     width: 0,
                     height: 0,
                 };
-
+console.log('[GHN Fee Payload]', feePayload)
                 try {
                     const feeRes = await authorizedFetch(API_ENDPOINTS.order.ghnFee(), {
                         method: 'POST',

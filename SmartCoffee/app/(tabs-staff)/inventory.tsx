@@ -227,7 +227,7 @@ export default function InventoryScreen() {
                         <Text style={styles.cardTitle} numberOfLines={1}>
                             {ingredientName}
                         </Text>
-                        <View style={[styles.statusPill, { backgroundColor: status.bgColor }]}> 
+                        <View style={[styles.statusPill, { backgroundColor: status.bgColor }]}>
                             <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
                         </View>
                     </View>
@@ -301,7 +301,7 @@ export default function InventoryScreen() {
                             <TouchableOpacity
                                 style={[styles.requestCard, { backgroundColor: COLORS.accentAlt, marginRight: 0 }]}
                                 onPress={() => router.push('/export-request')}
-                                >
+                            >
                                 <Ionicons name="arrow-up-circle-outline" size={20} color="#FFFFFF" />
                                 <Text style={styles.requestLabel}>Request{`\n`}Export</Text>
                             </TouchableOpacity>

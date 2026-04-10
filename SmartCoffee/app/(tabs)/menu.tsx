@@ -25,6 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { resolveCurrentSubscription } from '@/services/subscriptionResolver';
 import beverageSizeService, { BeverageSize } from '@/services/beverageSizeService';
 import { useAuth } from '@/context/auth-context';
 import { BeverageCategory, useBeverageCategories } from '@/context/beverage-category-context';
@@ -82,6 +83,7 @@ const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
 const ONBOARDING_COMPLETE_KEY = 'onboarding:complete';
 const SUBSCRIPTION_SKIP_ONCE_KEY = 'subscription:skip-once';
+const NOTIFICATION_UNREAD_COUNT_KEY = 'notification:unread-count';
 const SUBSCRIPTION_BG_IMAGE = require('../../assets/background.png');
 
 type SubscriptionPackage = {
@@ -202,6 +204,7 @@ export default function MenuScreen() {
   const [beverageHasMore, setBeverageHasMore] = useState(true);
   const [beverageLoadingMore, setBeverageLoadingMore] = useState(false);
   const [beverageSearchQuery, setBeverageSearchQuery] = useState('');
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
 
   const loadSubscriptionPackages = useCallback(async () => {
     try {
@@ -247,9 +250,7 @@ export default function MenuScreen() {
         return;
       }
       const payload = await response.json();
-      const resolved = Array.isArray(payload)
-        ? payload[0]
-        : payload?.data ?? payload?.item ?? payload?.items?.[0] ?? payload ?? null;
+      const resolved = resolveCurrentSubscription(payload);
       setCurrentSubscription(resolved);
       setCurrentPackageId(getSubscriptionPackageIdFromSubscription(resolved));
     } catch {
@@ -259,6 +260,66 @@ export default function MenuScreen() {
       setSubscriptionInfoLoading(false);
     }
   }, [coffeeShopId]);
+
+  const fetchNotificationUnreadCount = useCallback(async () => {
+    if (!accountId) {
+      setNotificationUnreadCount(0);
+      try {
+        await AsyncStorage.setItem(NOTIFICATION_UNREAD_COUNT_KEY, '0');
+      } catch {
+        // Ignore storage write errors.
+      }
+      return;
+    }
+
+    try {
+      // Show cached value instantly so badge updates right after returning from notifications.
+      try {
+        const cached = await AsyncStorage.getItem(NOTIFICATION_UNREAD_COUNT_KEY);
+        const parsed = Number(cached ?? '0');
+        if (Number.isFinite(parsed)) {
+          setNotificationUnreadCount(Math.max(parsed, 0));
+        }
+      } catch {
+        // Ignore storage read errors.
+      }
+
+      const response = await authorizedFetch(API_ENDPOINTS.notification.unreadCount(), {
+        headers: { Accept: '*/*' },
+      });
+
+      if (!response.ok) {
+        setNotificationUnreadCount(0);
+        try {
+          await AsyncStorage.setItem(NOTIFICATION_UNREAD_COUNT_KEY, '0');
+        } catch {
+          // Ignore storage write errors.
+        }
+        return;
+      }
+
+      const payload = await response.json();
+      const resolved = Number(
+        typeof payload === 'number'
+          ? payload
+          : payload?.count ?? payload?.unreadCount ?? payload?.data ?? 0
+      );
+      const normalized = Number.isFinite(resolved) ? resolved : 0;
+      setNotificationUnreadCount(normalized);
+      try {
+        await AsyncStorage.setItem(NOTIFICATION_UNREAD_COUNT_KEY, String(Math.max(normalized, 0)));
+      } catch {
+        // Ignore storage write errors.
+      }
+    } catch {
+      setNotificationUnreadCount(0);
+      try {
+        await AsyncStorage.setItem(NOTIFICATION_UNREAD_COUNT_KEY, '0');
+      } catch {
+        // Ignore storage write errors.
+      }
+    }
+  }, [accountId]);
 
   const handleSubscribePackage = useCallback(
     async (item: SubscriptionPackage) => {
@@ -570,6 +631,8 @@ export default function MenuScreen() {
             fetchMenus();
           }
 
+          await fetchNotificationUnreadCount();
+
           if (shouldRefreshBeverages === '1') {
             await AsyncStorage.removeItem(BEVERAGE_REFRESH_FLAG_KEY);
             await Promise.all([fetchBeverages(false, 1, beverageSearchQuery), fetchBeverageCount(), refreshCategories()]);
@@ -584,7 +647,7 @@ export default function MenuScreen() {
       return () => {
         isActive = false;
       };
-    }, [fetchMenus])
+    }, [fetchMenus, fetchNotificationUnreadCount])
   );
 
   const fetchBeverageCount = useCallback(async () => {
@@ -827,6 +890,7 @@ export default function MenuScreen() {
         fetchBeverages(false, 1, beverageSearchQuery),
         fetchBeverageCount(),
         refreshCategories(),
+        fetchNotificationUnreadCount(),
       ]);
     } finally {
       setRefreshing(false);
@@ -1382,8 +1446,19 @@ export default function MenuScreen() {
             </View>
             <Text style={styles.userName}>{headerName}</Text>
           </View>
-          <TouchableOpacity style={styles.cartButton}>
-            <Ionicons name="cart-outline" size={20} color="#FFF" />
+          <TouchableOpacity
+            style={styles.cartButton}
+            onPress={() => router.push('/notifications')}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="notifications-outline" size={20} color="#FFF" />
+            {notificationUnreadCount > 0 ? (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {notificationUnreadCount > 99 ? '99+' : String(notificationUnreadCount)}
+                </Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
         </View>
 
@@ -2023,6 +2098,26 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 6,
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#E76A24',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FFF4E4',
+  },
+  notificationBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   section: {
     marginBottom: 28,

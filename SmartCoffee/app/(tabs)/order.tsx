@@ -42,6 +42,7 @@ const statuses = [
   { key: 'delivering', label: 'Delivering', icon: 'bicycle-outline' },
   { key: 'delivered', label: 'Delivered', icon: 'checkmark-circle-outline' },
   { key: 'completed', label: 'Completed', icon: 'checkmark-done-outline' },
+  { key: 'cancelled', label: 'Cancelled', icon: 'close-outline' },
   { key: 'rejected', label: 'Rejected', icon: 'close-circle-outline' },
   { key: 'refunded', label: 'Refunded', icon: 'cash-outline' },
 ];
@@ -126,10 +127,10 @@ export default function OrderScreen() {
           orderStatus: toApiOrderStatus(statusKey),
         }),
         {
-        headers: {
-          Accept: '*/*',
-        },
-      }
+          headers: {
+            Accept: '*/*',
+          },
+        }
       );
 
       if (!response.ok) {
@@ -190,20 +191,19 @@ export default function OrderScreen() {
             try {
               setLoading(true);
               const response = await authorizedFetch(
-                API_ENDPOINTS.order.updateStatus(orderId, 'Cancelled'),
+                API_ENDPOINTS.order.updateStatusBody(orderId),
                 {
-                  method: 'PUT',
-                  headers: { Accept: '*/*' },
+                  method: 'PATCH',
+                  headers: {
+                    Accept: '*/*',
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ status: 'Cancelled' })
                 }
               );
-              
+
               if (!response.ok) {
-                 // Try POST fallback just in case
-                 const postRes = await authorizedFetch(
-                   API_ENDPOINTS.order.updateStatus(orderId, 'Cancelled'),
-                   { method: 'POST', headers: { Accept: '*/*' } }
-                 );
-                 if (!postRes.ok) throw new Error('API failed');
+                throw new Error('API failed');
               }
 
               Toast.show({ type: 'success', text1: 'Order cancelled successfully' });
@@ -224,33 +224,33 @@ export default function OrderScreen() {
     try {
       setLoading(true);
       if (!order.supplierId || !order.orderDetails?.length) {
-         Toast.show({ type: 'error', text1: 'Cannot reorder', text2: 'Missing supplier or items info.' });
-         return;
+        Toast.show({ type: 'error', text1: 'Cannot reorder', text2: 'Missing supplier or items info.' });
+        return;
       }
-      
+
       const res = await authorizedFetch(`${API_ENDPOINTS.supplierProduct.list(1, 500)}`);
       if (!res.ok) throw new Error('API request failed');
-      
+
       const data = await res.json();
       const allProducts = Array.isArray(data) ? data : (data?.items || []);
       const supplierProducts = allProducts.filter((p: any) => p.supplierId === order.supplierId);
-      
+
       const reorderedCartItems = [];
       let addedCount = 0;
 
       for (const detail of order.orderDetails) {
         const dAny = detail as any;
-        const match = supplierProducts.find((p: any) => 
-            (dAny.ingredientId && p.ingredientId === dAny.ingredientId) || 
-            (detail.ingredientName && p.ingredient?.name === detail.ingredientName) || 
-            (detail.ingredientName && p.name && String(p.name).toLowerCase().includes(String(detail.ingredientName).toLowerCase()))
+        const match = supplierProducts.find((p: any) =>
+          (dAny.ingredientId && p.ingredientId === dAny.ingredientId) ||
+          (detail.ingredientName && p.ingredient?.name === detail.ingredientName) ||
+          (detail.ingredientName && p.name && String(p.name).toLowerCase().includes(String(detail.ingredientName).toLowerCase()))
         );
-        
+
         if (match) {
-          const finalImage = (match.image && match.image !== 'null') ? match.image : 
-                             (match.ingredient?.image && match.ingredient.image !== 'null') ? match.ingredient.image : 
-                             fallbackOrderImage;
-          
+          const finalImage = (match.image && match.image !== 'null') ? match.image :
+            (match.ingredient?.image && match.ingredient.image !== 'null') ? match.ingredient.image :
+              fallbackOrderImage;
+
           reorderedCartItems.push({
             productId: match.productId,
             supplierId: match.supplierId,
@@ -267,7 +267,7 @@ export default function OrderScreen() {
           addedCount++;
         }
       }
-      
+
       if (addedCount > 0) {
         await AsyncStorage.setItem('checkout_reorder_data', JSON.stringify(reorderedCartItems));
         Toast.show({ type: 'success', text1: 'Reorder init', text2: 'Navigating to checkout...' });
@@ -334,9 +334,9 @@ export default function OrderScreen() {
         <Text style={styles.sectionTitle}>Recent orders</Text>
 
         <View style={styles.statusScrollContainer}>
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.statusRow}
           >
             {statuses.map((item) => {
@@ -397,7 +397,7 @@ export default function OrderScreen() {
                       <Text style={styles.orderDesc}>{order.status ?? 'Pending'}</Text>
                     )}
                     <Text style={styles.orderPrice}>
-                      {formatVnd(order.totalPrice ?? 0)} vnd
+                      {formatVnd(order.totalPrice ?? 0)} VND
                     </Text>
                   </View>
                   <View style={styles.actionButtons}>
@@ -500,14 +500,14 @@ export default function OrderScreen() {
                 <Text style={styles.detailLabel}>Shipping Fee:</Text>
                 <Text style={styles.detailValue}>
                   {selectedOrder?.shippingFee
-                    ? `${formatVnd(selectedOrder.shippingFee)} vnd`
-                    : '0 vnd'}
+                    ? `${formatVnd(selectedOrder.shippingFee)} VND`
+                    : '0 VND'}
                 </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Total Price:</Text>
                 <Text style={[styles.detailValue, { color: COLORS.danger, fontWeight: '700' }]}>
-                  {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} vnd
+                  {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} VND
                 </Text>
               </View>
 
@@ -517,7 +517,7 @@ export default function OrderScreen() {
               <View style={styles.divider} />
 
               <Text style={styles.sectionHeading}>Shipping Info</Text>
-              
+
               <View style={styles.timelineBox}>
                 <View style={[styles.timelineItem, { borderRightWidth: 1, borderColor: COLORS.border }]}>
                   <Text style={styles.timelineLabel}>Ship Date</Text>
@@ -551,7 +551,7 @@ export default function OrderScreen() {
                     <Text style={styles.addressValue}>{selectedOrder?.shipAddress || 'Pending update'}</Text>
                   </View>
                 </View>
-                
+
                 <View style={styles.addressDivider} />
 
                 <View style={styles.addressItem}>
@@ -568,7 +568,7 @@ export default function OrderScreen() {
               <View style={styles.divider} />
 
               <Text style={styles.sectionHeading}>Items</Text>
-              
+
               <View style={styles.receiptBox}>
                 {selectedOrder?.orderDetails?.map((item, idx) => (
                   <View key={idx} style={styles.receiptItemRow}>

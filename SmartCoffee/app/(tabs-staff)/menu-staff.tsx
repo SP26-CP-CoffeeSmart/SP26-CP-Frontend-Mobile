@@ -216,7 +216,7 @@ export default function MenuStaffScreen() {
 
     const formatPrice = (value?: number) => {
         if (value == null) return '';
-        return `${value.toLocaleString('vi-VN')} đ`;
+        return `${value.toLocaleString('vi-VN')} VND`;
     };
 
     const menuImages = getMenuImages();
@@ -331,7 +331,7 @@ export default function MenuStaffScreen() {
 
                         <View style={styles.priceRow}>
                             {/* <Text style={styles.price}>
-                                {(item.sellingPrice / 1000).toFixed(0)}K VNĐ
+                                {(item.sellingPrice / 1000).toFixed(0)}K VND
                             </Text> */}
                         </View>
 

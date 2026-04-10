@@ -175,9 +175,9 @@ export default function DailySaleItemScreen() {
     const formatPrice = (value?: number) => {
         if (value == null) return '-';
         try {
-            return `${value.toLocaleString('vi-VN')} đ`;
+            return `${value.toLocaleString('vi-VN')} VND`;
         } catch {
-            return `${value} đ`;
+            return `${value} VND`;
         }
     };
 
