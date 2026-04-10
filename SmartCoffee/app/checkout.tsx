@@ -22,7 +22,7 @@ import { useCart, CartItem } from '@/context/cart-context';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
+import { useSuggestions } from '@/context/suggestion-context';
 
 type StockCheckResponseItem = {
     productId: number;
@@ -203,7 +203,7 @@ export default function CheckoutPage() {
             supplierId: s.supplierId,
             supplierName: s.supplierName ?? undefined,
             name: s.name,
-            category: s.category,
+            category: '',
             image: s.image || FALLBACK_PRODUCT_IMAGE,
             measurement: s.measurement || 'unit',
             packageSize: s.packageSize ?? null,
@@ -378,7 +378,7 @@ export default function CheckoutPage() {
                     width: 0,
                     height: 0,
                 };
-console.log('[GHN Fee Payload]', feePayload)
+                console.log('[GHN Fee Payload]', feePayload)
                 try {
                     const feeRes = await authorizedFetch(API_ENDPOINTS.order.ghnFee(), {
                         method: 'POST',
@@ -528,41 +528,41 @@ console.log('[GHN Fee Payload]', feePayload)
             const productIds = selectedItems.map((item) => item.productId);
 
             const response = await authorizedFetch(API_ENDPOINTS.supplierProduct.checkAvailableStock(), {
-              method: 'POST',
-              headers: {
-                Accept: '*/*',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify(productIds),
+                method: 'POST',
+                headers: {
+                    Accept: '*/*',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(productIds),
             });
 
             if (!response.ok) {
-              throw new Error(`Unable to verify stock: ${response.status}`);
+                throw new Error(`Unable to verify stock: ${response.status}`);
             }
 
             const stockItems = await response.json() as StockCheckResponseItem[];
             const byProductId = new Map<number, StockCheckResponseItem>();
 
             stockItems.forEach((stockItem) => {
-              if (typeof stockItem.productId === 'number') {
-                byProductId.set(stockItem.productId, stockItem);
-              }
+                if (typeof stockItem.productId === 'number') {
+                    byProductId.set(stockItem.productId, stockItem);
+                }
             });
 
             const newStockIssues: Record<number, { available: number, requested: number }> = {};
             let hasIssue = false;
 
             selectedItems.forEach((selected) => {
-              const latest = byProductId.get(selected.productId);
-              const availableRaw =
-                latest?.availableStock ??
-                (Number(latest?.stock ?? 0) - Number(latest?.holdStock ?? 0));
-              const available = Math.max(0, Math.floor(Number(availableRaw) || 0));
+                const latest = byProductId.get(selected.productId);
+                const availableRaw =
+                    latest?.availableStock ??
+                    (Number(latest?.stock ?? 0) - Number(latest?.holdStock ?? 0));
+                const available = Math.max(0, Math.floor(Number(availableRaw) || 0));
 
-              if (!latest || selected.quantity > available) {
-                newStockIssues[selected.productId] = { available, requested: selected.quantity };
-                hasIssue = true;
-              }
+                if (!latest || selected.quantity > available) {
+                    newStockIssues[selected.productId] = { available, requested: selected.quantity };
+                    hasIssue = true;
+                }
             });
 
             if (hasIssue) {
@@ -956,34 +956,47 @@ console.log('[GHN Fee Payload]', feePayload)
                                 const issue = stockIssues[item.productId];
                                 const isOutOfStock = issue && issue.available === 0;
                                 const isNotEnough = issue && issue.available > 0;
+                                const measurementLabel = String(item.measurement || '').trim();
+                                const hasPackageSize =
+                                    typeof item.packageSize === 'number' && item.packageSize > 0;
+                                const packageSizeText = hasPackageSize
+                                    ? `${item.packageSize} ${measurementLabel || 'unit'}`
+                                    : measurementLabel
+                                        ? `1 ${measurementLabel}`
+                                        : '';
+
+                                const productSubText = [item.category, packageSizeText]
+                                    .map((value) => String(value || '').trim())
+                                    .filter(Boolean)
+                                    .join(' • ');
 
                                 return (
-                                <View key={item.productId} style={[styles.itemCardContainer, index > 0 && styles.itemBorderTop]}>
-                                    <View style={[styles.itemCardContent, issue && { opacity: 0.4 }]}>
-                                        <Image
-                                            source={{ uri: (item.image && item.image !== 'null') ? item.image : FALLBACK_PRODUCT_IMAGE }}
-                                            style={styles.itemImage}
-                                        />
-                                        <View style={styles.itemDetails}>
-                                            <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                                            <Text style={styles.itemCategory}>{item.category}</Text>
-                                            <View style={styles.itemPriceRow}>
-                                                <Text style={styles.itemPrice}>{formatVnd(item.unitPrice)} VND</Text>
-                                                <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+                                    <View key={item.productId} style={[styles.itemCardContainer, index > 0 && styles.itemBorderTop]}>
+                                        <View style={[styles.itemCardContent, issue && { opacity: 0.4 }]}>
+                                            <Image
+                                                source={{ uri: (item.image && item.image !== 'null') ? item.image : FALLBACK_PRODUCT_IMAGE }}
+                                                style={styles.itemImage}
+                                            />
+                                            <View style={styles.itemDetails}>
+                                                <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                                                <Text style={styles.itemCategory}>{productSubText || 'No details'}</Text>
+                                                <View style={styles.itemPriceRow}>
+                                                    <Text style={styles.itemPrice}>{formatVnd(item.unitPrice)} VND</Text>
+                                                    <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+                                                </View>
                                             </View>
                                         </View>
+                                        {isOutOfStock && (
+                                            <View style={styles.issueOverlayContainer}>
+                                                <Text style={styles.outOfStockBadge}>Out of Stock</Text>
+                                            </View>
+                                        )}
+                                        {isNotEnough && (
+                                            <View style={styles.issueOverlayContainer}>
+                                                <Text style={styles.notEnoughBadge}>Reduce quantity to ≤ {issue.available}</Text>
+                                            </View>
+                                        )}
                                     </View>
-                                    {isOutOfStock && (
-                                        <View style={styles.issueOverlayContainer}>
-                                            <Text style={styles.outOfStockBadge}>Out of Stock</Text>
-                                        </View>
-                                    )}
-                                    {isNotEnough && (
-                                        <View style={styles.issueOverlayContainer}>
-                                            <Text style={styles.notEnoughBadge}>Reduce quantity to ≤ {issue.available}</Text>
-                                        </View>
-                                    )}
-                                </View>
                                 );
                             })}
 

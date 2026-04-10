@@ -6,7 +6,6 @@ export type SuggestionItem = {
     supplierId: number;
     supplierName?: string | null;
     name: string;
-    category: string;
     image: string;
     productRating?: number;
     subtitle: string;
