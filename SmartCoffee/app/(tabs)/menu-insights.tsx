@@ -284,6 +284,7 @@ export default function MenuInsightsScreen() {
   const [recipeSearchQuery, setRecipeSearchQuery] = useState('');
   const [editErrors, setEditErrors] = useState<EditErrors>({});
   const [showBackConfirm, setShowBackConfirm] = useState(false);
+  const [isEditModalReadOnly, setIsEditModalReadOnly] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDuplicateItemModal, setShowDuplicateItemModal] = useState(false);
   const [duplicateItemMessage, setDuplicateItemMessage] = useState('');
@@ -441,6 +442,7 @@ export default function MenuInsightsScreen() {
     const onHardwareBackPress = () => {
       if (showEditModal) {
         setShowEditModal(false);
+        setIsEditModalReadOnly(false);
         return true;
       }
 
@@ -469,7 +471,7 @@ export default function MenuInsightsScreen() {
     return () => subscription.remove();
   }, [handleBackPress, showBackConfirm, showDeleteConfirm, showDuplicateItemModal, showEditModal]);
 
-  const openEditModalForItem = (item: MenuItem) => {
+  const openEditModalForItem = (item: MenuItem, options?: { readOnly?: boolean }) => {
     setEditingItem(item);
     const sizeDrafts = (item.itemSizeViewModels ?? []).map((size, index) => ({
       itemSizeId: size.itemSizeId > 0 ? size.itemSizeId : index,
@@ -489,6 +491,7 @@ export default function MenuInsightsScreen() {
     setEditSellingPrice(anchorSizePrice ?? String(item.sellingPrice ?? 0));
     setEditErrors({});
     setEditSizePrices(sizeDrafts);
+    setIsEditModalReadOnly(Boolean(options?.readOnly));
     setShowEditModal(true);
   };
 
@@ -629,6 +632,7 @@ export default function MenuInsightsScreen() {
     });
 
     setShowEditModal(false);
+    setIsEditModalReadOnly(false);
   };
 
   const buildUpdatePayload = (menuIdValue: number, menuRaw: any, items: MenuItem[], images: string[]) => {
@@ -1082,7 +1086,7 @@ export default function MenuInsightsScreen() {
       setAddedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
       setHasManualChanges(true);
       setShowAddItemModal(false);
-      openEditModalForItem(nextItem);
+      openEditModalForItem(nextItem, { readOnly: false });
 
       Toast.show({
         type: 'success',
@@ -1108,28 +1112,53 @@ export default function MenuInsightsScreen() {
     setShowDeleteConfirm(false);
     setDeletingItem(null);
 
-    setMenuItems((prev) => prev.filter((menuItem) => menuItem.menuItemId !== targetItem.menuItemId));
-    setItemSalesMap((prev) => {
-      const next = new Map(prev);
-      next.delete(targetItem.menuItemId);
-      return next;
-    });
-    setItemUnitCostMap((prev) => {
-      const next = new Map(prev);
-      next.delete(targetItem.menuItemId);
-      return next;
-    });
-    setEditedMenuItemIds((prev) =>
-      targetItem.menuItemId > 0
-        ? Array.from(new Set([...prev, targetItem.menuItemId]))
-        : prev.filter((id) => id !== targetItem.menuItemId)
-    );
-    setAddedMenuItemIds((prev) => prev.filter((id) => id !== targetItem.menuItemId));
-    if (targetItem.menuItemId > 0) {
-      setDeletedMenuItemIds((prev) => Array.from(new Set([...prev, targetItem.menuItemId])));
+    try {
+      const existed = menuItems.some((item) => item.menuItemId === targetItem.menuItemId);
+      if (!existed) {
+        Toast.show({
+          type: 'error',
+          text1: 'Delete failed',
+          text2: 'Menu item was not found in the current list.',
+        });
+        return;
+      }
+
+      setMenuItems((prev) => prev.filter((menuItem) => menuItem.menuItemId !== targetItem.menuItemId));
+      setItemSalesMap((prev) => {
+        const next = new Map(prev);
+        next.delete(targetItem.menuItemId);
+        return next;
+      });
+      setItemUnitCostMap((prev) => {
+        const next = new Map(prev);
+        next.delete(targetItem.menuItemId);
+        return next;
+      });
+      setEditedMenuItemIds((prev) =>
+        targetItem.menuItemId > 0
+          ? Array.from(new Set([...prev, targetItem.menuItemId]))
+          : prev.filter((id) => id !== targetItem.menuItemId)
+      );
+      setAddedMenuItemIds((prev) => prev.filter((id) => id !== targetItem.menuItemId));
+      if (targetItem.menuItemId > 0) {
+        setDeletedMenuItemIds((prev) => Array.from(new Set([...prev, targetItem.menuItemId])));
+      }
+      setHasManualChanges(true);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Deleted menu item',
+        text2: `${targetItem.shopRecipe?.recipeName ?? 'Menu item'} was removed.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to delete menu item.';
+      Toast.show({
+        type: 'error',
+        text1: 'Delete failed',
+        text2: message,
+      });
     }
-    setHasManualChanges(true);
-  }, [deletingItem]);
+  }, [deletingItem, menuItems]);
 
   const buildCreateMenuVersionPayload = (menuIdValue: number, menuRaw: any, items: MenuItem[]) => {
     const basePayload = buildUpdatePayload(menuIdValue, menuRaw, items, menuImageUris);
@@ -2298,9 +2327,11 @@ export default function MenuInsightsScreen() {
             </View>
           ) : (
             getFilteredMenuItems().slice(0, visibleCount).map((item) => (
-              <View
+              <TouchableOpacity
                 key={item.menuItemId}
                 style={[styles.menuItem, isMenuItemEdited(item) && styles.menuItemEdited]}
+                activeOpacity={0.9}
+                onPress={() => openEditModalForItem(item, { readOnly: true })}
               >
                 <View style={styles.menuItemImage}>
                   {item.shopRecipe?.image ? (
@@ -2323,13 +2354,19 @@ export default function MenuInsightsScreen() {
                     <View style={styles.menuItemActionGroup}>
                       <TouchableOpacity
                         style={styles.menuItemEditButton}
-                        onPress={() => openEditModalForItem(item)}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          openEditModalForItem(item, { readOnly: false });
+                        }}
                       >
                         <Ionicons name="create-outline" size={18} color="#4a3621" />
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.menuItemDeleteButton}
-                        onPress={() => handleDeleteMenuItem(item)}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          handleDeleteMenuItem(item);
+                        }}
                       >
                         <Ionicons name="trash-outline" size={18} color="#a13e2a" />
                       </TouchableOpacity>
@@ -2377,7 +2414,7 @@ export default function MenuInsightsScreen() {
                     </View>
                   )} */}
                 </View>
-              </View>
+              </TouchableOpacity>
             ))
           )}
         </View>
@@ -2608,8 +2645,15 @@ export default function MenuInsightsScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, styles.editModalContent]}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Edit menu item</Text>
-                <TouchableOpacity onPress={() => setShowEditModal(false)}>
+                <Text style={styles.modalTitle}>
+                  {isEditModalReadOnly ? 'Menu item detail' : 'Edit menu item'}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    setShowEditModal(false);
+                    setIsEditModalReadOnly(false);
+                  }}
+                >
                   <Ionicons name="close" size={24} color="#4a3621" />
                 </TouchableOpacity>
               </View>
@@ -2636,7 +2680,9 @@ export default function MenuInsightsScreen() {
                   </View>
                 </View>
 
-                <Text style={styles.editLabel}>Description (Editable)</Text>
+                <Text style={styles.editLabel}>
+                  {isEditModalReadOnly ? 'Description' : 'Description (Editable)'}
+                </Text>
                 <TextInput
                   style={[styles.editInput, styles.editTextArea]}
                   placeholder="Add a short description"
@@ -2644,14 +2690,17 @@ export default function MenuInsightsScreen() {
                   multiline
                   value={editDescription}
                   onChangeText={setEditDescription}
+                  editable={!isEditModalReadOnly}
                 />
-                {editErrors.description && (
+                {!isEditModalReadOnly && editErrors.description && (
                   <Text style={styles.editErrorText}>{editErrors.description}</Text>
                 )}
 
                 {!isMultiSizeEditing ? (
                   <>
-                    <Text style={styles.editLabel}>Selling price (Editable)</Text>
+                    <Text style={styles.editLabel}>
+                      {isEditModalReadOnly ? 'Selling price' : 'Selling price (Editable)'}
+                    </Text>
                     <TextInput
                       style={styles.editInput}
                       placeholder="0"
@@ -2659,8 +2708,9 @@ export default function MenuInsightsScreen() {
                       keyboardType="numeric"
                       value={editSellingPrice}
                       onChangeText={setEditSellingPrice}
+                      editable={!isEditModalReadOnly}
                     />
-                    {editErrors.sellingPrice && (
+                    {!isEditModalReadOnly && editErrors.sellingPrice && (
                       <Text style={styles.editErrorText}>{editErrors.sellingPrice}</Text>
                     )}
                   </>
@@ -2676,7 +2726,9 @@ export default function MenuInsightsScreen() {
 
                 {editSizePrices.length > 0 && (
                   <View style={styles.editSizesSection}>
-                    <Text style={styles.editLabel}>Size prices (Editable)</Text>
+                    <Text style={styles.editLabel}>
+                      {isEditModalReadOnly ? 'Size prices' : 'Size prices (Editable)'}
+                    </Text>
                     {editSizePrices.map((size, index) => (
                       <View key={size.itemSizeId}>
                         <View style={styles.sizePriceRow}>
@@ -2696,10 +2748,11 @@ export default function MenuInsightsScreen() {
                               keyboardType="numeric"
                               value={size.sellingPrice}
                               onChangeText={(value) => updateSizePriceDraft(size.itemSizeId, value)}
+                              editable={!isEditModalReadOnly}
                             />
                           </View>
                         </View>
-                        {editErrors.sizePrices?.[size.itemSizeId] && (
+                        {!isEditModalReadOnly && editErrors.sizePrices?.[size.itemSizeId] && (
                           <Text style={styles.editErrorText}>
                             {editErrors.sizePrices?.[size.itemSizeId]}
                           </Text>
@@ -2712,13 +2765,18 @@ export default function MenuInsightsScreen() {
               <View style={styles.editModalFooter}>
                 <TouchableOpacity
                   style={styles.editCancelButton}
-                  onPress={() => setShowEditModal(false)}
+                  onPress={() => {
+                    setShowEditModal(false);
+                    setIsEditModalReadOnly(false);
+                  }}
                 >
-                  <Text style={styles.editCancelText}>Cancel</Text>
+                  <Text style={styles.editCancelText}>{isEditModalReadOnly ? 'Close' : 'Cancel'}</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.editApplyButton} onPress={applyEditChanges}>
-                  <Text style={styles.editApplyText}>Apply changes</Text>
-                </TouchableOpacity>
+                {!isEditModalReadOnly && (
+                  <TouchableOpacity style={styles.editApplyButton} onPress={applyEditChanges}>
+                    <Text style={styles.editApplyText}>Apply changes</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </View>
