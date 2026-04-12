@@ -2331,7 +2331,33 @@ export default function MenuInsightsScreen() {
                 key={item.menuItemId}
                 style={[styles.menuItem, isMenuItemEdited(item) && styles.menuItemEdited]}
                 activeOpacity={0.9}
-                onPress={() => openEditModalForItem(item, { readOnly: true })}
+                onPress={() => {
+                  let shopRecipe: any = item?.shopRecipe || null;
+                  const shopRecipes =
+                    item?.shopBeverage && Array.isArray((item.shopBeverage as any).shopRecipes)
+                      ? (item.shopBeverage as any).shopRecipes
+                      : [];
+
+                  if (!shopRecipe && shopRecipes.length > 0) {
+                    shopRecipe = shopRecipes[0];
+                  }
+
+                  const shopRecipeIngredients = Array.isArray(
+                    shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients
+                  )
+                    ? shopRecipe.ingredients ?? shopRecipe.shopRecipeIngredients
+                    : [];
+
+                  router.push({
+                    pathname: '/recipe-detail/[id]',
+                    params: {
+                      id: String(item.menuItemId || 0),
+                      recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
+                      recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
+                      ingredients: JSON.stringify(shopRecipeIngredients),
+                    },
+                  });
+                }}
               >
                 <View style={styles.menuItemImage}>
                   {item.shopRecipe?.image ? (
