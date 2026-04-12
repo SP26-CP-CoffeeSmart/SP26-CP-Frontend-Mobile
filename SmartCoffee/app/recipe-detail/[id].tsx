@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     ScrollView,
     View,
@@ -7,7 +7,9 @@ import {
     Image,
     ActivityIndicator,
     RefreshControl,
+    BackHandler,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { AUTH_BASE_URL } from '@/services/api';
@@ -96,8 +98,15 @@ const resolveRemoteImageUrl = (raw?: string | null) => {
 export default function RecipeDetailScreen() {
     const colorScheme = useColorScheme() ?? 'light';
     const isDark = colorScheme === 'dark';
-    const { id, recipe: recipeParam, recipes: recipesParam, ingredients: ingredientsParam } = useLocalSearchParams();
+    const {
+        id,
+        recipe: recipeParam,
+        recipes: recipesParam,
+        ingredients: ingredientsParam,
+        returnTo: returnToParam,
+    } = useLocalSearchParams();
     const router = useRouter();
+    const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
     const [showChipsSelector, setShowChipsSelector] = useState(false);
     const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
     const [recipes, setRecipes] = useState<RecipeData[]>([]);
@@ -591,6 +600,41 @@ export default function RecipeDetailScreen() {
 
     const variant = getVariantFromRecipe();
 
+    const handleBack = useCallback(() => {
+        if (typeof returnTo === 'string' && returnTo.length > 0) {
+            const routerWithDismiss = router as typeof router & {
+                dismissTo?: (href: string) => void;
+            };
+
+            if (typeof routerWithDismiss.dismissTo === 'function') {
+                routerWithDismiss.dismissTo(returnTo);
+                return;
+            }
+
+            router.replace(returnTo as any);
+            return;
+        }
+
+        if (router.canGoBack()) {
+            router.back();
+            return;
+        }
+
+        router.replace('/(tabs)/menu');
+    }, [returnTo, router]);
+
+    useFocusEffect(
+        useCallback(() => {
+            const onHardwareBackPress = () => {
+                handleBack();
+                return true;
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
+            return () => subscription.remove();
+        }, [handleBack])
+    );
+
     return (
         <SafeAreaView edges={['top', 'bottom']} className={`flex-1 ${isDark ? 'bg-background-dark' : 'bg-[#F7F3EF]'}`}>
             <Stack.Screen options={{ headerShown: false }} />
@@ -599,7 +643,7 @@ export default function RecipeDetailScreen() {
             <View className={`px-5 pt-2 pb-3 flex-row items-center justify-between border-b ${isDark ? 'border-gray-700' : 'border-[#E8E1D9]'}`}>
                 <TouchableOpacity
                     className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-gray-800' : 'bg-[#F2E9E1]'}`}
-                    onPress={() => router.back()}
+                    onPress={handleBack}
                     activeOpacity={0.8}
                 >
                     <Ionicons name="arrow-back" size={20} color={isDark ? '#F7F3EF' : '#3C2A21'} />
