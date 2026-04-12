@@ -377,9 +377,7 @@ export default function InventoryScreen() {
           <View style={{ paddingTop: 40 }}>
             <View className="px-5" style={{ paddingBottom: 10 }}>
               <View className="flex-row items-center justify-between">
-                <TouchableOpacity className="w-10 h-10 items-center justify-center" style={{ backgroundColor: COLORS.card, borderRadius: 14 }}>
-                  <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
-                </TouchableOpacity>
+                <View style={{ width: 40, height: 40 }} />
                 <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.ink }}>
                   Inventory Dashboard
                 </Text>
