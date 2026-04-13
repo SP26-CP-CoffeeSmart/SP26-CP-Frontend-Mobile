@@ -156,8 +156,12 @@ export const API_ENDPOINTS = {
       return `${AUTH_BASE_URL}/Order/by-owner/${ownerId}${qs ? `?${qs}` : ''}`;
     },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
+    feedback: (orderId: number | string) => `${AUTH_BASE_URL}/Order/${orderId}/feedback`,
     updateStatus: (orderId: number, status: string) => `${AUTH_BASE_URL}/Order/${orderId}/status?status=${status}`,
     updateStatusBody: (orderId: number) => `${AUTH_BASE_URL}/Order/${orderId}/status`,
+  },
+  orderDetailFeedback: {
+    create: () => `${AUTH_BASE_URL}/OrderDetailFeedback`,
   },
   supplier: {
     list: () => `${AUTH_BASE_URL}/Supplier`,
