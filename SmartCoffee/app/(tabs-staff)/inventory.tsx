@@ -278,9 +278,7 @@ export default function InventoryScreen() {
                 ListHeaderComponent={
                     <View>
                         <View style={styles.headerRow}>
-                            <TouchableOpacity style={styles.headerIcon}>
-                                <Ionicons name="chevron-back" size={20} color={COLORS.ink} />
-                            </TouchableOpacity>
+                            <View style={styles.headerSpacer} />
                             <Text style={styles.headerTitle}>Staff Inventory</Text>
                             <TouchableOpacity
                                 style={styles.headerIcon}
@@ -412,7 +410,7 @@ export default function InventoryScreen() {
                                     return (
                                         <TouchableOpacity
                                             key={item.key}
-                                            onPress={() => setDraftStatus(item.key)}
+                                            onPress={() => setDraftStatus(item.key as 'in' | 'low' | 'out')}
                                             style={[styles.filterChip, isActive && styles.filterChipActive]}
                                         >
                                             <Ionicons

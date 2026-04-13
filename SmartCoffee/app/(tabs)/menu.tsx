@@ -1656,7 +1656,7 @@ export default function MenuScreen() {
                           onPress={() =>
                             router.push({
                               pathname: '/recipe-detail/[id]',
-                              params: { id: item.id },
+                              params: { id: item.id, returnTo: '/(tabs)/menu' },
                             })
                           }
                         >

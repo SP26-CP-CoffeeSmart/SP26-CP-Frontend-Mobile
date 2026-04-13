@@ -438,6 +438,15 @@ export default function MenuInsightsScreen() {
     navigateToMenuVersion,
   ]);
 
+  const openFeedbackInsights = useCallback(() => {
+    router.push({
+      pathname: '/feedback-insights',
+      params: {
+        menuId: String(menuId ?? ''),
+      },
+    });
+  }, [menuId, router]);
+
   useEffect(() => {
     const onHardwareBackPress = () => {
       if (showEditModal) {
@@ -2062,28 +2071,27 @@ export default function MenuInsightsScreen() {
             <Ionicons name="chevron-back" size={26} color="#4a3621" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Menu Insights</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        <View style={styles.feedbackInsightsButtonWrap}>
-          <TouchableOpacity
-            style={styles.feedbackInsightsButton}
-            activeOpacity={0.9}
-            onPress={() =>
-              router.push({
-                pathname: '/feedback-insights',
-                params: {
-                  menuId: String(menuId ?? ''),
-                },
-              })
-            }
-          >
-            <View style={styles.feedbackInsightsButtonLeft}>
-              <Ionicons name="bar-chart-outline" size={18} color="#FFFFFF" />
-              <Text style={styles.feedbackInsightsButtonText}>View feedback insights</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[styles.headerIconButton, styles.headerIconButtonAccent]}
+              activeOpacity={0.85}
+              onPress={openFeedbackInsights}
+            >
+              <Ionicons name="bar-chart-outline" size={18} color="#2D6A4F" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerIconButton}
+              activeOpacity={0.85}
+              onPress={() => setShowFilterModal(true)}
+            >
+              <Ionicons name="options-outline" size={18} color="#4a3621" />
+              {selectedCategoryIds.length > 0 && (
+                <View style={styles.headerActionBadge}>
+                  <Text style={styles.headerActionBadgeText}>{selectedCategoryIds.length}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
 
         <View style={styles.menuImageSection}>
@@ -2224,24 +2232,13 @@ export default function MenuInsightsScreen() {
               </TouchableOpacity>
             )}
           </View>
-          <TouchableOpacity 
-            style={[styles.filterButton, selectedCategoryIds.length > 0 && styles.filterButtonActive]}
-            onPress={() => setShowFilterModal(true)}
-          >
-            <Ionicons name="options" size={20} color={selectedCategoryIds.length > 0 ? "#FFF" : "#4a3621"} />
-            {selectedCategoryIds.length > 0 && (
-              <View style={styles.filterBadge}>
-                <Text style={styles.filterBadgeText}>{selectedCategoryIds.length}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
         </View>
 
         <View style={styles.manualEditCard}>
           <View style={styles.manualEditText}>
             <Text style={styles.manualEditTitle}>Manual edit</Text>
             <Text style={styles.manualEditSubtitle}>
-              Choose an action: overwrite current menu, or create a new version.
+              Keep current menu updated, or save as a new version.
             </Text>
             {hasActualUnsavedChanges && (
               <Text style={styles.manualEditHint}>Unsaved changes</Text>
@@ -2269,7 +2266,10 @@ export default function MenuInsightsScreen() {
                   <Text style={styles.manualSaveButtonText}>Saving...</Text>
                 </View>
               ) : (
-                <Text style={styles.manualSaveButtonText}>Save edits</Text>
+                <>
+                  <Ionicons name="save-outline" size={14} color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Save</Text>
+                </>
               )}
             </TouchableOpacity>
             <TouchableOpacity
@@ -2287,7 +2287,10 @@ export default function MenuInsightsScreen() {
                   <Text style={styles.manualSaveButtonText}>Creating...</Text>
                 </View>
               ) : (
-                <Text style={styles.manualSaveButtonText}>Create new version</Text>
+                <>
+                  <Ionicons name="git-branch-outline" size={14} color="#FFF" />
+                  <Text style={styles.manualSaveButtonText}>Version</Text>
+                </>
               )}
             </TouchableOpacity>
           </View>
@@ -2305,8 +2308,8 @@ export default function MenuInsightsScreen() {
               onPress={openAddItemModal}
               disabled={loadingItems}
             >
-              <Ionicons name="add" size={18} color="#FFF" />
-              <Text style={styles.addMenuItemButtonText}>Add item</Text>
+              <Ionicons name="add" size={20} color="#FFF" />
+              <Text style={styles.addMenuItemButtonText}>Add</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2331,7 +2334,33 @@ export default function MenuInsightsScreen() {
                 key={item.menuItemId}
                 style={[styles.menuItem, isMenuItemEdited(item) && styles.menuItemEdited]}
                 activeOpacity={0.9}
-                onPress={() => openEditModalForItem(item, { readOnly: true })}
+                onPress={() => {
+                  let shopRecipe: any = item?.shopRecipe || null;
+                  const shopRecipes =
+                    item?.shopBeverage && Array.isArray((item.shopBeverage as any).shopRecipes)
+                      ? (item.shopBeverage as any).shopRecipes
+                      : [];
+
+                  if (!shopRecipe && shopRecipes.length > 0) {
+                    shopRecipe = shopRecipes[0];
+                  }
+
+                  const shopRecipeIngredients = Array.isArray(
+                    shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients
+                  )
+                    ? shopRecipe.ingredients ?? shopRecipe.shopRecipeIngredients
+                    : [];
+
+                  router.push({
+                    pathname: '/recipe-detail/[id]',
+                    params: {
+                      id: String(item.menuItemId || 0),
+                      recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
+                      recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
+                      ingredients: JSON.stringify(shopRecipeIngredients),
+                    },
+                  });
+                }}
               >
                 <View style={styles.menuItemImage}>
                   {item.shopRecipe?.image ? (
@@ -3002,14 +3031,58 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderWidth: 1,
     borderColor: '#e1dbd6',
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 2,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
     color: '#4a3621',
   },
-  headerSpacer: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerIconButton: {
     width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#e1dbd6',
+    position: 'relative',
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  headerIconButtonAccent: {
+    backgroundColor: '#eef8f1',
+    borderColor: '#cde8d8',
+  },
+  headerActionBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#e74c3c',
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  headerActionBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   bannerContainer: {
     paddingHorizontal: 24,
@@ -3060,16 +3133,22 @@ const styles = StyleSheet.create({
   },
   addMenuItemButton: {
     backgroundColor: '#4a3621',
-    borderRadius: 12,
+    borderRadius: 18,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
+    height: 36,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
     gap: 4,
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    elevation: 3,
   },
   addMenuItemButtonText: {
     color: '#FFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   menuImageSection: {
@@ -3281,12 +3360,20 @@ const styles = StyleSheet.create({
     color: '#d17a22',
   },
   manualSaveButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    height: 38,
+    paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: '#4a3621',
     justifyContent: 'center',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 88,
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    elevation: 3,
   },
   manualSaveButtonDisabled: {
     opacity: 0.6,
@@ -3295,6 +3382,7 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   manualEditProgress: {
     marginTop: 6,
@@ -3312,12 +3400,20 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   manualCreateVersionButton: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    height: 38,
+    paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: '#2D6A4F',
     justifyContent: 'center',
     alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 88,
+    shadowColor: '#214d3a',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    elevation: 3,
   },
   searchBar: {
     flex: 1,
@@ -3538,18 +3634,24 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   menuItemEditButton: {
-    padding: 6,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#e1dbd6',
     backgroundColor: '#FFF',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   menuItemDeleteButton: {
-    padding: 6,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: '#f0d6cf',
     backgroundColor: '#fff5f2',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   menuItemTitle: {
     fontSize: 16,
@@ -3566,6 +3668,8 @@ const styles = StyleSheet.create({
     height: 46,
     borderRadius: 14,
     backgroundColor: '#4a3621',
+    borderWidth: 1,
+    borderColor: '#3c2c1b',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -3702,10 +3806,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#4a3621',
     paddingVertical: 14,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3c2c1b',
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
+    shadowColor: '#3b2a1a',
+    shadowOffset: { width: 0, height: 7 },
+    shadowOpacity: 0.17,
+    shadowRadius: 12,
+    elevation: 4,
   },
   aiButtonDisabled: {
     opacity: 0.7,

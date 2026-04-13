@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Animated,
+    BackHandler,
     StyleSheet,
     View,
     Text,
@@ -12,6 +13,7 @@ import {
     FlatList,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
@@ -231,7 +233,7 @@ const MenuVersionPage = () => {
         });
     };
 
-    const handleBackToMenuTab = () => {
+    const handleBackToMenuTab = useCallback(() => {
         const routerWithDismiss = router as typeof router & {
             dismissTo?: (href: string) => void;
         };
@@ -242,7 +244,19 @@ const MenuVersionPage = () => {
         }
 
         router.replace('/(tabs)/menu');
-    };
+    }, [router]);
+
+    useFocusEffect(
+        useCallback(() => {
+            const onHardwareBackPress = () => {
+                handleBackToMenuTab();
+                return true;
+            };
+
+            const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
+            return () => subscription.remove();
+        }, [handleBackToMenuTab])
+    );
 
     const renderSkeleton = () => (
         <View style={styles.cardContainer}>
