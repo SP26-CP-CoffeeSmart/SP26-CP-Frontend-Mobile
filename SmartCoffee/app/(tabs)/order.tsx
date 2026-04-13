@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Modal,
   Alert,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -62,7 +63,22 @@ type OrderResponse = {
   receiveDate?: string;
   shipAddress?: string;
   receiveAddress?: string;
-  orderDetails?: { ingredientName?: string; quantity?: number; price?: number }[];
+  orderDetails?: {
+    orderDetailId?: number;
+    order_detail_id?: number;
+    id?: number;
+    type?: string;
+    ingredientId?: number;
+    ingredientName?: string;
+    quantity?: number;
+    price?: number;
+  }[];
+};
+
+type FeedbackFormState = {
+  type: string;
+  content: string;
+  rating: number;
 };
 
 type PagedOrderResponse = {
@@ -93,6 +109,118 @@ export default function OrderScreen() {
   const [totalPages, setTotalPages] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderResponse | null>(null);
+  const [feedbackOrder, setFeedbackOrder] = useState<OrderResponse | null>(null);
+  const [selectedFeedbackDetailId, setSelectedFeedbackDetailId] = useState<number | null>(null);
+  const [feedbackForm, setFeedbackForm] = useState<FeedbackFormState>({
+    type: 'Quality',
+    content: '',
+    rating: 5,
+  });
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
+  const [feedbackSubmittedDetailIds, setFeedbackSubmittedDetailIds] = useState<number[]>([]);
+
+  const feedbackTypes = ['Quality', 'Packaging', 'Delivery', 'Other'];
+
+  const getOrderDetailId = (detail: NonNullable<OrderResponse['orderDetails']>[number]) => {
+    const id = Number(detail.orderDetailId ?? detail.order_detail_id ?? detail.id ?? 0);
+    return Number.isFinite(id) && id > 0 ? id : 0;
+  };
+
+  const canFeedbackStatus = (status?: string) => {
+    const normalized = String(status ?? '').toLowerCase();
+    return normalized === 'delivered' || normalized === 'completed';
+  };
+
+  const getFeedbackProgress = (order: OrderResponse) => {
+    const detailIds = (order.orderDetails ?? [])
+      .map((detail) => getOrderDetailId(detail))
+      .filter((id) => id > 0);
+    if (detailIds.length === 0) {
+      return { done: 0, total: 0 };
+    }
+    const done = detailIds.filter((id) => feedbackSubmittedDetailIds.includes(id)).length;
+    return { done, total: detailIds.length };
+  };
+
+  const openFeedbackModal = (order: OrderResponse, e?: any) => {
+    if (e?.stopPropagation) e.stopPropagation();
+    const details = order.orderDetails ?? [];
+    const firstSelectable = details
+      .map((detail) => getOrderDetailId(detail))
+      .find((id) => id > 0 && !feedbackSubmittedDetailIds.includes(id));
+
+    setFeedbackOrder(order);
+    setSelectedFeedbackDetailId(firstSelectable ?? null);
+    setFeedbackForm({ type: 'Quality', content: '', rating: 5 });
+  };
+
+  const handleSubmitFeedback = async () => {
+    const orderId = Number(feedbackOrder?.orderId ?? 0);
+    const orderDetailId = Number(selectedFeedbackDetailId ?? 0);
+
+    if (!orderId || !orderDetailId) {
+      Toast.show({ type: 'error', text1: 'Missing order detail to feedback' });
+      return;
+    }
+
+    if (!feedbackForm.type.trim()) {
+      Toast.show({ type: 'error', text1: 'Please select feedback type' });
+      return;
+    }
+
+    if (!feedbackForm.content.trim()) {
+      Toast.show({ type: 'error', text1: 'Please enter feedback content' });
+      return;
+    }
+
+    if (feedbackForm.rating < 1 || feedbackForm.rating > 5) {
+      Toast.show({ type: 'error', text1: 'Rating must be between 1 and 5' });
+      return;
+    }
+
+    try {
+      setSubmittingFeedback(true);
+
+      const payload = {
+        order_detail_id: orderDetailId,
+        type: feedbackForm.type.trim(),
+        content: feedbackForm.content.trim(),
+        rating: feedbackForm.rating,
+      };
+
+      console.log('[Order Feedback] payload:', JSON.stringify(payload, null, 2));
+
+      const response = await authorizedFetch(API_ENDPOINTS.orderDetailFeedback.create(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+      console.log('[Order Feedback] endpoint /OrderDetailFeedback status:', response.status);
+      console.log('[Order Feedback] endpoint /OrderDetailFeedback body:', responseText);
+
+      if (!response.ok) {
+        throw new Error(responseText || `Request failed: ${response.status}`);
+      }
+
+      setFeedbackSubmittedDetailIds((prev) =>
+        prev.includes(orderDetailId) ? prev : [...prev, orderDetailId]
+      );
+
+      Toast.show({ type: 'success', text1: 'Feedback submitted' });
+      setSelectedFeedbackDetailId(null);
+      setFeedbackForm({ type: 'Quality', content: '', rating: 5 });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Submit feedback failed';
+      Toast.show({ type: 'error', text1: 'Feedback failed', text2: message });
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  };
 
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
@@ -426,22 +554,25 @@ export default function OrderScreen() {
                 </View>
 
                 {/* Bottom row for Feedback when Delivered */}
-                {String(order.status ?? '').toLowerCase() === 'delivered' && (
+                {canFeedbackStatus(order.status) && (
                   <View style={styles.feedbackRow}>
                     <TouchableOpacity
                       style={styles.feedbackTouchable}
                       activeOpacity={0.6}
-                      onPress={(e) => {
-                        e.stopPropagation(); // Prevent opening modal just by clicking feedback
-                        router.push({
-                          pathname: '/feedback',
-                          params: { orderData: JSON.stringify(order) },
-                        });
-                      }}
+                      onPress={(e) => openFeedbackModal(order, e)}
                     >
                       <Ionicons name="chatbubble-ellipses-outline" size={18} color="#D4AF37" />
-                      <Text style={styles.feedbackText}>Đánh giá</Text>
+                      <Text style={styles.feedbackText}>Feedback</Text>
                     </TouchableOpacity>
+                    {(() => {
+                      const progress = getFeedbackProgress(order);
+                      if (progress.total === 0) return null;
+                      return (
+                        <Text style={styles.feedbackProgressText}>
+                          {progress.done}/{progress.total} feedbacked
+                        </Text>
+                      );
+                    })()}
                   </View>
                 )}
               </TouchableOpacity>
@@ -610,6 +741,144 @@ export default function OrderScreen() {
                   <Text style={styles.modalCancelText}>Re-Order</Text>
                 </TouchableOpacity>
               )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!feedbackOrder}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setFeedbackOrder(null);
+          setSelectedFeedbackDetailId(null);
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.feedbackModalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Order Feedback</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setFeedbackOrder(null);
+                  setSelectedFeedbackDetailId(null);
+                }}
+                style={styles.closeModalBtn}
+              >
+                <Ionicons name="close" size={24} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody}>
+              <Text style={styles.sectionHeading}>Select Item</Text>
+              <View style={styles.feedbackSelectListWrap}>
+                <ScrollView style={styles.feedbackSelectList} nestedScrollEnabled>
+                  {(feedbackOrder?.orderDetails ?? []).map((detail, index) => {
+                    const detailId = getOrderDetailId(detail);
+                    const isSelected = detailId > 0 && detailId === selectedFeedbackDetailId;
+                    const isSubmitted = detailId > 0 && feedbackSubmittedDetailIds.includes(detailId);
+
+                    return (
+                      <TouchableOpacity
+                        key={`${detailId || 'detail'}-${index}`}
+                        style={[
+                          styles.feedbackDetailItem,
+                          isSelected && styles.feedbackDetailItemSelected,
+                          isSubmitted && styles.feedbackDetailItemDisabled,
+                        ]}
+                        activeOpacity={0.8}
+                        disabled={isSubmitted}
+                        onPress={() => {
+                          if (detailId > 0 && !isSubmitted) {
+                            setSelectedFeedbackDetailId(detailId);
+                          }
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.feedbackDetailName}>
+                            {detail.ingredientName || `Order detail #${detailId || index + 1}`}
+                          </Text>
+                          <Text style={styles.feedbackDetailMeta}>
+                            Qty: {detail.quantity || 1}
+                          </Text>
+                        </View>
+                        {isSubmitted ? (
+                          <Text style={styles.feedbackSubmittedTag}>Submitted</Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+
+              <Text style={[styles.sectionHeading, { marginTop: 14 }]}>Feedback Form</Text>
+
+              <Text style={styles.detailLabel}>Type</Text>
+              <View style={styles.feedbackTypeRow}>
+                {feedbackTypes.map((type) => {
+                  const active = feedbackForm.type === type;
+                  return (
+                    <TouchableOpacity
+                      key={type}
+                      style={[styles.feedbackTypeChip, active && styles.feedbackTypeChipActive]}
+                      onPress={() => setFeedbackForm((prev) => ({ ...prev, type }))}
+                      disabled={!selectedFeedbackDetailId}
+                    >
+                      <Text style={[styles.feedbackTypeChipText, active && styles.feedbackTypeChipTextActive]}>
+                        {type}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <Text style={styles.detailLabel}>Content</Text>
+              <TextInput
+                style={styles.feedbackContentInput}
+                placeholder={selectedFeedbackDetailId ? 'Write your feedback...' : 'Select an unsubmitted item to feedback'}
+                placeholderTextColor={COLORS.textSecondary}
+                multiline
+                editable={Boolean(selectedFeedbackDetailId)}
+                value={feedbackForm.content}
+                onChangeText={(text) => setFeedbackForm((prev) => ({ ...prev, content: text }))}
+              />
+
+              <Text style={styles.detailLabel}>Rating</Text>
+              <View style={styles.ratingRow}>
+                {[1, 2, 3, 4, 5].map((value) => {
+                  const active = value <= feedbackForm.rating;
+                  return (
+                    <TouchableOpacity
+                      key={value}
+                      onPress={() => setFeedbackForm((prev) => ({ ...prev, rating: value }))}
+                      style={styles.ratingButton}
+                      disabled={!selectedFeedbackDetailId}
+                    >
+                      <Ionicons
+                        name={active ? 'star' : 'star-outline'}
+                        size={24}
+                        color={active ? '#D4AF37' : COLORS.textSecondary}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.feedbackSubmitButton,
+                  (submittingFeedback || !selectedFeedbackDetailId) && { opacity: 0.7 },
+                ]}
+                onPress={handleSubmitFeedback}
+                disabled={submittingFeedback || !selectedFeedbackDetailId}
+              >
+                {submittingFeedback ? (
+                  <ActivityIndicator size="small" color={COLORS.white} />
+                ) : (
+                  <Text style={styles.feedbackSubmitText}>Submit Feedback</Text>
+                )}
+              </TouchableOpacity>
             </ScrollView>
           </View>
         </View>
@@ -784,6 +1053,9 @@ const styles = StyleSheet.create({
     borderTopColor: COLORS.border,
     padding: 10,
     paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   feedbackTouchable: {
     flexDirection: 'row',
@@ -794,6 +1066,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textSecondary,
     fontWeight: '500',
+  },
+  feedbackProgressText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
   },
   loadMoreButton: {
     alignSelf: 'center',
@@ -986,6 +1263,113 @@ const styles = StyleSheet.create({
   modalCancelText: {
     color: COLORS.white,
     fontSize: 14,
+    fontWeight: '700',
+  },
+  feedbackModalCard: {
+    width: '88%',
+    maxHeight: '82%',
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  feedbackDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 8,
+  },
+  feedbackDetailItemSelected: {
+    borderColor: COLORS.accent,
+    backgroundColor: '#FDF6EE',
+  },
+  feedbackDetailItemDisabled: {
+    opacity: 0.65,
+  },
+  feedbackSelectListWrap: {
+    maxHeight: 160,
+  },
+  feedbackSelectList: {
+    maxHeight: 160,
+  },
+  feedbackDetailName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text,
+  },
+  feedbackDetailMeta: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  feedbackSubmittedTag: {
+    fontSize: 10,
+    color: '#2F7D4A',
+    fontWeight: '700',
+  },
+  feedbackTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  feedbackTypeChip: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#FFF',
+  },
+  feedbackTypeChipActive: {
+    backgroundColor: '#FDF6EE',
+    borderColor: COLORS.accent,
+  },
+  feedbackTypeChipText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  feedbackTypeChipTextActive: {
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  feedbackContentInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    minHeight: 90,
+    textAlignVertical: 'top',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: COLORS.text,
+    marginBottom: 10,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  ratingButton: {
+    marginRight: 8,
+  },
+  feedbackSubmitButton: {
+    backgroundColor: COLORS.text,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  feedbackSubmitText: {
+    color: COLORS.white,
+    fontSize: 13,
     fontWeight: '700',
   },
 });

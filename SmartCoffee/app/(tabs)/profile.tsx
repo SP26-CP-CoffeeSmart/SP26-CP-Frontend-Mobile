@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Modal,
   TextInput,
   Switch,
@@ -30,6 +31,8 @@ const purchaseStatuses = [
   { label: 'Awaiting delivery', icon: 'car-outline' },
   { label: 'Delivered', icon: 'checkmark-done-outline' },
 ];
+
+const TX_PAGE_SIZE = 10;
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -91,9 +94,11 @@ export default function ProfileScreen() {
   const [txTotalEbank, setTxTotalEbank] = useState(0);
   const [txTotalTransaction, setTxTotalTransaction] = useState(0);
   const [txLoadingMore, setTxLoadingMore] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTriggeredRef = useRef(false);
+  const txLoadMoreLockRef = useRef(false);
 
   const getSizeName = (size: BeverageSize, index: number) =>
     String(size.name ?? size.sizeName ?? size.title ?? `Size ${index + 1}`);
@@ -872,7 +877,7 @@ export default function ProfileScreen() {
         setTransactionsLoading(true);
       }
       setTransactionsError(null);
-      const params: any = { page, pageSize: 20 };
+      const params: any = { page, pageSize: TX_PAGE_SIZE };
       if (method) {
         params.paymentMethod = method;
       }
@@ -896,7 +901,7 @@ export default function ProfileScreen() {
         setTxTotalTransaction(data?.totalTransaction ?? 0);
       }
       
-      setTxHasMore(list.length === 20);
+      setTxHasMore(list.length === TX_PAGE_SIZE);
       setTxPage(page);
     } catch (error) {
       setTransactionsError('Unable to load transactions.');
@@ -929,8 +934,26 @@ export default function ProfileScreen() {
   };
 
   const handleLoadMoreTransactions = async () => {
-    if (transactionsLoading || txLoadingMore || !txHasMore) return;
-    await loadTransactions(txPage + 1, txPaymentMethod, true);
+    if (transactionsLoading || txLoadingMore || !txHasMore || txLoadMoreLockRef.current) return;
+    txLoadMoreLockRef.current = true;
+    try {
+      await loadTransactions(txPage + 1, txPaymentMethod, true);
+    } finally {
+      txLoadMoreLockRef.current = false;
+    }
+  };
+
+  const handleTransactionListScroll = (event: any) => {
+    if (transactionsLoading || txLoadingMore || !txHasMore || txLoadMoreLockRef.current) {
+      return;
+    }
+
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    const distanceToBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+    if (distanceToBottom <= 120) {
+      handleLoadMoreTransactions();
+    }
   };
 
   const handleSelectTxMethod = (method: string) => {
@@ -963,13 +986,59 @@ export default function ProfileScreen() {
     return `${Number(value).toLocaleString('vi-VN')} VND`;
   };
 
-  const getTransactionStatusColor = (status?: string) => {
-    const s = String(status ?? '').toLowerCase();
-    if (s === 'paid' || s === 'completed' || s === 'success') return '#2B8A3E';
-    if (s === 'pending') return '#D38B2A';
-    if (s === 'failed' || s === 'cancelled' || s === 'canceled') return '#C51B1B';
-    return '#6B4D35';
+  const getTransactionAmountColor = (value?: number) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '#3C2B20';
+    if (value > 0) return '#2F7A3D';
+    if (value < 0) return '#A4332B';
+    return '#3C2B20';
   };
+
+  const getTransactionNotePreview = (notes?: string) => {
+    const normalized = String(notes ?? '').trim();
+    if (!normalized) return '-';
+    if (normalized.length > 40) return 'Tap to view full transaction detail';
+    return normalized;
+  };
+
+  const getTransactionStatusDisplay = (status?: string) => {
+    const normalized = String(status ?? '').trim();
+    if (!normalized) return '-';
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+  };
+
+  const getTransactionStatusDetailColor = (status?: string) => {
+    const normalized = String(status ?? '').trim().toLowerCase();
+    if (normalized === 'paid' || normalized === 'completed' || normalized === 'success') {
+      return '#2B8A3E';
+    }
+    if (normalized === 'pending') {
+      return '#A76712';
+    }
+    if (normalized === 'failed' || normalized === 'cancelled' || normalized === 'canceled') {
+      return '#A4332B';
+    }
+    return '#3C2B20';
+  };
+
+  const groupedTransactions = useMemo(() => {
+    const groups: Array<{ dateLabel: string; items: any[] }> = [];
+    const groupIndexes = new Map<string, number>();
+
+    transactions.forEach((tx) => {
+      const dateLabel = formatTransactionDate(tx?.transactionDate);
+      const groupKey = dateLabel === '-' ? 'Unknown date' : dateLabel;
+      const existingIndex = groupIndexes.get(groupKey);
+
+      if (existingIndex === undefined) {
+        groupIndexes.set(groupKey, groups.length);
+        groups.push({ dateLabel: groupKey, items: [tx] });
+      } else {
+        groups[existingIndex].items.push(tx);
+      }
+    });
+
+    return groups;
+  }, [transactions]);
 
   useEffect(() => {
     return () => {
@@ -1401,8 +1470,10 @@ export default function ProfileScreen() {
           transparent
           animationType="fade"
           onRequestClose={() => setShowAddSizeModal(false)}>
-          <View style={styles.modalBackdrop}>
-            <View style={styles.modalCard}>
+          <TouchableWithoutFeedback onPress={() => setShowAddSizeModal(false)}>
+            <View style={styles.modalBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Add Beverage Size</Text>
                 <TouchableOpacity
@@ -1451,8 +1522,10 @@ export default function ProfileScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </View>
+          </TouchableWithoutFeedback>
         </Modal>
 
 
@@ -1543,6 +1616,8 @@ export default function ProfileScreen() {
           <ScrollView
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ flexGrow: 1 }}
+            onScroll={handleTransactionListScroll}
+            scrollEventThrottle={16}
             refreshControl={
               <RefreshControl
                 refreshing={refreshingTransactions}
@@ -1550,113 +1625,184 @@ export default function ProfileScreen() {
               />
             }
           >
-            <View style={styles.txFilterContainer}>
-              <TouchableOpacity
-                style={[styles.txFilterBtn, txPaymentMethod === '' && styles.txFilterBtnActive]}
-                onPress={() => handleSelectTxMethod('')}
-              >
-                <Text style={[styles.txFilterText, txPaymentMethod === '' && styles.txFilterTextActive]}>All</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.txFilterBtn, txPaymentMethod === 'WALLET' && styles.txFilterBtnActive]}
-                onPress={() => handleSelectTxMethod('WALLET')}
-              >
-                <Text style={[styles.txFilterText, txPaymentMethod === 'WALLET' && styles.txFilterTextActive]}>Wallet</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.txFilterBtn, txPaymentMethod === 'E-BANK' && styles.txFilterBtnActive]}
-                onPress={() => handleSelectTxMethod('E-BANK')}
-              >
-                <Text style={[styles.txFilterText, txPaymentMethod === 'E-BANK' && styles.txFilterTextActive]}>E-Bank</Text>
-              </TouchableOpacity>
+            <View style={styles.txOverviewCard}>
+              <View style={styles.txSummaryContainer}>
+                <Text style={styles.txSummaryLabel}>
+                  {txPaymentMethod === 'WALLET' ? 'WALLET TOTAL' : txPaymentMethod === 'E-BANK' ? 'E-BANK TOTAL' : 'TOTAL AMOUNT'}
+                </Text>
+                <Text style={styles.txSummaryValue}>
+                  {formatPrice(txPaymentMethod === 'WALLET' ? txTotalWallet : txPaymentMethod === 'E-BANK' ? txTotalEbank : txTotalTransaction)}
+                </Text>
+              </View>
+
+              <View style={styles.txFilterContainer}>
+                <TouchableOpacity
+                  style={[styles.txFilterBtn, txPaymentMethod === '' && styles.txFilterBtnActive]}
+                  onPress={() => handleSelectTxMethod('')}
+                >
+                  <Ionicons
+                    name="apps-outline"
+                    size={15}
+                    color={txPaymentMethod === '' ? '#FFF7EE' : '#6A4A31'}
+                  />
+                  <Text style={[styles.txFilterText, txPaymentMethod === '' && styles.txFilterTextActive]}>All</Text>
+                </TouchableOpacity>
+
+                <View style={styles.txFilterDivider} />
+
+                <TouchableOpacity
+                  style={[styles.txFilterBtn, txPaymentMethod === 'WALLET' && styles.txFilterBtnActive]}
+                  onPress={() => handleSelectTxMethod('WALLET')}
+                >
+                  <Ionicons
+                    name="wallet-outline"
+                    size={15}
+                    color={txPaymentMethod === 'WALLET' ? '#FFF7EE' : '#6A4A31'}
+                  />
+                  <Text style={[styles.txFilterText, txPaymentMethod === 'WALLET' && styles.txFilterTextActive]}>Wallet</Text>
+                </TouchableOpacity>
+
+                <View style={styles.txFilterDivider} />
+
+                <TouchableOpacity
+                  style={[styles.txFilterBtn, txPaymentMethod === 'E-BANK' && styles.txFilterBtnActive]}
+                  onPress={() => handleSelectTxMethod('E-BANK')}
+                >
+                  <Ionicons
+                    name="card-outline"
+                    size={15}
+                    color={txPaymentMethod === 'E-BANK' ? '#FFF7EE' : '#6A4A31'}
+                  />
+                  <Text style={[styles.txFilterText, txPaymentMethod === 'E-BANK' && styles.txFilterTextActive]}>E-Bank</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <View style={styles.txSummaryContainer}>
-              <Text style={styles.txSummaryLabel}>
-                {txPaymentMethod === 'WALLET' ? 'Total Wallet:' : txPaymentMethod === 'E-BANK' ? 'Total E-Bank:' : 'Total Amount:'}
-              </Text>
-              <Text style={styles.txSummaryValue}>
-                {formatPrice(txPaymentMethod === 'WALLET' ? txTotalWallet : txPaymentMethod === 'E-BANK' ? txTotalEbank : txTotalTransaction)}
-              </Text>
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              contentContainerStyle={styles.txModalBody}
-            >
-              <View style={styles.txTableWrap}>
-                {/* Table Header */}
-                <View style={styles.txTableHeader}>
-                  <Text style={[styles.txTableHeaderText, styles.txColDate]}>Date</Text>
-                  <Text style={[styles.txTableHeaderText, styles.txColNotes]}>Notes</Text>
-                  <Text style={[styles.txTableHeaderText, styles.txColAmount]}>Amount</Text>
-                  <Text style={[styles.txTableHeaderText, styles.txColStatus]}>Status</Text>
+            <View style={styles.txModalBody}>
+              {transactionsLoading ? (
+                <View style={styles.txLoadingWrap}>
+                  <ActivityIndicator size="small" color="#A36D2D" />
+                  <Text style={styles.txFeedbackText}>Loading transactions...</Text>
                 </View>
+              ) : transactionsError ? (
+                <View style={styles.txLoadingWrap}>
+                  <Ionicons name="alert-circle-outline" size={24} color="#C51B1B" />
+                  <Text style={styles.txFeedbackText}>{transactionsError}</Text>
+                  <TouchableOpacity style={styles.txRetryButton} onPress={() => loadTransactions(1, txPaymentMethod, false)}>
+                    <Text style={styles.txRetryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : transactions.length === 0 ? (
+                <View style={styles.txLoadingWrap}>
+                  <Ionicons name="document-text-outline" size={32} color="#C2B6A8" />
+                  <Text style={styles.txFeedbackText}>No transactions found.</Text>
+                </View>
+              ) : (
+                groupedTransactions.map((group, groupIndex) => (
+                  <View key={`${group.dateLabel}-${groupIndex}`} style={styles.txDateGroup}>
+                    <Text style={styles.txDateGroupLabel}>{group.dateLabel}</Text>
 
-                {transactionsLoading ? (
-                  <View style={styles.txLoadingWrap}>
-                    <ActivityIndicator size="small" color="#A36D2D" />
-                    <Text style={styles.txFeedbackText}>Loading transactions...</Text>
-                  </View>
-                ) : transactionsError ? (
-                  <View style={styles.txLoadingWrap}>
-                    <Ionicons name="alert-circle-outline" size={24} color="#C51B1B" />
-                    <Text style={styles.txFeedbackText}>{transactionsError}</Text>
-                    <TouchableOpacity style={styles.txRetryButton} onPress={() => loadTransactions(1, txPaymentMethod, false)}>
-                      <Text style={styles.txRetryText}>Retry</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : transactions.length === 0 ? (
-                  <View style={styles.txLoadingWrap}>
-                    <Ionicons name="document-text-outline" size={32} color="#C2B6A8" />
-                    <Text style={styles.txFeedbackText}>No transactions found.</Text>
-                  </View>
-                ) : (
-                  transactions.map((tx, index) => {
-                    const statusColor = getTransactionStatusColor(tx.status);
-                    return (
-                      <View key={tx.transactionId ?? tx.id ?? index}>
-                        <View style={styles.txRow}>
-                          <Text style={[styles.txCellText, styles.txColDate]} numberOfLines={1}>
-                            {formatTransactionDate(tx.transactionDate)}
-                          </Text>
-                          <Text style={[styles.txCellText, styles.txColNotes]} numberOfLines={1}>
-                            {tx.notes || '-'}
-                          </Text>
-                          <Text style={[styles.txCellAmount, styles.txColAmount]} numberOfLines={1}>
+                    {group.items.map((tx, itemIndex) => {
+                      const amountColor = getTransactionAmountColor(tx.totalPrice);
+                      const notePreview = getTransactionNotePreview(tx.notes);
+                      const hasLongNote = String(tx?.notes ?? '').trim().length > 40;
+
+                      return (
+                        <TouchableOpacity
+                          key={tx.transactionId ?? tx.id ?? `${groupIndex}-${itemIndex}`}
+                          style={styles.txCard}
+                          activeOpacity={0.85}
+                          onPress={() => setSelectedTransaction(tx)}
+                        >
+                          <Text style={styles.txCardDate}>{formatTransactionDate(tx.transactionDate)}</Text>
+
+                          <Text style={[styles.txCardAmount, { color: amountColor }]}>
                             {formatPrice(tx.totalPrice)}
                           </Text>
-                          <Text style={[styles.txCellStatus, styles.txColStatus, { color: statusColor }]} numberOfLines={1}>
-                            {tx.status || '-'}
-                          </Text>
-                        </View>
-                        {index < transactions.length - 1 ? (
-                          <View style={styles.txDivider} />
-                        ) : null}
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-            </ScrollView>
+
+                          <View style={styles.txCardNoteRow}>
+                            <Text style={styles.txCardNote} numberOfLines={1}>{notePreview}</Text>
+                            {hasLongNote ? <Ionicons name="chevron-forward" size={14} color="#8B6B4D" /> : null}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ))
+              )}
+            </View>
             
-            {txHasMore && (
-              <TouchableOpacity
-                style={styles.txLoadMoreBtn}
-                onPress={handleLoadMoreTransactions}
-                disabled={txLoadingMore}
-              >
-                {txLoadingMore ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={styles.txLoadMoreText}>Load More</Text>
-                )}
-              </TouchableOpacity>
-            )}
+            {txLoadingMore ? (
+              <View style={styles.txLoadingMoreFooter}>
+                <ActivityIndicator size="small" color="#A36D2D" />
+                <Text style={styles.txLoadingMoreText}>Loading more transactions...</Text>
+              </View>
+            ) : null}
             
           </ScrollView>
         </SafeAreaView>
+      </Modal>
+
+      <Modal
+        visible={!!selectedTransaction}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedTransaction(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setSelectedTransaction(null)}>
+          <View style={styles.txDetailBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.txDetailCard}>
+            <View style={styles.txDetailHeader}>
+              <Text style={styles.txDetailTitle}>Transaction Detail</Text>
+              <TouchableOpacity
+                style={styles.txDetailCloseButton}
+                onPress={() => setSelectedTransaction(null)}
+              >
+                <Ionicons name="close" size={18} color="#4D3423" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.txDetailRow}>
+              <Text style={styles.txDetailLabel}>Date</Text>
+              <Text style={styles.txDetailValue}>
+                {formatTransactionDate(selectedTransaction?.transactionDate)}
+              </Text>
+            </View>
+            <View style={styles.txDetailRow}>
+              <Text style={styles.txDetailLabel}>Amount</Text>
+              <Text
+                style={[
+                  styles.txDetailValue,
+                  { color: getTransactionAmountColor(selectedTransaction?.totalPrice) },
+                ]}
+              >
+                {formatPrice(selectedTransaction?.totalPrice)}
+              </Text>
+            </View>
+            <View style={styles.txDetailRow}>
+              <Text style={styles.txDetailLabel}>Status</Text>
+              <Text
+                style={[
+                  styles.txDetailValue,
+                  { color: getTransactionStatusDetailColor(selectedTransaction?.status) },
+                ]}
+              >
+                {getTransactionStatusDisplay(selectedTransaction?.status)}
+              </Text>
+            </View>
+            <View style={styles.txDetailRow}>
+              <Text style={styles.txDetailLabel}>Method</Text>
+              <Text style={styles.txDetailValue}>{selectedTransaction?.paymentMethod || '-'}</Text>
+            </View>
+            <View style={styles.txDetailNotesWrap}>
+              <Text style={styles.txDetailLabel}>Notes</Text>
+              <Text style={styles.txDetailNotesText}>{selectedTransaction?.notes || '-'}</Text>
+            </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {toastMessage ? (
@@ -2601,6 +2747,54 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 32,
   },
+  txDateGroup: {
+    marginBottom: 10,
+  },
+  txDateGroupLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8A6A4E',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  txCard: {
+    backgroundColor: '#FFFDF9',
+    borderWidth: 1,
+    borderColor: '#E8D9C8',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  txCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  txCardDate: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#7B5B3C',
+    marginBottom: 6,
+  },
+  txCardAmount: {
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  txCardNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  txCardNote: {
+    flex: 1,
+    fontSize: 12,
+    color: '#6B4D35',
+    fontWeight: '500',
+  },
   txTableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2768,50 +2962,69 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#3C2B20',
   },
+  txOverviewCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 10,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3CBB3',
+  },
   txFilterContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EADBCB',
+    alignItems: 'stretch',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    backgroundColor: '#FFFDF9',
+    borderTopWidth: 1,
+    borderTopColor: '#EADBCB',
   },
   txFilterBtn: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: '#EADBCB',
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
   },
   txFilterBtnActive: {
-    backgroundColor: '#8B6B4D',
+    backgroundColor: '#6E4B30',
+  },
+  txFilterDivider: {
+    width: 1,
+    backgroundColor: '#EADBCB',
+    marginVertical: 8,
   },
   txFilterText: {
-    fontSize: 14,
-    color: '#6B4D35',
+    fontSize: 12,
+    color: '#6A4A31',
     fontWeight: '600',
   },
   txFilterTextActive: {
-    color: '#FFF',
+    color: '#FFF7EE',
   },
   txSummaryContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#F7F2EA',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EADBCB',
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 16,
+    backgroundColor: '#F2E4D6',
   },
   txSummaryLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#3C2B20',
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6A4A31',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    marginBottom: 4,
   },
   txSummaryValue: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#A36D2D',
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#2D1C12',
   },
   txLoadMoreBtn: {
     alignSelf: 'center',
@@ -2825,5 +3038,91 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontWeight: '700',
     fontSize: 14,
+  },
+  txLoadingMoreFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  txLoadingMoreText: {
+    fontSize: 12,
+    color: '#8B6B4D',
+    fontWeight: '600',
+  },
+  txDetailBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(35, 22, 14, 0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  txDetailCard: {
+    backgroundColor: '#FFF8EF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2C9B2',
+    padding: 18,
+    shadowColor: '#2D1D13',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  txDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  txDetailTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#3C2B20',
+  },
+  txDetailCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#F0E2D2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  txDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECDAC8',
+  },
+  txDetailLabel: {
+    fontSize: 12,
+    color: '#7B5B3C',
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  txDetailValue: {
+    flex: 1,
+    textAlign: 'right',
+    marginLeft: 12,
+    fontSize: 14,
+    color: '#3C2B20',
+    fontWeight: '700',
+  },
+  txDetailNotesWrap: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E7D4C1',
+    backgroundColor: '#FFFDF8',
+  },
+  txDetailNotesText: {
+    marginTop: 6,
+    fontSize: 14,
+    color: '#4E3828',
+    lineHeight: 20,
   },
 });
