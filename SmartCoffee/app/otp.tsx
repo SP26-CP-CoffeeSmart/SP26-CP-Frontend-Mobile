@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image,
   ImageBackground,
@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { verifyOtp } from '@/services/authService';
+import { verifyForgotPasswordOtp, verifyOtp } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 
 const COLORS = {
@@ -28,14 +28,46 @@ const COLORS = {
 };
 
 const BACKGROUND_IMAGE = require('../assets/background.png');
+const FORGOT_PASSWORD_EMAIL_KEY = 'forgot-password:email';
+const FORGOT_PASSWORD_OTP_KEY = 'forgot-password:otp';
+
+const normalizeParam = (value?: string | string[]) => {
+  if (Array.isArray(value)) {
+    return value[0] ?? '';
+  }
+  return value ?? '';
+};
 
 export default function OtpScreen() {
   const router = useRouter();
-  const { email } = useLocalSearchParams<{ email?: string }>();
+  const params = useLocalSearchParams<{ email?: string | string[]; flow?: string | string[] }>();
+  const normalizedEmail = useMemo(() => normalizeParam(params.email).trim(), [params.email]);
+  const normalizedFlow = useMemo(() => normalizeParam(params.flow).trim(), [params.flow]);
   const { refreshProfile } = useAuth();
   const [code, setCode] = useState(['', '', '', '', '', '']);
+  const [emailForOtp, setEmailForOtp] = useState(normalizedEmail);
   const inputsRef = useRef<Array<TextInput | null>>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (normalizedEmail) {
+      setEmailForOtp(normalizedEmail);
+    }
+  }, [normalizedEmail]);
+
+  useEffect(() => {
+    const hydrateForgotPasswordEmail = async () => {
+      if (normalizedFlow !== 'forgot-password') return;
+      if (normalizedEmail) return;
+
+      const storedEmail = await AsyncStorage.getItem(FORGOT_PASSWORD_EMAIL_KEY);
+      if (storedEmail) {
+        setEmailForOtp(storedEmail.trim());
+      }
+    };
+
+    hydrateForgotPasswordEmail();
+  }, [normalizedEmail, normalizedFlow]);
 
   const handleChange = (value: string, index: number) => {
     const next = [...code];
@@ -49,7 +81,10 @@ export default function OtpScreen() {
 
   const handleVerify = async () => {
     const otp = code.join('');
-    if (!email) {
+    const isForgotPasswordFlow = normalizedFlow === 'forgot-password';
+    const resolvedEmail = emailForOtp.trim();
+
+    if (!resolvedEmail) {
       Toast.show({ type: 'error', text1: 'Verification failed', text2: 'Missing email for verification.' });
       return;
     }
@@ -61,8 +96,19 @@ export default function OtpScreen() {
 
     try {
       setSubmitting(true);
-      let role = 'ShopOwner';
-      const tokens = await verifyOtp(email, otp, role);
+      if (isForgotPasswordFlow) {
+        await verifyForgotPasswordOtp(resolvedEmail, otp);
+        await AsyncStorage.multiSet([
+          [FORGOT_PASSWORD_EMAIL_KEY, resolvedEmail],
+          [FORGOT_PASSWORD_OTP_KEY, otp],
+        ]);
+        Toast.show({ type: 'success', text1: 'OTP verified' });
+        router.replace({ pathname: '/reset-password', params: { email: resolvedEmail } });
+        return;
+      }
+
+      const role = 'ShopOwner';
+      const tokens = await verifyOtp(resolvedEmail, otp, role);
       await AsyncStorage.multiSet([
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],

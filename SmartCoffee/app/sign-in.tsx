@@ -10,7 +10,7 @@ import {
   View,
   Pressable,
 } from 'react-native';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -60,9 +60,11 @@ export default function SignInScreen() {
         ['accessToken', tokens.accessToken],
         ['refreshToken', tokens.refreshToken],
       ]);
-      await refreshProfile();
+      router.replace({ pathname: '/onboarding', params: { source: 'login' } });
+      refreshProfile().catch(() => {
+        // Ignore refresh errors here; onboarding will still load with auth tokens.
+      });
       Toast.show({ type: 'success', text1: 'Login successful' });
-      // Navigation will be handled by root layout based on role
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       Toast.show({ type: 'error', text1: 'Login failed', text2: message });
@@ -117,14 +119,6 @@ export default function SignInScreen() {
 
         <View style={styles.dividerRow}>
           <View style={styles.divider} />
-          <Text style={styles.dividerText}>Or</Text>
-          <View style={styles.divider} />
-        </View>
-
-        <View style={styles.socialRow}>
-          <Pressable style={styles.socialButton}>
-            <FontAwesome name="google" size={20} color="#EA4335" />
-          </Pressable>
         </View>
 
         <View style={styles.footerRow}>
@@ -236,31 +230,12 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
     marginVertical: 16,
   },
   divider: {
     flex: 1,
     height: 1,
     backgroundColor: '#E2D6CC',
-  },
-  dividerText: {
-    fontSize: 12,
-    color: COLORS.muted,
-  },
-  socialRow: {
-    alignItems: 'center',
-    marginBottom: 18,
-  },
-  socialButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   footerRow: {
     flexDirection: 'row',

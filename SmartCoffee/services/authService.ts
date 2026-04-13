@@ -120,6 +120,26 @@ export const verifyOtp = async (email: string, otp: string, role: string): Promi
   return postJson<AuthTokens>(API_ENDPOINTS.auth.verifyOtp(), { email, otp, role });
 };
 
+export const requestForgotPasswordOtp = async (email: string): Promise<string> => {
+  return postJson<string>(API_ENDPOINTS.auth.forgotPassword(), { email });
+};
+
+export const verifyForgotPasswordOtp = async (email: string, otp: string): Promise<string> => {
+  return postJson<string>(API_ENDPOINTS.auth.verifyForgotPasswordOtp(), { email, otp });
+};
+
+export const resetForgotPassword = async (
+  email: string,
+  otp: string,
+  newPassword: string
+): Promise<string> => {
+  return postJson<string>(API_ENDPOINTS.auth.resetPassword(), {
+    email,
+    otp,
+    newPassword,
+  });
+};
+
 export const refreshTokens = async (): Promise<AuthTokens> => {
   const accessToken = await AsyncStorage.getItem('accessToken');
   const refreshToken = await AsyncStorage.getItem('refreshToken');

@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch, updateCoffeeShop } from '@/services/authService';
@@ -35,7 +35,7 @@ const BACKGROUND_IMAGE = require('../assets/background.png');
 const ONBOARDING_COMPLETE_KEY = 'onboarding:complete';
 const SUBSCRIPTION_SKIP_ONCE_KEY = 'subscription:skip-once';
 const EDGE_NAV_WIDTH = 44;
-const ONBOARDING_CARD_HEIGHT = 640;
+const ONBOARDING_CARD_HEIGHT = 700;
 
 type SubscriptionPackage = {
   subscriptionPackageId?: number;
@@ -44,8 +44,30 @@ type SubscriptionPackage = {
   name?: string;
   tier?: string;
   price?: number | string;
+  amount?: number | string;
+  cost?: number | string;
+  monthlyPrice?: number | string;
+  annualPrice?: number | string;
+  pricePerMonth?: number | string;
   duration?: number | string;
+  durationMonths?: number | string;
+  durationDays?: number | string;
+  billingCycle?: string;
+  cycle?: string;
   description?: string;
+  summary?: string;
+  subtitle?: string;
+  detail?: string;
+  features?: string[] | string;
+  featureList?: string[] | string;
+  benefits?: string[] | string;
+  details?: string[] | string;
+  staffQuantity?: number;
+  menuSuggestLimit?: number;
+  recipeRecommendLimit?: number;
+  productRecommendLimit?: number;
+  menuAnalyzeFeedbackLimit?: number;
+  inventoryForecastLimit?: number;
 };
 
 type ProvinceItem = {
@@ -66,6 +88,22 @@ type WardItem = {
 const getPackageId = (item: SubscriptionPackage) =>
   item.subscriptionPackageId ?? item.packageId ?? item.id ?? null;
 
+const getPackagePrice = (value: SubscriptionPackage) => {
+  const raw =
+    value?.price ??
+    value?.amount ??
+    value?.cost ??
+    value?.monthlyPrice ??
+    value?.annualPrice ??
+    value?.pricePerMonth;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') {
+    const parsed = Number(raw.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
 const formatPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -73,6 +111,61 @@ const formatPrice = (value: unknown) => {
     return `${numeric.toLocaleString()} VND`;
   }
   return String(value);
+};
+
+const getPackageDuration = (value: SubscriptionPackage) => {
+  const duration =
+    value?.duration ??
+    value?.durationMonths ??
+    value?.durationDays ??
+    value?.billingCycle ??
+    value?.cycle;
+  if (!duration) return '';
+  if (typeof duration === 'number') {
+    return duration > 1 ? `${duration} months` : `${duration} month`;
+  }
+  return String(duration);
+};
+
+const getPackageDescription = (value: SubscriptionPackage) => {
+  const description = value?.description ?? value?.summary ?? value?.subtitle ?? value?.detail;
+  return description ? String(description) : '';
+};
+
+const getPackageFeatures = (value: SubscriptionPackage) => {
+  const defaultFeatures: string[] = [];
+
+  if (value.staffQuantity !== undefined) {
+    defaultFeatures.push(`Staff Accounts: ${value.staffQuantity}`);
+  }
+  if (value.menuSuggestLimit !== undefined) {
+    defaultFeatures.push(`Menu Suggestions Limit: ${value.menuSuggestLimit}`);
+  }
+  if (value.recipeRecommendLimit !== undefined) {
+    defaultFeatures.push(`Recipe Recommendations Limit: ${value.recipeRecommendLimit}`);
+  }
+  if (value.productRecommendLimit !== undefined) {
+    defaultFeatures.push(`Product Recommendations Limit: ${value.productRecommendLimit}`);
+  }
+  if (value.menuAnalyzeFeedbackLimit !== undefined) {
+    defaultFeatures.push(`Menu Feedback Analysis Limit: ${value.menuAnalyzeFeedbackLimit}`);
+  }
+  if (value.inventoryForecastLimit !== undefined) {
+    defaultFeatures.push(`Inventory Forecasts Limit: ${value.inventoryForecastLimit}`);
+  }
+
+  const raw = value?.features ?? value?.featureList ?? value?.benefits ?? value?.details;
+  if (Array.isArray(raw)) {
+    return [...defaultFeatures, ...raw.map((item) => String(item)).filter(Boolean)];
+  }
+  if (typeof raw === 'string') {
+    const parsed = raw
+      .split(/\n|;|\r|\r\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    return [...defaultFeatures, ...parsed];
+  }
+  return defaultFeatures;
 };
 
 const isTrialPackage = (item: SubscriptionPackage) => {
@@ -84,7 +177,9 @@ const isTrialPackage = (item: SubscriptionPackage) => {
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { source } = useLocalSearchParams<{ source?: string }>();
   const { coffeeShopId, shopName, refreshProfile, accountId } = useAuth();
+  const isLoginPromoEntry = source === 'login';
   const [activeTab, setActiveTab] = useState(0);
   const [shopNameInput, setShopNameInput] = useState(shopName ?? '');
   const [savingShopName, setSavingShopName] = useState(false);
@@ -116,6 +211,13 @@ export default function OnboardingScreen() {
 
   useEffect(() => {
     const checkOnboarding = async () => {
+      if (isLoginPromoEntry) {
+        setActiveTab(2);
+        // Promo screen after login should not block user from continuing to menu.
+        setSubscriptionActivated(true);
+        return;
+      }
+
       try {
         const stored = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
         if (stored === 'true') {
@@ -150,7 +252,7 @@ export default function OnboardingScreen() {
     };
 
     checkOnboarding();
-  }, [coffeeShopId, router]);
+  }, [coffeeShopId, isLoginPromoEntry, router]);
 
   const loadPackages = useCallback(async () => {
     try {
@@ -517,7 +619,7 @@ export default function OnboardingScreen() {
     activeTab === 1
       ? savingShopName || Boolean(shopNameError)
       : activeTab === 2
-        ? !subscriptionActivated
+        ? !subscriptionActivated && !isLoginPromoEntry
         : false;
 
   const handlePrimaryAction = () => {
@@ -763,13 +865,16 @@ export default function OnboardingScreen() {
                       showsVerticalScrollIndicator={false}
                     >
                       {sortedPackages.map((item) => {
-                        const price = formatPrice(item.price);
+                        const price = formatPrice(getPackagePrice(item) ?? item.price);
                         const isTrial = isTrialPackage(item);
                         const isTrialActivated = isTrial && subscriptionActivated;
-                        const descriptionLines = String(item.description ?? '')
+                        const description = getPackageDescription(item);
+                        const descriptionLines = description
                           .split('\n')
                           .map((line) => line.trim())
                           .filter(Boolean);
+                        const features = getPackageFeatures(item);
+                        const durationText = getPackageDuration(item);
                         return (
                           <View key={String(getPackageId(item) ?? item.name)} style={styles.packageCard}>
                             <View style={styles.packageHeaderRow}>
@@ -798,9 +903,18 @@ export default function OnboardingScreen() {
                                 ))}
                               </View>
                             ) : null}
-                            {item.duration ? (
+                            {features.length > 0 ? (
+                              <View style={styles.packageFeatureList}>
+                                {features.map((feature, index) => (
+                                  <Text key={`${getPackageId(item) ?? item.name}-feature-${index}`} style={styles.packageFeatureText}>
+                                    • {feature}
+                                  </Text>
+                                ))}
+                              </View>
+                            ) : null}
+                            {durationText ? (
                               <View style={styles.packageMetaBadge}>
-                                <Text style={styles.packageMeta}>Duration: {item.duration}</Text>
+                                <Text style={styles.packageMeta}>Duration: {durationText}</Text>
                               </View>
                             ) : null}
                             <Pressable
@@ -1193,6 +1307,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.text,
     lineHeight: 18,
+  },
+  packageFeatureList: {
+    marginTop: 8,
+    gap: 4,
+    maxHeight: 150,
+  },
+  packageFeatureText: {
+    fontSize: 11,
+    color: '#6A4A31',
+    lineHeight: 17,
   },
   packageMetaBadge: {
     alignSelf: 'flex-start',
