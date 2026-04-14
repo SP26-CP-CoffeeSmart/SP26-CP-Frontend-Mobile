@@ -1451,7 +1451,7 @@ export default function MenuScreen() {
             onPress={() => router.push('/notifications')}
             activeOpacity={0.85}
           >
-            <Ionicons name="notifications-outline" size={20} color="#FFF" />
+            <Ionicons name="notifications-outline" size={24} color="#FFF" />
             {notificationUnreadCount > 0 ? (
               <View style={styles.notificationBadge}>
                 <Text style={styles.notificationBadgeText}>
@@ -1462,8 +1462,10 @@ export default function MenuScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
+        <View style={styles.headerDivider} />
+
+        <View style={[styles.section, styles.menuSection]}>
+          <View style={[styles.sectionHeader, styles.menuSectionHeader]}>
             <Text style={styles.sectionTitle}>Menu List</Text>
             <TouchableOpacity onPress={handleNewMenuPress} disabled={checkingMenuGate}>
               <Text
@@ -1714,47 +1716,52 @@ export default function MenuScreen() {
           )}
         </View>
 
-      </ScrollView>
-
-      <View style={styles.suggestionDock} pointerEvents="box-none">
-        <View style={styles.suggestionCard}>
-          <View style={styles.suggestionGlow} />
-          <View style={styles.suggestionContent}>
-            <View style={styles.suggestionHeader}>
-              <View style={styles.suggestionIconWrap}>
-                <MaterialIcons name="auto-awesome" size={18} color={stylesVars.primary} />
+        <View style={styles.suggestionDock}>
+          <View style={styles.suggestionCard}>
+            <View style={styles.suggestionGlow} />
+            <View style={styles.suggestionContent}>
+              <View style={styles.suggestionHeader}>
+                <View style={styles.suggestionIconWrap}>
+                  <MaterialIcons name="auto-awesome" size={18} color={stylesVars.primary} />
+                </View>
+                <View style={styles.suggestionHeaderTextWrap}>
+                  <Text style={styles.suggestionTitle}>Create Recipe</Text>
+                  <Text style={styles.suggestionSubtitle}>
+                    Quickly create recipes with AI, or craft your own recipe your way.
+                  </Text>
+                </View>
               </View>
-              <Text style={styles.suggestionTitle}>Create Recipe</Text>
-            </View>
-            <View style={styles.suggestionButtons}>
-              <TouchableOpacity
-                style={[styles.aiButton, checkingRecipeGate && styles.suggestionActionDisabled]}
-                onPress={() => handleCreateRecipeEntry('/ai-create')}
-                disabled={checkingRecipeGate}
-              >
-                <Text style={styles.aiButtonText}>Create By AI</Text>
-                {checkingRecipeGate ? (
-                  <ActivityIndicator size="small" color={stylesVars.espresso} />
-                ) : (
-                  <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.manualButton, checkingRecipeGate && styles.suggestionActionDisabled]}
-                onPress={() => handleCreateRecipeEntry('/create-recipe')}
-                disabled={checkingRecipeGate}
-              >
-                <Text style={styles.manualButtonText}>Create Manually</Text>
-                {checkingRecipeGate ? (
-                  <ActivityIndicator size="small" color={stylesVars.espresso} />
-                ) : (
-                  <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
-                )}
-              </TouchableOpacity>
+              <View style={styles.suggestionButtons}>
+                <TouchableOpacity
+                  style={[styles.aiButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  onPress={() => handleCreateRecipeEntry('/ai-create')}
+                  disabled={checkingRecipeGate}
+                >
+                  <Text style={styles.aiButtonText}>AI Suggestions</Text>
+                  {checkingRecipeGate ? (
+                    <ActivityIndicator size="small" color={stylesVars.espresso} />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.manualButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  onPress={() => handleCreateRecipeEntry('/create-recipe')}
+                  disabled={checkingRecipeGate}
+                >
+                  <Text style={styles.manualButtonText}>Manually</Text>
+                  {checkingRecipeGate ? (
+                    <ActivityIndicator size="small" color={stylesVars.espresso} />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
-      </View>
+
+      </ScrollView>
 
       <Modal
         visible={showBeverageSizeGuideModal}
@@ -2045,7 +2052,7 @@ export default function MenuScreen() {
 const stylesVars = {
   primary: '#D9A05B',
   espresso: '#3E2723',
-  background: '#FDFBF7',
+  background: '#F6EFE6',
   muted: '#9C9388',
 };
 
@@ -2056,7 +2063,7 @@ const styles = StyleSheet.create({
   },
   container: {
     paddingHorizontal: 24,
-    paddingBottom: 320,
+    paddingBottom: 40,
     backgroundColor: stylesVars.background,
   },
   spacerTop: {
@@ -2087,9 +2094,9 @@ const styles = StyleSheet.create({
     color: stylesVars.espresso,
   },
   cartButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 56,
+    height: 56,
+    borderRadius: 27,
     backgroundColor: stylesVars.espresso,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2102,11 +2109,11 @@ const styles = StyleSheet.create({
   },
   notificationBadge: {
     position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
+    top: 4,
+    right: 4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
     paddingHorizontal: 4,
     backgroundColor: '#E76A24',
     alignItems: 'center',
@@ -2122,11 +2129,26 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 28,
   },
+  menuSection: {
+    marginTop: 8,
+  },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     marginBottom: 16,
+  },
+  menuSectionHeader: {
+    marginBottom: 8,
+  },
+  headerDivider: {
+    alignSelf: 'center',
+    width: 350,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: 'rgba(62,39,35,0.16)',
+    marginTop: 2,
+    marginBottom: 8,
   },
   sectionTitle: {
     fontSize: 22,
@@ -2137,12 +2159,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: stylesVars.primary,
+    marginBottom: 3,
   },
   sectionActionPrimaryDisabled: {
     opacity: 0.5,
   },
   menuList: {
-    marginTop: 6,
+    marginTop: 0,
     gap: 16,
   },
   menuStateText: {
@@ -2503,11 +2526,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   suggestionDock: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 24,
-    zIndex: 30,
+    marginTop: 4,
+    marginBottom: 16,
   },
   suggestionGlow: {
     position: 'absolute',
@@ -2524,8 +2544,12 @@ const styles = StyleSheet.create({
   },
   suggestionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
+  },
+  suggestionHeaderTextWrap: {
+    flex: 1,
+    gap: 4,
   },
   suggestionIconWrap: {
     width: 36,
@@ -2539,6 +2563,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#FFF',
+  },
+  suggestionSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.85)',
   },
   suggestionButtons: {
     flexDirection: 'row',

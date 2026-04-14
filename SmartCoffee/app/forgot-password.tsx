@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Image,
   ImageBackground,
@@ -12,6 +12,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
+import Toast from 'react-native-toast-message';
+import { requestForgotPasswordOtp } from '@/services/authService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const FORGOT_PASSWORD_EMAIL_KEY = 'forgot-password:email';
 
 // Match sign-in styles
 const COLORS = {
@@ -28,6 +33,29 @@ const BACKGROUND_IMAGE = require('../assets/background.png');
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSendOtp = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      Toast.show({ type: 'error', text1: 'Send OTP failed', text2: 'Please enter your email.' });
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await requestForgotPasswordOtp(trimmedEmail);
+      await AsyncStorage.setItem(FORGOT_PASSWORD_EMAIL_KEY, trimmedEmail);
+      Toast.show({ type: 'success', text1: 'OTP sent', text2: 'Please check your email for the OTP code.' });
+      router.push({ pathname: '/otp', params: { email: trimmedEmail, flow: 'forgot-password' } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to send OTP.';
+      Toast.show({ type: 'error', text1: 'Send OTP failed', text2: message });
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <ImageBackground source={BACKGROUND_IMAGE} style={styles.background} imageStyle={styles.backgroundImage}>
@@ -52,11 +80,13 @@ export default function ForgotPasswordScreen() {
                 placeholder="Enter your Email/Phone"
                 placeholderTextColor={COLORS.muted}
                 autoCapitalize="none"
+                value={email}
+                onChangeText={setEmail}
               />
             </View>
 
-            <Pressable style={styles.primaryButton} onPress={() => router.push('/otp')}>
-              <Text style={styles.primaryButtonText}>Send OTP</Text>
+            <Pressable style={[styles.primaryButton, submitting && styles.primaryButtonDisabled]} onPress={handleSendOtp} disabled={submitting}>
+              <Text style={styles.primaryButtonText}>{submitting ? 'Sending...' : 'Send OTP'}</Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -147,6 +177,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 8,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.7,
   },
   primaryButtonText: {
     color: COLORS.white,

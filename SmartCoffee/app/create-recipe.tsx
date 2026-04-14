@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -7,11 +7,18 @@ import {
   View,
   Pressable,
   Switch,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import Toast from 'react-native-toast-message';
+import { API_ENDPOINTS } from '@/services/api';
+import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 const palette = {
   background: '#FBF7F2',
@@ -27,9 +34,11 @@ const palette = {
 };
 
 type IngredientItem = {
+  ingredientId: number;
   name: string;
   note: string;
   amount: string;
+  measurement: string;
   icon: keyof typeof Ionicons.glyphMap;
   tint: string;
   iconColor: string;
@@ -40,45 +49,15 @@ type StepItem = {
   body: string;
 };
 
-const initialIngredients: IngredientItem[] = [
-  {
-    name: 'Espresso Beans',
-    note: 'Arabica Blend',
-    amount: '18g',
-    icon: 'cafe',
-    tint: '#F5E7DA',
-    iconColor: '#B85C38',
-  },
-  {
-    name: 'Matcha Powder',
-    note: 'Ceremonial Grade',
-    amount: '2g',
-    icon: 'leaf',
-    tint: '#E6F4EA',
-    iconColor: '#3E9B63',
-  },
-  {
-    name: 'Hot Water',
-    note: '80°C',
-    amount: '30ml',
-    icon: 'water',
-    tint: '#E9F1FF',
-    iconColor: '#3A74D8',
-  },
-];
+type BeverageOption = {
+  id: number;
+  name: string;
+};
 
-const initialSteps: StepItem[] = [
-  {
-    title: 'Prepare Matcha Base',
-    body:
-      'Whisk 2g matcha powder with 30ml warm water until smooth and frothy. Ensure no clumps remain.',
-  },
-  {
-    title: 'Extract Espresso',
-    body:
-      'Pull a double shot of espresso (18g in, 36g out) directly over the serving glass or into a small pitcher.',
-  },
-];
+type IngredientOption = {
+  id: number;
+  name: string;
+};
 
 const categories = ['Coffee', 'Tea', 'Mocktail', 'Chocolate'];
 const primaryStyles = ['Sweet', 'Nutty', 'Fruity', 'Floral'];
@@ -86,41 +65,286 @@ const secondaryStyles = ['Creamy', 'Spicy', 'Citrus', 'Smooth'];
 const difficulties = ['Beginner', 'Intermediate', 'Advanced'];
 const brewingMethods = ['Espresso Machine', 'Pour Over', 'French Press', 'Cold Brew'];
 const marginOptions = ['45%', '55%', '65%', '75%'];
+const measurementOptions = ['g', 'kg', 'ml', 'l', 'oz', 'tbsp', 'tsp', 'unit'];
+const INGREDIENT_PAGE_SIZE = 20;
+
+const mapListPayload = <T extends unknown>(payload: any): { items: T[]; totalCount: number } => {
+  const items = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : [];
+  const totalCount = Number(payload?.totalCount ?? payload?.total ?? payload?.totalItems ?? items.length);
+  return {
+    items: items as T[],
+    totalCount: Number.isFinite(totalCount) ? totalCount : items.length,
+  };
+};
+
+const getUploadFileInfo = (uri: string) => {
+  const cleanUri = uri.split('?')[0];
+  const namePart = cleanUri.split('/').pop() || `recipe_${Date.now()}`;
+  const ext = namePart.includes('.') ? namePart.split('.').pop() : '';
+  const lowerExt = String(ext).toLowerCase();
+  const mimeType =
+    lowerExt === 'jpg' || lowerExt === 'jpeg'
+      ? 'image/jpeg'
+      : lowerExt === 'png'
+        ? 'image/png'
+        : lowerExt === 'webp'
+          ? 'image/webp'
+          : 'image/jpeg';
+  const fileName = namePart.includes('.') ? namePart : `${namePart}.jpg`;
+  return { fileName, mimeType };
+};
+
+const parseCreatedRecipeId = (payload: any) => {
+  const candidate = Number(
+    payload?.recipeId ??
+      payload?.id ??
+      payload?.shopRecipeId ??
+      payload?.data?.recipeId ??
+      payload?.data?.id ??
+      0
+  );
+  return Number.isFinite(candidate) && candidate > 0 ? candidate : null;
+};
 
 export default function CreateRecipeScreen() {
   const router = useRouter();
-  const [hasCover, setHasCover] = useState(false);
+  const { coffeeShopId } = useAuth();
+
+  const [coverImageUri, setCoverImageUri] = useState('');
   const [recipeName, setRecipeName] = useState('');
   const [categoryIndex, setCategoryIndex] = useState(0);
-  const [source, setSource] = useState('');
+  const [beverageOptions, setBeverageOptions] = useState<BeverageOption[]>([]);
+  const [selectedBeverageId, setSelectedBeverageId] = useState<number | null>(null);
+
   const [primaryIndex, setPrimaryIndex] = useState(0);
   const [secondaryIndex, setSecondaryIndex] = useState(0);
-  const [notes, setNotes] = useState<string[]>(['Caramel', 'Vanilla']);
+  const [notes, setNotes] = useState<string[]>([]);
   const [noteDraft, setNoteDraft] = useState('');
   const [showNoteInput, setShowNoteInput] = useState(false);
-  const [isHot, setIsHot] = useState(true);
-  const [isIce, setIsIce] = useState(true);
+
+  const [isHot, setIsHot] = useState(false);
+  const [isIce, setIsIce] = useState(false);
   const [isCold, setIsCold] = useState(false);
-  const [isMilk, setIsMilk] = useState(true);
+  const [isMilk, setIsMilk] = useState(false);
+  const [isUnique, setIsUnique] = useState(false);
+
   const [strength, setStrength] = useState(0.72);
   const [price, setPrice] = useState('');
   const [marginIndex, setMarginIndex] = useState(2);
   const [difficultyIndex, setDifficultyIndex] = useState(0);
   const [prepMin, setPrepMin] = useState('');
   const [prepMax, setPrepMax] = useState('');
-  const [ingredients, setIngredients] = useState<IngredientItem[]>(initialIngredients);
+  const [suggestedOccasions, setSuggestedOccasions] = useState('');
+
+  const [ingredientOptions, setIngredientOptions] = useState<IngredientOption[]>([]);
+  const [inventoryIngredientIds, setInventoryIngredientIds] = useState<number[]>([]);
+  const [ingredientPage, setIngredientPage] = useState(0);
+  const [ingredientHasMore, setIngredientHasMore] = useState(true);
+  const [loadingIngredientMore, setLoadingIngredientMore] = useState(false);
+
+  const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [showIngredientInput, setShowIngredientInput] = useState(false);
-  const [ingredientDraft, setIngredientDraft] = useState({ name: '', note: '', amount: '' });
+  const [selectedIngredientId, setSelectedIngredientId] = useState<number | null>(null);
+  const [ingredientDraft, setIngredientDraft] = useState({ quantity: '', measurement: 'g' });
+  const [showBeverageDropdown, setShowBeverageDropdown] = useState(false);
+  const [showIngredientDropdown, setShowIngredientDropdown] = useState(false);
+
   const [brewIndex, setBrewIndex] = useState(0);
-  const [steps, setSteps] = useState<StepItem[]>(initialSteps);
+  const [steps, setSteps] = useState<StepItem[]>([
+    {
+      title: 'Prepare ingredients',
+      body: 'Measure all ingredients and get tools ready.',
+    },
+  ]);
   const [showStepInput, setShowStepInput] = useState(false);
   const [stepDraft, setStepDraft] = useState({ title: '', body: '' });
+
+  const [loadingInit, setLoadingInit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const strengthLabel = useMemo(() => {
     if (strength < 0.33) return 'Decaf';
     if (strength < 0.66) return 'Regular';
     return 'High';
   }, [strength]);
+
+  const currentBeverageName = useMemo(() => {
+    const target = beverageOptions.find((item) => item.id === selectedBeverageId);
+    return target?.name ?? 'No beverage available';
+  }, [beverageOptions, selectedBeverageId]);
+
+  const currentIngredientName = useMemo(() => {
+    const target = ingredientOptions.find((item) => item.id === selectedIngredientId);
+    return target?.name ?? 'No ingredient available';
+  }, [ingredientOptions, selectedIngredientId]);
+
+  const inventoryIngredientIdSet = useMemo(
+    () => new Set(inventoryIngredientIds),
+    [inventoryIngredientIds]
+  );
+
+  const fetchBeverages = useCallback(async () => {
+    if (!coffeeShopId) {
+      setBeverageOptions([]);
+      setSelectedBeverageId(null);
+      return;
+    }
+
+    const response = await authorizedFetch(
+      `${API_ENDPOINTS.shopBeverage.getByShop(coffeeShopId)}?page=1&pageSize=100`,
+      { headers: { Accept: '*/*' } }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Load beverages failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const { items } = mapListPayload<any>(payload);
+    const mapped = items
+      .map((item) => {
+        const id = Number(item?.beverageId ?? item?.id ?? 0);
+        const name = String(item?.name ?? item?.beverageName ?? '').trim();
+        return { id, name } as BeverageOption;
+      })
+      .filter((item) => item.id > 0 && item.name.length > 0);
+
+    setBeverageOptions(mapped);
+    setSelectedBeverageId((prev) => prev ?? mapped[0]?.id ?? null);
+  }, [coffeeShopId]);
+
+  const fetchIngredientPage = useCallback(async (page: number, allowedIds: Set<number>) => {
+    const response = await authorizedFetch(
+      `${API_ENDPOINTS.ingredient.getAll()}?page=${page}&pageSize=${INGREDIENT_PAGE_SIZE}`,
+      { headers: { Accept: '*/*' } }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Load ingredients failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const { items, totalCount } = mapListPayload<any>(payload);
+    const mapped = items
+      .map((item) => {
+        const id = Number(item?.ingredientId ?? item?.id ?? 0);
+        const name = String(item?.name ?? item?.ingredientName ?? '').trim();
+        return { id, name } as IngredientOption;
+      })
+      .filter((item) => item.id > 0 && item.name.length > 0)
+      .filter((item) => allowedIds.has(item.id));
+
+    return { mapped, totalCount };
+  }, []);
+
+  const fetchInventoryIngredientIds = useCallback(async () => {
+    if (!coffeeShopId) {
+      setInventoryIngredientIds([]);
+      return new Set<number>();
+    }
+
+    const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId), {
+      headers: { Accept: '*/*' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Load inventory failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    const { items } = mapListPayload<any>(payload);
+
+    const ids = Array.from(
+      new Set(
+        items
+          .map((item) => Number(item?.ingredientId ?? item?.ingredient?.ingredientId ?? 0))
+          .filter((id) => Number.isFinite(id) && id > 0)
+      )
+    );
+
+    setInventoryIngredientIds(ids);
+    return new Set(ids);
+  }, [coffeeShopId]);
+
+  const loadInitialIngredients = useCallback(async (allowedIds: Set<number>) => {
+    const { mapped, totalCount } = await fetchIngredientPage(1, allowedIds);
+    setIngredientOptions(mapped);
+    setSelectedIngredientId((prev) => prev ?? mapped[0]?.id ?? null);
+    setIngredientPage(1);
+    setIngredientHasMore(mapped.length < totalCount);
+  }, [fetchIngredientPage]);
+
+  const loadMoreIngredients = useCallback(async () => {
+    if (!ingredientHasMore || loadingIngredientMore) return;
+
+    try {
+      setLoadingIngredientMore(true);
+      const nextPage = ingredientPage + 1;
+      const { mapped, totalCount } = await fetchIngredientPage(nextPage, inventoryIngredientIdSet);
+      setIngredientOptions((prev) => {
+        const dedup = new Map<number, IngredientOption>();
+        for (const item of [...prev, ...mapped]) dedup.set(item.id, item);
+        return Array.from(dedup.values());
+      });
+      const loadedCount = ingredientOptions.length + mapped.length;
+      setIngredientPage(nextPage);
+      setIngredientHasMore(loadedCount < totalCount && mapped.length > 0);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load more ingredients.';
+      Toast.show({ type: 'error', text1: 'Ingredient', text2: message });
+    } finally {
+      setLoadingIngredientMore(false);
+    }
+  }, [fetchIngredientPage, ingredientHasMore, ingredientOptions.length, ingredientPage, inventoryIngredientIdSet, loadingIngredientMore]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const hydrate = async () => {
+      try {
+        setLoadingInit(true);
+        const [_, allowedIds] = await Promise.all([fetchBeverages(), fetchInventoryIngredientIds()]);
+        await loadInitialIngredients(allowedIds);
+      } catch (error) {
+        if (!mounted) return;
+        const message = error instanceof Error ? error.message : 'Unable to load data.';
+        Toast.show({ type: 'error', text1: 'Create recipe', text2: message });
+      } finally {
+        if (mounted) setLoadingInit(false);
+      }
+    };
+
+    hydrate();
+    return () => {
+      mounted = false;
+    };
+  }, [fetchBeverages, fetchInventoryIngredientIds, loadInitialIngredients]);
+
+  const handlePickCoverImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Toast.show({ type: 'info', text1: 'Permission required', text2: 'Please allow photo access.' });
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    setCoverImageUri(result.assets[0].uri);
+  };
 
   const handleAddNote = () => {
     const trimmed = noteDraft.trim();
@@ -131,23 +355,69 @@ export default function CreateRecipeScreen() {
   };
 
   const handleAddIngredient = () => {
-    const name = ingredientDraft.name.trim();
-    const note = ingredientDraft.note.trim();
-    const amount = ingredientDraft.amount.trim();
-    if (!name || !amount) return;
-    setIngredients((prev) => [
-      ...prev,
-      {
-        name,
-        note: note || 'Custom',
-        amount,
+    if (!selectedIngredientId) {
+      Toast.show({ type: 'error', text1: 'Ingredient required' });
+      return;
+    }
+
+    if (!inventoryIngredientIdSet.has(selectedIngredientId)) {
+      Toast.show({ type: 'error', text1: 'Ingredient not in shop inventory' });
+      return;
+    }
+
+    const quantity = Number(ingredientDraft.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      Toast.show({ type: 'error', text1: 'Quantity must be greater than 0' });
+      return;
+    }
+
+    const ingredientName = ingredientOptions.find((item) => item.id === selectedIngredientId)?.name;
+    const measurement = ingredientDraft.measurement.trim() || 'g';
+
+    setIngredients((prev) => {
+      const existingIndex = prev.findIndex((item) => item.ingredientId === selectedIngredientId);
+      const nextItem: IngredientItem = {
+        ingredientId: selectedIngredientId,
+        name: ingredientName || `Ingredient #${selectedIngredientId}`,
+        note: 'Selected from inventory',
+        amount: String(quantity),
+        measurement,
         icon: 'nutrition',
         tint: '#F3EFEA',
         iconColor: palette.accent,
-      },
-    ]);
-    setIngredientDraft({ name: '', note: '', amount: '' });
+      };
+
+      if (existingIndex >= 0) {
+        return prev.map((item, index) => (index === existingIndex ? nextItem : item));
+      }
+
+      return [...prev, nextItem];
+    });
+
+    setIngredientDraft({ quantity: '', measurement: 'g' });
     setShowIngredientInput(false);
+  };
+
+  const handleToggleHot = (next: boolean) => {
+    setIsHot(next);
+    if (next) {
+      setIsCold(false);
+      setIsIce(false);
+    }
+  };
+
+  const handleToggleCold = (next: boolean) => {
+    setIsCold(next);
+    if (next) {
+      setIsHot(false);
+    }
+  };
+
+  const handleToggleIce = (next: boolean) => {
+    setIsIce(next);
+    if (next) {
+      setIsHot(false);
+    }
   };
 
   const handleAddStep = () => {
@@ -159,17 +429,151 @@ export default function CreateRecipeScreen() {
     setShowStepInput(false);
   };
 
-  const applyAiSuggestion = () => {
-    setRecipeName('Matcha Espresso Fusion');
-    setCategoryIndex(0);
-    setPrimaryIndex(2);
-    setSecondaryIndex(1);
-    setNotes(['Matcha', 'Vanilla', 'Toffee']);
-    setDifficultyIndex(1);
-    setPrice('55000');
-    setMarginIndex(2);
-    setPrepMin('3');
-    setPrepMax('5');
+  const handleIngredientDropdownScroll = (event: any) => {
+    if (!ingredientHasMore || loadingIngredientMore) return;
+
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const distanceToBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+
+    if (distanceToBottom < 40) {
+      loadMoreIngredients();
+    }
+  };
+
+  const handleSaveRecipe = async () => {
+    console.log('[Create Recipe] save tapped');
+
+    if (submitting) return;
+
+    const trimmedName = recipeName.trim();
+    if (!trimmedName) {
+      console.log('[Create Recipe] validation failed: missing recipeName');
+      Toast.show({ type: 'error', text1: 'Recipe name is required' });
+      return;
+    }
+
+    if (!selectedBeverageId) {
+      console.log('[Create Recipe] validation failed: missing beverageId');
+      Toast.show({ type: 'error', text1: 'Please select a beverage' });
+      return;
+    }
+
+    if (ingredients.length === 0) {
+      console.log('[Create Recipe] validation failed: no ingredients selected');
+      Toast.show({ type: 'error', text1: 'Please add at least one ingredient' });
+      return;
+    }
+
+    console.log('[Create Recipe] validation passed');
+
+    const proposedSellingPrice = Number(price);
+    const profitMarginPercent = Number(String(marginOptions[marginIndex]).replace('%', ''));
+
+    const payload = {
+      recipeName: trimmedName,
+      image: '',
+      createdSource: 'Manually',
+      category: categories[categoryIndex],
+      flavorStylePrimary: primaryStyles[primaryIndex],
+      flavorStyleSecondary: secondaryStyles[secondaryIndex],
+      flavorNote: notes.join(', '),
+      isHot,
+      isCold,
+      hasIce: isIce,
+      caffeineStrength: Math.round(strength * 10),
+      containsMilk: isMilk,
+      suggestedOccasions: suggestedOccasions.trim(),
+      proposedSellingPrice: Number.isFinite(proposedSellingPrice) ? proposedSellingPrice : 0,
+      profitMarginPercent: Number.isFinite(profitMarginPercent) ? profitMarginPercent : 0,
+      difficultyLevel: difficulties[difficultyIndex],
+      prepTimeRange: `${prepMin || '0'}-${prepMax || '0'} min`,
+      brewingMethod: brewingMethods[brewIndex],
+      brewingSteps: steps.map((step) => `${step.title}: ${step.body}`),
+      brewingVariablesData: JSON.stringify({
+        caffeineStrength: Math.round(strength * 10),
+        containsMilk: isMilk,
+        isHot,
+        isCold,
+        hasIce: isIce,
+      }),
+      presentationData: JSON.stringify({
+        flavorNote: notes.join(', '),
+        suggestedOccasions: suggestedOccasions.trim(),
+      }),
+      isPublic: true,
+      isUnique,
+      status: 'ACTIVE',
+      beverageId: selectedBeverageId,
+      ingredients: ingredients.map((item) => ({
+        ingredient_id: item.ingredientId,
+        quantity: Number(item.amount) || 0,
+        measurement: item.measurement,
+      })),
+    };
+
+    try {
+      setSubmitting(true);
+      console.log('[Create Recipe] request payload:', JSON.stringify(payload, null, 2));
+
+      const createResponse = await authorizedFetch(API_ENDPOINTS.shopRecipe.create(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const createResponseText = await createResponse.text();
+      console.log('[Create Recipe] response status:', createResponse.status);
+      console.log('[Create Recipe] response body:', createResponseText);
+
+      if (!createResponse.ok) {
+        throw new Error(`Create recipe failed (${createResponse.status}): ${createResponseText}`);
+      }
+
+      const createPayload = createResponseText ? JSON.parse(createResponseText) : null;
+      console.log('[Create Recipe] parsed response:', createPayload);
+      const recipeId = parseCreatedRecipeId(createPayload);
+      console.log('[Create Recipe] resolved recipeId:', recipeId);
+
+      if (coverImageUri && recipeId) {
+        const { fileName, mimeType } = getUploadFileInfo(coverImageUri);
+        const formData = new FormData();
+        formData.append('file', {
+          uri: coverImageUri,
+          name: fileName,
+          type: mimeType,
+        } as any);
+
+        const uploadResponse = await authorizedFetch(
+          `${API_ENDPOINTS.shopRecipe.uploadImage()}?id=${recipeId}`,
+          {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+            },
+            body: formData,
+          }
+        );
+
+        const uploadResponseText = await uploadResponse.text();
+        console.log('[Create Recipe] upload image status:', uploadResponse.status);
+        console.log('[Create Recipe] upload image body:', uploadResponseText);
+
+        if (!uploadResponse.ok) {
+          throw new Error(`Upload recipe image failed (${uploadResponse.status}): ${uploadResponseText}`);
+        }
+      }
+
+      Toast.show({ type: 'success', text1: 'Recipe created successfully' });
+      router.back();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to create recipe.';
+      Toast.show({ type: 'error', text1: 'Create recipe failed', text2: message });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -184,19 +588,30 @@ export default function CreateRecipeScreen() {
         </View>
 
         <Pressable
-          style={[styles.coverCard, hasCover && styles.coverCardSelected]}
-          onPress={() => setHasCover((prev) => !prev)}
+          style={[styles.coverCard, coverImageUri && styles.coverCardSelected]}
+          onPress={handlePickCoverImage}
         >
-          <View style={styles.coverIconWrap}>
-            <Ionicons name="camera" size={20} color={palette.accent} />
-            <View style={styles.coverPlus}>
-              <Ionicons name="add" size={10} color={palette.accent} />
+          {coverImageUri ? (
+            <Image source={{ uri: coverImageUri }} style={styles.coverPreview} />
+          ) : (
+            <View style={styles.coverIconWrap}>
+              <Ionicons name="camera" size={20} color={palette.accent} />
+              <View style={styles.coverPlus}>
+                <Ionicons name="add" size={10} color={palette.accent} />
+              </View>
             </View>
-          </View>
+          )}
           <Text style={styles.coverText}>
-            {hasCover ? 'Cover Photo Selected' : 'Upload Cover Photo'}
+            {coverImageUri ? 'Cover Photo Selected (Tap to change)' : 'Upload Cover Photo'}
           </Text>
         </Pressable>
+
+        {loadingInit ? (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator size="small" color={palette.accentDeep} />
+            <Text style={styles.loadingText}>Loading beverages and ingredients...</Text>
+          </View>
+        ) : null}
 
         <View style={styles.formBlock}>
           <Text style={styles.sectionLabel}>RECIPE NAME</Text>
@@ -220,14 +635,43 @@ export default function CreateRecipeScreen() {
               </Pressable>
             </View>
             <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>SOURCE</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. In-house"
-                placeholderTextColor={palette.muted}
-                value={source}
-                onChangeText={setSource}
-              />
+              <Text style={styles.sectionLabel}>BEVERAGE</Text>
+              <Pressable
+                style={styles.selectInput}
+                onPress={() => setShowBeverageDropdown((prev) => !prev)}
+              >
+                <Text style={styles.selectText} numberOfLines={1}>{currentBeverageName}</Text>
+                <Ionicons name={showBeverageDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+              </Pressable>
+              {showBeverageDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                    {beverageOptions.map((item) => (
+                      <Pressable
+                        key={item.id}
+                        style={[
+                          styles.dropdownItem,
+                          item.id === selectedBeverageId && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedBeverageId(item.id);
+                          setShowBeverageDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            item.id === selectedBeverageId && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
           </View>
         </View>
@@ -315,14 +759,16 @@ export default function CreateRecipeScreen() {
               <Text style={styles.toggleLabel}>Hot</Text>
               <Switch
                 value={isHot}
-                onValueChange={setIsHot}
+                onValueChange={handleToggleHot}
+                disabled={isCold || isIce}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />
               <Text style={styles.toggleLabel}>Cold</Text>
               <Switch
                 value={isCold}
-                onValueChange={setIsCold}
+                onValueChange={handleToggleCold}
+                disabled={isHot}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />
@@ -331,17 +777,18 @@ export default function CreateRecipeScreen() {
               <Text style={styles.toggleLabel}>Ice</Text>
               <Switch
                 value={isIce}
-                onValueChange={setIsIce}
+                onValueChange={handleToggleIce}
+                disabled={isHot}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />
               <Text style={styles.toggleLabel}>Milk</Text>
-              <Switch
-                value={isMilk}
-                onValueChange={setIsMilk}
-                trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
-                thumbColor="#FFFFFF"
-              />
+              <Switch value={isMilk} onValueChange={setIsMilk} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
+            </View>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Unique</Text>
+              <Switch value={isUnique} onValueChange={setIsUnique} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
+              <View style={styles.toggleSpacer} />
             </View>
           </View>
 
@@ -434,21 +881,26 @@ export default function CreateRecipeScreen() {
               </View>
             </View>
           </View>
+
+          <Text style={styles.sectionLabel}>SUGGESTED OCCASIONS</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Morning rush, weekend brunch, date night..."
+            placeholderTextColor={palette.muted}
+            value={suggestedOccasions}
+            onChangeText={setSuggestedOccasions}
+          />
         </View>
 
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeaderRow}>
             <Ionicons name="clipboard" size={18} color={palette.accent} />
             <Text style={styles.sectionTitle}>Preparation</Text>
-            <Pressable style={styles.aiChip} onPress={applyAiSuggestion}>
-              <Ionicons name="sparkles" size={12} color={palette.accentDeep} />
-              <Text style={styles.aiChipText}>AI SUGGESTION</Text>
-            </Pressable>
           </View>
 
           <Text style={styles.sectionLabel}>INGREDIENTS LIST</Text>
           {ingredients.map((item, index) => (
-            <View key={`${item.name}-${index}`} style={styles.ingredientCard}>
+            <View key={`${item.ingredientId}-${index}`} style={styles.ingredientCard}>
               <View style={[styles.ingredientIcon, { backgroundColor: item.tint }]}
               >
                 <Ionicons name={item.icon} size={16} color={item.iconColor} />
@@ -458,8 +910,11 @@ export default function CreateRecipeScreen() {
                 <Text style={styles.ingredientNote}>{item.note}</Text>
               </View>
               <View style={styles.ingredientAmount}>
-                <Text style={styles.ingredientAmountText}>{item.amount}</Text>
+                <Text style={styles.ingredientAmountText}>{item.amount} {item.measurement}</Text>
               </View>
+              <Pressable onPress={() => setIngredients((prev) => prev.filter((row) => row.ingredientId !== item.ingredientId))}>
+                <Ionicons name="trash-outline" size={16} color={palette.accentDeep} />
+              </Pressable>
             </View>
           ))}
 
@@ -470,35 +925,81 @@ export default function CreateRecipeScreen() {
             </Pressable>
           ) : (
             <View style={styles.inlineForm}>
-              <TextInput
-                style={styles.input}
-                placeholder="Ingredient name"
-                placeholderTextColor={palette.muted}
-                value={ingredientDraft.name}
-                onChangeText={(text) =>
-                  setIngredientDraft((prev) => ({ ...prev, name: text }))
-                }
-              />
+              <Pressable
+                style={styles.selectInput}
+                onPress={() => setShowIngredientDropdown((prev) => !prev)}
+              >
+                <Text style={styles.selectText} numberOfLines={1}>{currentIngredientName}</Text>
+                <Ionicons name={showIngredientDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+              </Pressable>
+              {showIngredientDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView
+                    nestedScrollEnabled
+                    style={styles.dropdownList}
+                    onScroll={handleIngredientDropdownScroll}
+                    scrollEventThrottle={16}
+                  >
+                    {ingredientOptions.map((item) => (
+                      <Pressable
+                        key={item.id}
+                        style={[
+                          styles.dropdownItem,
+                          item.id === selectedIngredientId && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSelectedIngredientId(item.id);
+                          setShowIngredientDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            item.id === selectedIngredientId && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item.name}
+                        </Text>
+                      </Pressable>
+                    ))}
+                    {loadingIngredientMore ? (
+                      <View style={styles.dropdownLoadingRow}>
+                        <ActivityIndicator size="small" color={palette.accentDeep} />
+                      </View>
+                    ) : null}
+                  </ScrollView>
+                </View>
+              ) : null}
+
               <View style={styles.rowSplit}>
                 <TextInput
                   style={[styles.input, styles.flexInput]}
-                  placeholder="Note"
+                  placeholder="Quantity"
                   placeholderTextColor={palette.muted}
-                  value={ingredientDraft.note}
-                  onChangeText={(text) =>
-                    setIngredientDraft((prev) => ({ ...prev, note: text }))
-                  }
+                  keyboardType="numeric"
+                  value={ingredientDraft.quantity}
+                  onChangeText={(text) => setIngredientDraft((prev) => ({ ...prev, quantity: text }))}
                 />
-                <TextInput
-                  style={[styles.input, styles.flexInput]}
-                  placeholder="Amount"
-                  placeholderTextColor={palette.muted}
-                  value={ingredientDraft.amount}
-                  onChangeText={(text) =>
-                    setIngredientDraft((prev) => ({ ...prev, amount: text }))
-                  }
-                />
+                <View style={styles.measurementPickerWrap}>
+                  <Text style={styles.measurementLabel}>Measurement</Text>
+                  <View style={styles.measurementOptions}>
+                    {measurementOptions.map((unit) => {
+                      const selected = ingredientDraft.measurement === unit;
+                      return (
+                        <Pressable
+                          key={unit}
+                          style={[styles.measureChip, selected && styles.measureChipSelected]}
+                          onPress={() => setIngredientDraft((prev) => ({ ...prev, measurement: unit }))}
+                        >
+                          <Text style={[styles.measureChipText, selected && styles.measureChipTextSelected]}>{unit}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
               </View>
+
               <View style={styles.inlineActions}>
                 <Pressable style={styles.primaryAction} onPress={handleAddIngredient}>
                   <Text style={styles.primaryActionText}>Add</Text>
@@ -506,7 +1007,7 @@ export default function CreateRecipeScreen() {
                 <Pressable
                   style={styles.ghostAction}
                   onPress={() => {
-                    setIngredientDraft({ name: '', note: '', amount: '' });
+                    setIngredientDraft({ quantity: '', measurement: 'g' });
                     setShowIngredientInput(false);
                   }}
                 >
@@ -527,7 +1028,7 @@ export default function CreateRecipeScreen() {
 
           <Text style={styles.sectionLabel}>STEPS</Text>
           {steps.map((step, index) => (
-            <View key={step.title} style={styles.stepRow}>
+            <View key={`${step.title}-${index}`} style={styles.stepRow}>
               <View style={styles.stepIndicator}>
                 <Text style={styles.stepNumber}>{index + 1}</Text>
               </View>
@@ -579,6 +1080,14 @@ export default function CreateRecipeScreen() {
             </View>
           )}
         </View>
+
+        <Pressable style={[styles.saveButton, submitting && styles.saveButtonDisabled]} onPress={handleSaveRecipe} disabled={submitting || loadingInit}>
+          {submitting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.saveButtonText}>Save Recipe</Text>
+          )}
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -660,6 +1169,24 @@ const styles = StyleSheet.create({
     borderColor: palette.accent,
     backgroundColor: '#FFFBF6',
   },
+  coverPreview: {
+    width: 92,
+    height: 92,
+    borderRadius: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: palette.line,
+  },
+  loadingRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingText: {
+    fontSize: 12,
+    color: palette.muted,
+  },
   formBlock: {
     marginTop: 20,
     gap: 12,
@@ -696,6 +1223,63 @@ const styles = StyleSheet.create({
     color: palette.ink,
     fontWeight: '600',
   },
+  beverageSelectRow: {
+    backgroundColor: palette.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: palette.line,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  beverageNavBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  beverageSelectText: {
+    flex: 1,
+    fontSize: 13,
+    color: palette.ink,
+    fontWeight: '600',
+  },
+  dropdownCard: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: 14,
+    backgroundColor: palette.card,
+    overflow: 'hidden',
+  },
+  dropdownList: {
+    maxHeight: 180,
+  },
+  dropdownItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2EBE2',
+  },
+  dropdownItemSelected: {
+    backgroundColor: palette.accentSoft,
+  },
+  dropdownItemText: {
+    fontSize: 13,
+    color: palette.ink,
+    fontWeight: '600',
+  },
+  dropdownItemTextSelected: {
+    color: palette.accentDeep,
+  },
+  dropdownLoadingRow: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
   rowSplit: {
     flexDirection: 'row',
     gap: 12,
@@ -711,6 +1295,46 @@ const styles = StyleSheet.create({
   },
   flexInput: {
     flex: 1,
+  },
+  measurementPickerWrap: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: 18,
+    backgroundColor: palette.card,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  measurementLabel: {
+    fontSize: 11,
+    color: palette.muted,
+    fontWeight: '700',
+  },
+  measurementOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  measureChip: {
+    borderWidth: 1,
+    borderColor: palette.line,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: '#FFFFFF',
+  },
+  measureChipSelected: {
+    borderColor: palette.accent,
+    backgroundColor: palette.accentSoft,
+  },
+  measureChipText: {
+    fontSize: 12,
+    color: palette.muted,
+    fontWeight: '700',
+  },
+  measureChipTextSelected: {
+    color: palette.accentDeep,
   },
   card: {
     marginTop: 18,
@@ -809,6 +1433,9 @@ const styles = StyleSheet.create({
     color: palette.ink,
     fontWeight: '600',
   },
+  toggleSpacer: {
+    width: 52,
+  },
   sliderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -851,22 +1478,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: palette.ink,
-  },
-  aiChip: {
-    marginLeft: 'auto',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: palette.accentSoft,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  aiChipText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: palette.accentDeep,
-    letterSpacing: 0.4,
   },
   inputWithSuffix: {
     position: 'relative',
@@ -1055,5 +1666,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: palette.muted,
     fontWeight: '600',
+  },
+  saveButton: {
+    marginTop: 20,
+    borderRadius: 16,
+    backgroundColor: palette.accentDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+  },
+  saveButtonDisabled: {
+    opacity: 0.65,
+  },
+  saveButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

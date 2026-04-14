@@ -35,6 +35,9 @@ export const API_ENDPOINTS = {
     register: () => `${AUTH_BASE_URL}/Auth/register`,
     login: () => `${AUTH_BASE_URL}/Auth/login`,
     verifyOtp: () => `${AUTH_BASE_URL}/Auth/verify-otp`,
+    forgotPassword: () => `${AUTH_BASE_URL}/Auth/forgot-password`,
+    verifyForgotPasswordOtp: () => `${AUTH_BASE_URL}/Auth/verify-forgot-password-otp`,
+    resetPassword: () => `${AUTH_BASE_URL}/Auth/reset-password`,
     me: () => `${AUTH_BASE_URL}/Auth/me`,
     logout: () => `${AUTH_BASE_URL}/Auth/logout`,
     refreshToken: () => `${AUTH_BASE_URL}/Auth/refresh-token`,
@@ -54,9 +57,11 @@ export const API_ENDPOINTS = {
     getByRecipeId: (recipeId: number) => `${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeId}`,
   },
   shopRecipe: {
+    create: () => `${AUTH_BASE_URL}/ShopRecipe`,
     getById: (id: number) => `${AUTH_BASE_URL}/ShopRecipe/${id}`,
     getByShop: (shopId: number) => `${AUTH_BASE_URL}/ShopRecipe/by-shop/${shopId}`,
     enablePublic: (shopRecipeId: number) => `${AUTH_BASE_URL}/ShopRecipe/${shopRecipeId}/enable-public`,
+    uploadImage: () => `${AUTH_BASE_URL}/ShopRecipe/upload-image`,
   },
   postCategory: {
     list: () => `${AUTH_BASE_URL}/post-categories`,
@@ -151,8 +156,12 @@ export const API_ENDPOINTS = {
       return `${AUTH_BASE_URL}/Order/by-owner/${ownerId}${qs ? `?${qs}` : ''}`;
     },
     ghnFee: () => `${AUTH_BASE_URL}/Order/ghn-fee`,
+    feedback: (orderId: number | string) => `${AUTH_BASE_URL}/Order/${orderId}/feedback`,
     updateStatus: (orderId: number, status: string) => `${AUTH_BASE_URL}/Order/${orderId}/status?status=${status}`,
     updateStatusBody: (orderId: number) => `${AUTH_BASE_URL}/Order/${orderId}/status`,
+  },
+  orderDetailFeedback: {
+    create: () => `${AUTH_BASE_URL}/OrderDetailFeedback`,
   },
   supplier: {
     list: () => `${AUTH_BASE_URL}/Supplier`,
