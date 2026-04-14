@@ -56,6 +56,11 @@ type IngredientApiItem = {
   CurrentQuantity?: number;
 };
 
+type PagedIngredientResponse = {
+  items?: IngredientApiItem[];
+  totalPages?: number;
+};
+
 type ImportDetail = {
   ingredientId: number;
   ingredient: Ingredient;
@@ -248,18 +253,34 @@ export default function ImportRequestScreen() {
     try {
       setIngredientLoading(true);
       setIngredientError(null);
-      const response = await authorizedFetch(API_ENDPOINTS.ingredient.getAll(), {
-        headers: {
-          Accept: '*/*',
-        },
-      });
+      const pageSize = 100;
+      let page = 1;
+      let totalPages = 1;
+      const rows: IngredientApiItem[] = [];
 
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+      while (page <= totalPages) {
+        const response = await authorizedFetch(
+          `${API_ENDPOINTS.ingredient.getAll()}?page=${page}&pageSize=${pageSize}`,
+          {
+            headers: {
+              Accept: '*/*',
+            },
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as IngredientApiItem[] | PagedIngredientResponse;
+        const pageRows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
+        rows.push(...pageRows);
+
+        const nextTotalPages = Number(Array.isArray(data) ? 1 : data?.totalPages ?? 1);
+        totalPages = Number.isFinite(nextTotalPages) && nextTotalPages > 0 ? nextTotalPages : 1;
+        page += 1;
       }
 
-      const data = (await response.json()) as IngredientApiItem[] | { items?: IngredientApiItem[] };
-      const rows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : [];
       const mapped: Ingredient[] = rows
       .map((item) => {
         const ingredientId = Number(item.ingredientId ?? item.IngredientId ?? 0);
@@ -754,7 +775,12 @@ export default function ImportRequestScreen() {
               ) : ingredientError ? (
                 <Text style={styles.emptyText}>{ingredientError}</Text>
               ) : (
-                <>
+                <ScrollView
+                  style={styles.ingredientListScroll}
+                  contentContainerStyle={styles.ingredientListContent}
+                  showsVerticalScrollIndicator
+                  nestedScrollEnabled
+                >
                   {filteredIngredients.map((ingredient) => (
                     <TouchableOpacity
                       key={ingredient.ingredientId}
@@ -778,7 +804,7 @@ export default function ImportRequestScreen() {
                   {!filteredIngredients.length ? (
                     <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
                   ) : null}
-                </>
+                </ScrollView>
               )}
             </View>
           </View>
@@ -1239,7 +1265,14 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   ingredientList: {
+    maxHeight: 360,
+  },
+  ingredientListScroll: {
+    maxHeight: 360,
+  },
+  ingredientListContent: {
     gap: 12,
+    paddingRight: 4,
   },
   ingredientRow: {
     flexDirection: 'row',

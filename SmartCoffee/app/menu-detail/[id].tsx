@@ -528,6 +528,8 @@ export default function MenuDetailScreen() {
       pathname: '/recipe-detail/[id]',
       params: {
         id: String(menuItemId || 0),
+        menuItemId: String(menuItemId || 0),
+        recipeId: String(shopRecipe?.recipeId || 0),
         recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
         recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
         ingredients: JSON.stringify(shopRecipeIngredients),
