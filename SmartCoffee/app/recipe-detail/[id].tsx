@@ -100,6 +100,8 @@ export default function RecipeDetailScreen() {
     const isDark = colorScheme === 'dark';
     const {
         id,
+        recipeId: recipeIdParam,
+        menuItemId: menuItemIdParam,
         recipe: recipeParam,
         recipes: recipesParam,
         ingredients: ingredientsParam,
@@ -186,6 +188,14 @@ export default function RecipeDetailScreen() {
     const fetchRecipe = async (options?: { isRefresh?: boolean; forceApi?: boolean }) => {
         const isRefresh = Boolean(options?.isRefresh);
         const forceApi = Boolean(options?.forceApi);
+        const resolvedRecipeId = Number(
+            Array.isArray(recipeIdParam) ? recipeIdParam[0] : recipeIdParam ?? 0
+        );
+        const resolvedMenuItemId = Number(
+            Array.isArray(menuItemIdParam) ? menuItemIdParam[0] : menuItemIdParam ?? 0
+        );
+        const fallbackId = Number(Array.isArray(id) ? id[0] : id ?? 0);
+        let hydratedFromParams = false;
 
         try {
             if (isRefresh) {
@@ -225,12 +235,76 @@ export default function RecipeDetailScreen() {
                         setIngredients(defaultRecipe.ingredients);
                     }
                     setError(null);
-                    return;
+
+                    hydratedFromParams = true;
+                    const canFetchFromApi =
+                        (Number.isFinite(resolvedRecipeId) && resolvedRecipeId > 0) ||
+                        (Number.isFinite(resolvedMenuItemId) && resolvedMenuItemId > 0) ||
+                        (Number.isFinite(fallbackId) && fallbackId > 0);
+
+                    // Keep optimistic UI from params, then enrich from API when possible.
+                    if (!canFetchFromApi) {
+                        return;
+                    }
                 }
             }
 
-            // Nếu không có params hoặc cần làm mới dữ liệu, gọi API
-            const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${id}`);
+            // If params are unavailable or a refresh is requested, resolve from API.
+            // Priority: explicit recipeId -> menuItemId -> beverageId fallback.
+            if (Number.isFinite(resolvedRecipeId) && resolvedRecipeId > 0) {
+                const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${resolvedRecipeId}`);
+                const data = await response.json();
+                if (data) {
+                    setRecipes([data]);
+                    setRecipeData(data);
+                    setActiveRecipeIndex(0);
+                } else {
+                    setRecipes([]);
+                    setRecipeData(null);
+                }
+                setError(null);
+                return;
+            }
+
+            if (Number.isFinite(resolvedMenuItemId) && resolvedMenuItemId > 0) {
+                const menuItemResponse = await authorizedFetch(`${AUTH_BASE_URL}/MenuItem/${resolvedMenuItemId}`);
+                const menuItemData = await menuItemResponse.json();
+                const menuItemRecipe = menuItemData?.shopRecipe ?? null;
+                const menuItemRecipeId = Number(menuItemRecipe?.recipeId ?? 0);
+
+                if (menuItemRecipeId > 0) {
+                    const recipeResponse = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${menuItemRecipeId}`);
+                    const recipeDataFromApi = await recipeResponse.json();
+                    if (recipeDataFromApi) {
+                        setRecipes([recipeDataFromApi]);
+                        setRecipeData(recipeDataFromApi);
+                    } else if (menuItemRecipe) {
+                        setRecipes([menuItemRecipe]);
+                        setRecipeData(menuItemRecipe);
+                    } else {
+                        setRecipes([]);
+                        setRecipeData(null);
+                    }
+                } else if (menuItemRecipe) {
+                    setRecipes([menuItemRecipe]);
+                    setRecipeData(menuItemRecipe);
+                } else {
+                    setRecipes([]);
+                    setRecipeData(null);
+                }
+                setActiveRecipeIndex(0);
+                setError(null);
+                return;
+            }
+
+            if (!Number.isFinite(fallbackId) || fallbackId <= 0) {
+                setRecipes([]);
+                setRecipeData(null);
+                setError('Missing id to load recipe details');
+                return;
+            }
+
+            const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${fallbackId}`);
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
@@ -247,7 +321,9 @@ export default function RecipeDetailScreen() {
             }
             setError(null);
         } catch (err) {
-            setError('Failed to load recipe details');
+            if (!hydratedFromParams) {
+                setError('Failed to load recipe details');
+            }
             console.error('Recipe fetch error:', err);
         } finally {
             setLoading(false);
@@ -259,7 +335,7 @@ export default function RecipeDetailScreen() {
         if (id || recipeParam) {
             fetchRecipe();
         }
-    }, [id, recipeParam, ingredientsParam]);
+    }, [id, recipeIdParam, menuItemIdParam, recipeParam, ingredientsParam]);
 
     useEffect(() => {
         if (!recipeData) return;
