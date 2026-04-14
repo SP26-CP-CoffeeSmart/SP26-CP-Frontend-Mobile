@@ -65,6 +65,7 @@ interface Ingredient {
     quantity: number;
     cost: number;
     measurement?: string | null;
+    meassurement?: string | null;
     ingredient_id?: number;
     shopRecipe: null;
     ingredient?: {
@@ -185,6 +186,52 @@ export default function RecipeDetailScreen() {
         }
     };
 
+    const normalizeIngredients = (raw: any): Ingredient[] => {
+        if (!Array.isArray(raw)) return [];
+
+        return raw.map((entry: any) => {
+            const measurementCandidate =
+                entry?.measurement ??
+                entry?.meassurement ??
+                entry?.Measurement ??
+                entry?.Meassurement ??
+                null;
+
+            const normalizedMeasurement =
+                typeof measurementCandidate === 'string' && measurementCandidate.trim().length > 0
+                    ? measurementCandidate.trim()
+                    : null;
+
+            const ingredient = entry?.ingredient ?? entry?.Ingredient ?? null;
+            const ingredientId = Number(
+                entry?.ingredient_id ??
+                entry?.ingredientId ??
+                entry?.IngredientId ??
+                ingredient?.ingredientId ??
+                ingredient?.IngredientId ??
+                0
+            );
+
+            return {
+                ...entry,
+                quantity: Number(entry?.quantity ?? entry?.Quantity ?? 0),
+                cost: Number(entry?.cost ?? entry?.Cost ?? 0),
+                measurement: normalizedMeasurement,
+                ingredient_id: Number.isFinite(ingredientId) && ingredientId > 0 ? ingredientId : undefined,
+                ingredient: ingredient
+                    ? {
+                        ...ingredient,
+                        ingredientId: Number(
+                            ingredient?.ingredientId ?? ingredient?.IngredientId ?? ingredientId ?? 0
+                        ),
+                        name: ingredient?.name ?? ingredient?.Name ?? 'Unnamed ingredient',
+                        image: ingredient?.image ?? ingredient?.Image ?? null,
+                    }
+                    : undefined,
+            } as Ingredient;
+        });
+    };
+
     const fetchRecipe = async (options?: { isRefresh?: boolean; forceApi?: boolean }) => {
         const isRefresh = Boolean(options?.isRefresh);
         const forceApi = Boolean(options?.forceApi);
@@ -230,9 +277,9 @@ export default function RecipeDetailScreen() {
 
                     const parsedIngredients = safeParseJson(ingredientsParam as string);
                     if (Array.isArray(parsedIngredients) && parsedIngredients.length > 0) {
-                        setIngredients(parsedIngredients);
+                        setIngredients(normalizeIngredients(parsedIngredients));
                     } else if (Array.isArray(defaultRecipe?.ingredients) && defaultRecipe.ingredients.length > 0) {
-                        setIngredients(defaultRecipe.ingredients);
+                        setIngredients(normalizeIngredients(defaultRecipe.ingredients));
                     }
                     setError(null);
 
@@ -346,13 +393,14 @@ export default function RecipeDetailScreen() {
 
     // Fetch ingredients when recipeData changes
     useEffect(() => {
-        // Nếu đã có ingredients từ params, không cần fetch
-        if (ingredientsParam) {
+        const parsedIngredientsFromParam = safeParseJson(ingredientsParam as string);
+        if (Array.isArray(parsedIngredientsFromParam) && parsedIngredientsFromParam.length > 0) {
+            setIngredients(normalizeIngredients(parsedIngredientsFromParam));
             return;
         }
 
         if (Array.isArray(recipeData?.ingredients)) {
-            setIngredients(recipeData.ingredients);
+            setIngredients(normalizeIngredients(recipeData.ingredients));
             return;
         }
 
@@ -362,7 +410,7 @@ export default function RecipeDetailScreen() {
                     const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}`);
                     const data = await response.json();
                     if (Array.isArray(data)) {
-                        setIngredients(data);
+                        setIngredients(normalizeIngredients(data));
                     }
                 } catch (err) {
                     console.error('Ingredients fetch error:', err);
@@ -371,7 +419,7 @@ export default function RecipeDetailScreen() {
             };
             fetchIngredients();
         }
-    }, [recipeData?.recipeId, ingredientsParam]);
+    }, [recipeData?.recipeId, recipeData?.ingredients, ingredientsParam]);
 
     const getEmojiForIngredient = (category: string, ingredientName: string): string => {
         // Map by category first
