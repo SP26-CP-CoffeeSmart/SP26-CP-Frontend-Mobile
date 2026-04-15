@@ -40,6 +40,10 @@ interface RecipeData {
     recipeId: number;
     recipeName: string;
     image: string;
+    beverageName?: string;
+    beverage?: {
+        name?: string;
+    } | null;
     flavorStylePrimary: string;
     flavorStyleSecondary: string;
     flavorNote: string;
@@ -103,6 +107,7 @@ export default function RecipeDetailScreen() {
         recipe: recipeParam,
         recipes: recipesParam,
         ingredients: ingredientsParam,
+        beverageName: beverageNameParam,
         returnTo: returnToParam,
     } = useLocalSearchParams();
     const router = useRouter();
@@ -181,6 +186,24 @@ export default function RecipeDetailScreen() {
         } catch {
             return null;
         }
+    };
+
+    const normalizeImageUrl = (url: unknown): string | null => {
+        if (!url || typeof url !== 'string') return null;
+        const trimmed = url.trim();
+        if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) return trimmed;
+        return `${AUTH_BASE_URL}${trimmed.startsWith('/') ? trimmed : `/images/${trimmed}`}`;
+    };
+
+    const getBeverageName = () => {
+        const fromParam = Array.isArray(beverageNameParam) ? beverageNameParam[0] : beverageNameParam;
+        const fromRecipe =
+            recipeData?.beverageName ??
+            recipeData?.beverage?.name ??
+            (recipeData as any)?.shopBeverage?.name ??
+            '';
+        return String(fromParam || fromRecipe || '').trim();
     };
 
     const fetchRecipe = async (options?: { isRefresh?: boolean; forceApi?: boolean }) => {
@@ -447,15 +470,12 @@ export default function RecipeDetailScreen() {
     const getFallbackImage = () => require('../../assets/1.jpg');
 
     const getRecipeImageSource = () => {
-        if (!recipeData?.image || recipeData.image === 'null' || recipeData.image === 'undefined') {
+        const normalizedImageUrl = normalizeImageUrl(recipeData?.image);
+        if (!normalizedImageUrl) {
             return getFallbackImage();
         }
 
-        if (recipeData.image.startsWith('http')) {
-            return { uri: recipeData.image };
-        }
-
-        return { uri: `${AUTH_BASE_URL}${recipeData.image.startsWith('/') ? recipeData.image : '/images/' + recipeData.image}` };
+        return { uri: normalizedImageUrl };
     };
 
     const getRecipeImage = () => {
@@ -723,6 +743,11 @@ export default function RecipeDetailScreen() {
                     </View>
                     {/* Title & Description */}
                     <Text className={`text-[44px] font-bold text-center mb-2 ${isDark ? 'text-text-dark' : 'text-[#2E2220]'}`}>{variant.name || ''}</Text>
+                    {getBeverageName().length > 0 && (
+                        <Text className={`text-base text-center mb-2 ${isDark ? 'text-gray-300' : 'text-[#6F5547]'}`}>
+                            Beverage: {getBeverageName()}
+                        </Text>
+                    )}
                     <Text className={`text-base text-center mb-4 leading-6 ${isDark ? 'text-gray-400' : 'text-[#5F5A57]'}`}>
                         {variant.flavor || ''}
                     </Text>

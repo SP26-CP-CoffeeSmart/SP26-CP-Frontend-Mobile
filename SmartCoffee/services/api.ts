@@ -105,6 +105,7 @@ export const API_ENDPOINTS = {
     createMenuRegenerate: () => `${AUTH_BASE_URL}/AI/create-menu-p1-5-regenerate`,
     createMenuDetails: () => `${AUTH_BASE_URL}/AI/create-menu-p2-details`,
     createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
+    generateRecipeImages: () => `${AUTH_BASE_URL}/AI/generate-recipe-images-and-save`,
     analyzeMenuFeedback: (menuId: number) => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/${menuId}`,
     updateAi: (menuId: number | string) => `${AUTH_BASE_URL}/AI/update-ai/${menuId}`,
     predictInventory: () => `${AUTH_BASE_URL}/AI/predict-inventory`,
@@ -169,6 +170,7 @@ export const API_ENDPOINTS = {
   supplierProduct: {
     list: (page = 1, pageSize = 500) => `${AUTH_BASE_URL}/SupplierProduct?page=${page}&pageSize=${pageSize}`,
     checkAvailableStock: () => `${AUTH_BASE_URL}/SupplierProduct/check-available-stock`,
+    averagePriceByIngredients: () => `${AUTH_BASE_URL}/SupplierProduct/average-price/ingredients`,
   },
   importNote: {
     create: () => `${AUTH_BASE_URL}/ImportNote`,
