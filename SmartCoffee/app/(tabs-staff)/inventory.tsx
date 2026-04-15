@@ -212,7 +212,11 @@ export default function InventoryScreen() {
         const status = getStatus(item);
 
         return (
-            <View style={styles.cardItem}>
+            <TouchableOpacity
+                style={styles.cardItem}
+                onPress={() => router.push(`/ingredient-detail/${item.inventoryDetailId}`)}
+                activeOpacity={0.85}
+            >
                 <View style={styles.cardImageWrap}>
                     {ingredientImage ? (
                         <Image source={{ uri: ingredientImage }} style={styles.cardImage} />
@@ -224,7 +228,7 @@ export default function InventoryScreen() {
                 </View>
                 <View style={styles.cardContent}>
                     <View style={styles.cardHeaderRow}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>
+                        <Text style={styles.cardTitle} numberOfLines={2}>
                             {ingredientName}
                         </Text>
                         <View style={[styles.statusPill, { backgroundColor: status.bgColor }]}>
@@ -237,7 +241,7 @@ export default function InventoryScreen() {
                     </Text>
                 </View>
                 <Ionicons name="ellipsis-horizontal" size={20} color={COLORS.muted} />
-            </View>
+            </TouchableOpacity>
         );
     };
 
@@ -778,7 +782,7 @@ const styles = StyleSheet.create({
     },
     cardHeaderRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
         marginBottom: 4,
     },

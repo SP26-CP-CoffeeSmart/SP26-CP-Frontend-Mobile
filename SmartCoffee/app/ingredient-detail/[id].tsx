@@ -18,6 +18,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanima
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 
 interface IngredientInfo {
   ingredientId: number;
@@ -70,6 +71,7 @@ export default function IngredientDetailScreen() {
   const isDark = false;
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { role } = useAuth();
 
   const [inventoryDetail, setInventoryDetail] = useState<ShopInventoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,6 +98,9 @@ export default function IngredientDetailScreen() {
     successText: '#1B7A34',
     border: '#EFE7E1',
   };
+
+  const normalizedRole = (role ?? '').trim().toLowerCase();
+  const canSetThreshold = normalizedRole === 'shopowner' || normalizedRole === 'owner';
 
   useEffect(() => {
     fetchIngredientDetail();
@@ -193,6 +198,15 @@ export default function IngredientDetailScreen() {
   };
 
   const handleApplyChanges = async () => {
+    if (!canSetThreshold) {
+      Toast.show({
+        type: 'error',
+        text1: 'Permission denied',
+        text2: 'Only owner can update minimum stock.',
+      });
+      return;
+    }
+
     if (!inventoryDetail || isUpdating) {
       return;
     }
@@ -439,77 +453,79 @@ export default function IngredientDetailScreen() {
           </View>
         </View>
 
-        {/* Set Minimum Stock Level */}
-        <View
-          style={{
-            backgroundColor: COLORS.card,
-            padding: 16,
-            marginBottom: 12,
-            borderRadius: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 3,
-          }}
-        >
-          <Text
+        {/* Minimum Stock Level */}
+        {canSetThreshold ? (
+          <View
             style={{
-              fontSize: 12,
-              fontWeight: '700',
-              color: COLORS.muted,
-              letterSpacing: 1,
+              backgroundColor: COLORS.card,
+              padding: 16,
               marginBottom: 12,
+              borderRadius: 16,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 8,
+              elevation: 3,
             }}
           >
-            Set Minimum Stock Level
-          </Text>
-          <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
-            Threshold ({measurementUnit})
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <TextInput
-              value={manualThresholdText}
-              onChangeText={(value) => {
-                const normalized = value.replace(',', '.');
-                setManualThresholdText(normalized);
-              }}
-              onBlur={() => {
-                const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
-                if (Number.isFinite(next)) {
-                  setManualThresholdText(next.toFixed(1));
-                }
-              }}
-              keyboardType="decimal-pad"
+            <Text
               style={{
-                flex: 1,
-                borderWidth: 1,
-                borderColor: COLORS.border,
-                borderRadius: 10,
-                paddingVertical: 10,
-                paddingHorizontal: 12,
-                fontSize: 16,
-                color: COLORS.ink,
-                marginRight: 10,
-              }}
-            />
-            <TouchableOpacity
-              onPress={handleApplyChanges}
-              disabled={isUpdating}
-              style={{
-                backgroundColor: COLORS.accent,
-                paddingHorizontal: 20,
-                paddingVertical: 12,
-                borderRadius: 10,
-                opacity: isUpdating ? 0.7 : 1,
+                fontSize: 12,
+                fontWeight: '700',
+                color: COLORS.muted,
+                letterSpacing: 1,
+                marginBottom: 12,
               }}
             >
-              <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
-                {isUpdating ? 'Updating...' : 'Update'}
-              </Text>
-            </TouchableOpacity>
+              Minimum Stock Level
+            </Text>
+            <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
+              Threshold ({measurementUnit})
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TextInput
+                value={manualThresholdText}
+                onChangeText={(value) => {
+                  const normalized = value.replace(',', '.');
+                  setManualThresholdText(normalized);
+                }}
+                onBlur={() => {
+                  const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
+                  if (Number.isFinite(next)) {
+                    setManualThresholdText(next.toFixed(1));
+                  }
+                }}
+                keyboardType="decimal-pad"
+                style={{
+                  flex: 1,
+                  borderWidth: 1,
+                  borderColor: COLORS.border,
+                  borderRadius: 10,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  fontSize: 16,
+                  color: COLORS.ink,
+                  marginRight: 10,
+                }}
+              />
+              <TouchableOpacity
+                onPress={handleApplyChanges}
+                disabled={isUpdating}
+                style={{
+                  backgroundColor: COLORS.accent,
+                  paddingHorizontal: 20,
+                  paddingVertical: 12,
+                  borderRadius: 10,
+                  opacity: isUpdating ? 0.7 : 1,
+                }}
+              >
+                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                  {isUpdating ? 'Updating...' : 'Update'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Bottom spacing */}
         <View style={{ height: 20 }} />
