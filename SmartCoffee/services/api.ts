@@ -144,6 +144,7 @@ export const API_ENDPOINTS = {
   },
   order: {
     fromSupplierProducts: () => `${AUTH_BASE_URL}/Order/from-supplier-products`,
+    byId: (orderId: number | string) => `${AUTH_BASE_URL}/Order/${orderId}`,
     byOwner: (
       ownerId: number,
       params?: { page?: number; pageSize?: number; orderStatus?: string }
