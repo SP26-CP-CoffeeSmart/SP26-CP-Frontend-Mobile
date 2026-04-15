@@ -204,6 +204,20 @@ const getStatusStyle = (status?: string) => {
 const isImportedOrder = (order: OrderResponse) =>
   (order.notes ?? '').toLowerCase().includes('[imported]');
 
+const resolveManualImportMeasurement = (ingredient: Ingredient) => {
+  const normalizedCategory = (ingredient.category ?? '').trim().toLowerCase();
+
+  if (normalizedCategory.includes('liquid')) {
+    return 'ml';
+  }
+
+  if (normalizedCategory.includes('dry')) {
+    return 'g';
+  }
+
+  return ingredient.measurement?.trim() || 'unit';
+};
+
 export default function ImportRequestScreen() {
   const router = useRouter();
   const { coffeeShopId } = useAuth();
@@ -584,7 +598,7 @@ export default function ImportRequestScreen() {
           .map((detail) => ({
             ingredientId: detail.ingredientId,
             quantity: detail.importQuantity,
-            measurement: detail.ingredient.measurement ?? null,
+            measurement: resolveManualImportMeasurement(detail.ingredient),
             note: null,
           }));
 
@@ -883,6 +897,7 @@ export default function ImportRequestScreen() {
           ) : (
             details.map((detail) => {
               const newTotal = detail.ingredient.currentQuantity + detail.importQuantity;
+              const measurementLabel = resolveManualImportMeasurement(detail.ingredient);
               return (
                 <View key={detail.ingredientId} style={styles.detailCard}>
                   <View style={styles.detailHeader}>
@@ -892,7 +907,7 @@ export default function ImportRequestScreen() {
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.detailMeta}>
-                    Current: {detail.ingredient.currentQuantity} {detail.ingredient.measurement}
+                    Current: {detail.ingredient.currentQuantity} {measurementLabel}
                   </Text>
 
                   <View style={styles.quantityRow}>
@@ -914,7 +929,7 @@ export default function ImportRequestScreen() {
                     </View>
                   </View>
 
-                  <Text style={styles.detailMeta}>New total: {newTotal} {detail.ingredient.measurement}</Text>
+                  <Text style={styles.detailMeta}>New total: {newTotal} {measurementLabel}</Text>
 
                 </View>
               );
