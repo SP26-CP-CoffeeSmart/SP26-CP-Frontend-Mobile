@@ -85,6 +85,12 @@ interface MenuItemSnapshot {
   sizePrices: Array<{ key: string; price: number }>;
 }
 
+interface GenerateRecipeImageRequest {
+  recipeId: number;
+  recipeName: string;
+  imagePrompt: string;
+}
+
 interface EditErrors {
   description?: string;
   sellingPrice?: string;
@@ -289,6 +295,7 @@ export default function MenuInsightsScreen() {
   const [showDuplicateItemModal, setShowDuplicateItemModal] = useState(false);
   const [duplicateItemMessage, setDuplicateItemMessage] = useState('');
   const [deletingItem, setDeletingItem] = useState<MenuItem | null>(null);
+  const [generatingImageItemIds, setGeneratingImageItemIds] = useState<number[]>([]);
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -343,6 +350,85 @@ export default function MenuInsightsScreen() {
     const trimmed = value.trim();
     if (!trimmed) return '';
     return trimmed.replace(/\[PRICES\][\s\S]*$/i, '').trim();
+  };
+
+  const buildRecipeImagePrompt = (recipeName: string) => `tạo ảnh cho ${recipeName}`;
+
+  const resolveRecipeImageUrlFromPayload = (payload: any, recipeId: number): string | null => {
+    if (!payload) return null;
+
+    const fromArray = (arr: any[]) => {
+      const matched = arr.find((entry) => Number(entry?.recipeId ?? entry?.RecipeId) === recipeId);
+      if (matched) {
+        const matchedUrl = resolveGeneratedImageUrl(matched);
+        if (matchedUrl) return matchedUrl;
+      }
+
+      for (const entry of arr) {
+        const url = resolveGeneratedImageUrl(entry);
+        if (url) return url;
+      }
+
+      return null;
+    };
+
+    if (Array.isArray(payload)) {
+      return fromArray(payload);
+    }
+
+    if (Array.isArray(payload?.data)) {
+      const fromData = fromArray(payload.data);
+      if (fromData) return fromData;
+    }
+
+    return resolveGeneratedImageUrl(payload);
+  };
+
+  const resolveRecipeImageErrorFromPayload = (payload: any, recipeId: number): string | null => {
+    if (!payload) return null;
+
+    const getErrorFromResult = (entry: any): string | null => {
+      const isFailed = entry?.success === false || entry?.Success === false;
+      if (!isFailed) return null;
+      return String(entry?.error ?? entry?.Error ?? entry?.message ?? entry?.Message ?? '').trim() ||
+        'AI image generation failed.';
+    };
+
+    const fromArray = (arr: any[]): string | null => {
+      const matched = arr.find((entry) => Number(entry?.recipeId ?? entry?.RecipeId) === recipeId);
+      if (matched) {
+        return getErrorFromResult(matched);
+      }
+
+      for (const entry of arr) {
+        const error = getErrorFromResult(entry);
+        if (error) return error;
+      }
+
+      return null;
+    };
+
+    if (Array.isArray(payload)) {
+      return fromArray(payload);
+    }
+
+    if (Array.isArray(payload?.results)) {
+      const fromResults = fromArray(payload.results);
+      if (fromResults) return fromResults;
+    }
+
+    if (Array.isArray(payload?.data)) {
+      const fromData = fromArray(payload.data);
+      if (fromData) return fromData;
+    }
+
+    const rootFailed = payload?.success === false || payload?.Success === false;
+    if (rootFailed) {
+      return String(payload?.error ?? payload?.Error ?? payload?.message ?? payload?.Message ?? '').trim() ||
+        'AI image generation failed.';
+    }
+
+    return null;
   };
 
   const buildMenuItemSnapshot = (item: MenuItem): MenuItemSnapshot => {
@@ -1168,6 +1254,149 @@ export default function MenuInsightsScreen() {
       });
     }
   }, [deletingItem, menuItems]);
+
+  const handleGenerateMenuItemImage = useCallback(
+    async (item: MenuItem) => {
+      const recipeId = Number(item?.shopRecipe?.recipeId ?? 0);
+      const recipeName = String(item?.shopRecipe?.recipeName ?? '').trim();
+      const imagePrompt = buildRecipeImagePrompt(recipeName);
+
+      if (!Number.isFinite(recipeId) || recipeId <= 0) {
+        Toast.show({
+          type: 'error',
+          text1: 'Missing recipe ID',
+          text2: 'Cannot generate image for this menu item.',
+        });
+        return;
+      }
+
+      if (!recipeName) {
+        Toast.show({
+          type: 'error',
+          text1: 'Missing recipe name',
+          text2: 'Cannot generate image for this menu item.',
+        });
+        return;
+      }
+
+      setGeneratingImageItemIds((prev) => (prev.includes(item.menuItemId) ? prev : [...prev, item.menuItemId]));
+
+      try {
+        const requestBody: GenerateRecipeImageRequest[] = [
+          {
+            recipeId,
+            recipeName,
+            imagePrompt,
+          },
+        ];
+
+        const callGenerate = async (body: GenerateRecipeImageRequest[], reason: 'primary' | 'fallback') => {
+          console.log('[AI generate-recipe-images] REQUEST', {
+            reason,
+            url: API_ENDPOINTS.ai.generateRecipeImages(),
+            method: 'POST',
+            body,
+          });
+
+          const response = await authorizedFetch(API_ENDPOINTS.ai.generateRecipeImages(), {
+            method: 'POST',
+            headers: {
+              Accept: '*/*',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          });
+
+          const responseText = await response.text();
+          console.log('[AI generate-recipe-images] RESPONSE', {
+            reason,
+            status: response.status,
+            ok: response.ok,
+            raw: responseText,
+          });
+
+          if (!response.ok) {
+            throw new Error(responseText || `Request failed (${response.status})`);
+          }
+
+          let payload: any = null;
+          if (responseText) {
+            try {
+              payload = JSON.parse(responseText);
+            } catch {
+              payload = responseText;
+            }
+          }
+
+          console.log('[AI generate-recipe-images] PARSED PAYLOAD', { reason, payload });
+          return payload;
+        };
+
+        let payload = await callGenerate(requestBody, 'primary');
+        let resolvedRawImageUrl = resolveRecipeImageUrlFromPayload(payload, recipeId);
+
+        if (!resolvedRawImageUrl) {
+          const backendError = resolveRecipeImageErrorFromPayload(payload, recipeId);
+
+          // Retry once with a shorter, safer prompt if the model rejected the first prompt.
+          if (backendError) {
+            const fallbackPrompt = buildRecipeImagePrompt(recipeName);
+            const fallbackBody: GenerateRecipeImageRequest[] = [
+              {
+                recipeId,
+                recipeName,
+                imagePrompt: fallbackPrompt,
+              },
+            ];
+
+            payload = await callGenerate(fallbackBody, 'fallback');
+            resolvedRawImageUrl = resolveRecipeImageUrlFromPayload(payload, recipeId);
+
+            if (!resolvedRawImageUrl) {
+              const fallbackError = resolveRecipeImageErrorFromPayload(payload, recipeId);
+              throw new Error(fallbackError || backendError);
+            }
+          }
+        }
+
+        const resolvedImageUrl = encodeFirebaseImageUrl(resolvedRawImageUrl ?? undefined) ?? resolvedRawImageUrl;
+
+        if (!resolvedImageUrl) {
+          throw new Error('No image URL returned by AI service.');
+        }
+
+        setMenuItems((prev) =>
+          prev.map((menuItem) =>
+            menuItem.menuItemId === item.menuItemId
+              ? {
+                  ...menuItem,
+                  shopRecipe: {
+                    ...menuItem.shopRecipe,
+                    image: resolvedImageUrl,
+                  },
+                }
+              : menuItem
+          )
+        );
+
+        Toast.show({
+          type: 'success',
+          text1: 'Image generated',
+          text2: `${recipeName} image has been updated.`,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to generate image.';
+        Toast.show({
+          type: 'error',
+          text1: 'Generate image failed',
+          text2: message,
+        });
+      } finally {
+        setGeneratingImageItemIds((prev) => prev.filter((id) => id !== item.menuItemId));
+      }
+    },
+    []
+  );
 
   const buildCreateMenuVersionPayload = (menuIdValue: number, menuRaw: any, items: MenuItem[]) => {
     const basePayload = buildUpdatePayload(menuIdValue, menuRaw, items, menuImageUris);
@@ -2357,6 +2586,7 @@ export default function MenuInsightsScreen() {
                       id: String(item.menuItemId || 0),
                       menuItemId: String(item.menuItemId || 0),
                       recipeId: String(item.shopRecipe?.recipeId || 0),
+                      beverageName: item.shopBeverage?.name ?? '',
                       recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
                       recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
                       ingredients: JSON.stringify(shopRecipeIngredients),
@@ -2383,6 +2613,20 @@ export default function MenuInsightsScreen() {
                       {item.shopRecipe?.recipeName || 'Unnamed Item'}
                     </Text>
                     <View style={styles.menuItemActionGroup}>
+                      <TouchableOpacity
+                        style={styles.menuItemGenerateImageButton}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          handleGenerateMenuItemImage(item);
+                        }}
+                        disabled={generatingImageItemIds.includes(item.menuItemId)}
+                      >
+                        {generatingImageItemIds.includes(item.menuItemId) ? (
+                          <ActivityIndicator size="small" color="#2D6A4F" />
+                        ) : (
+                          <Ionicons name="image-outline" size={18} color="#2D6A4F" />
+                        )}
+                      </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.menuItemEditButton}
                         onPress={(event) => {
@@ -3634,6 +3878,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  menuItemGenerateImageButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#cfe7da',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f3faf6',
   },
   menuItemEditButton: {
     width: 32,

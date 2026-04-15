@@ -39,6 +39,7 @@ type IngredientItem = {
   note: string;
   amount: string;
   measurement: string;
+  averagePrice?: number | null;
   icon: keyof typeof Ionicons.glyphMap;
   tint: string;
   iconColor: string;
@@ -57,6 +58,7 @@ type BeverageOption = {
 type IngredientOption = {
   id: number;
   name: string;
+  category?: string;
 };
 
 const categories = ['Coffee', 'Tea', 'Mocktail', 'Chocolate'];
@@ -64,9 +66,65 @@ const primaryStyles = ['Sweet', 'Nutty', 'Fruity', 'Floral'];
 const secondaryStyles = ['Creamy', 'Spicy', 'Citrus', 'Smooth'];
 const difficulties = ['Beginner', 'Intermediate', 'Advanced'];
 const brewingMethods = ['Espresso Machine', 'Pour Over', 'French Press', 'Cold Brew'];
-const marginOptions = ['45%', '55%', '65%', '75%'];
-const measurementOptions = ['g', 'kg', 'ml', 'l', 'oz', 'tbsp', 'tsp', 'unit'];
+const measurementOptions = ['g', 'ml'];
 const INGREDIENT_PAGE_SIZE = 20;
+
+const resolveIngredientMeasurementOptions = (category?: string): string[] => {
+  const normalized = String(category ?? '').trim().toLowerCase();
+
+  if (normalized.includes('liquid')) {
+    return ['ml'];
+  }
+
+  if (normalized.includes('dry')) {
+    return ['g'];
+  }
+
+  // Fallback: if category is unknown, keep both options.
+  return measurementOptions;
+};
+
+const extractAveragePrice = (payload: any): number | null => {
+  const queue: unknown[] = [payload];
+
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) {
+        queue.push(item);
+      }
+      continue;
+    }
+
+    if (candidate && typeof candidate === 'object') {
+      const obj = candidate as Record<string, unknown>;
+      const fields = [
+        obj.averagePrice,
+        obj.avgPrice,
+        obj.price,
+        obj.cost,
+        obj.totalCost,
+        obj.calculatedPrice,
+      ];
+
+      for (const field of fields) {
+        const num = Number(field);
+        if (Number.isFinite(num)) {
+          return num;
+        }
+      }
+
+      queue.push(obj.data, obj.result, obj.item, obj.items);
+    }
+  }
+
+  return null;
+};
 
 const mapListPayload = <T extends unknown>(payload: any): { items: T[]; totalCount: number } => {
   const items = Array.isArray(payload)
@@ -136,17 +194,17 @@ export default function CreateRecipeScreen() {
 
   const [strength, setStrength] = useState(0.72);
   const [price, setPrice] = useState('');
-  const [marginIndex, setMarginIndex] = useState(2);
   const [difficultyIndex, setDifficultyIndex] = useState(0);
   const [prepMin, setPrepMin] = useState('');
   const [prepMax, setPrepMax] = useState('');
   const [suggestedOccasions, setSuggestedOccasions] = useState('');
 
   const [ingredientOptions, setIngredientOptions] = useState<IngredientOption[]>([]);
-  const [inventoryIngredientIds, setInventoryIngredientIds] = useState<number[]>([]);
   const [ingredientPage, setIngredientPage] = useState(0);
   const [ingredientHasMore, setIngredientHasMore] = useState(true);
   const [loadingIngredientMore, setLoadingIngredientMore] = useState(false);
+  const [ingredientSearchKeyword, setIngredientSearchKeyword] = useState('');
+  const [ingredientSearchDebounced, setIngredientSearchDebounced] = useState('');
 
   const [ingredients, setIngredients] = useState<IngredientItem[]>([]);
   const [showIngredientInput, setShowIngredientInput] = useState(false);
@@ -184,10 +242,37 @@ export default function CreateRecipeScreen() {
     return target?.name ?? 'No ingredient available';
   }, [ingredientOptions, selectedIngredientId]);
 
-  const inventoryIngredientIdSet = useMemo(
-    () => new Set(inventoryIngredientIds),
-    [inventoryIngredientIds]
+  const selectedIngredientOption = useMemo(
+    () => ingredientOptions.find((item) => item.id === selectedIngredientId),
+    [ingredientOptions, selectedIngredientId]
   );
+
+  const allowedMeasurementOptions = useMemo(
+    () => resolveIngredientMeasurementOptions(selectedIngredientOption?.category),
+    [selectedIngredientOption?.category]
+  );
+
+  const totalIngredientAveragePrice = useMemo(
+    () => ingredients.reduce((sum, item) => sum + (Number(item.averagePrice) || 0), 0),
+    [ingredients]
+  );
+
+  const calculatedProfitMarginPercent = useMemo(() => {
+    const sellingPrice = Number(price);
+    if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) {
+      return null;
+    }
+
+    return ((sellingPrice - totalIngredientAveragePrice) / sellingPrice) * 100;
+  }, [price, totalIngredientAveragePrice]);
+
+  const calculatedProfitMarginLabel = useMemo(() => {
+    if (calculatedProfitMarginPercent === null || !Number.isFinite(calculatedProfitMarginPercent)) {
+      return '--';
+    }
+
+    return `${calculatedProfitMarginPercent.toFixed(1)}%`;
+  }, [calculatedProfitMarginPercent]);
 
   const fetchBeverages = useCallback(async () => {
     if (!coffeeShopId) {
@@ -219,9 +304,19 @@ export default function CreateRecipeScreen() {
     setSelectedBeverageId((prev) => prev ?? mapped[0]?.id ?? null);
   }, [coffeeShopId]);
 
-  const fetchIngredientPage = useCallback(async (page: number, allowedIds: Set<number>) => {
+  const fetchIngredientPage = useCallback(async (page: number, searchByName?: string) => {
+    const query = new URLSearchParams({
+      page: String(page),
+      pageSize: String(INGREDIENT_PAGE_SIZE),
+    });
+
+    const trimmedKeyword = String(searchByName ?? '').trim();
+    if (trimmedKeyword) {
+      query.set('name', trimmedKeyword);
+    }
+
     const response = await authorizedFetch(
-      `${API_ENDPOINTS.ingredient.getAll()}?page=${page}&pageSize=${INGREDIENT_PAGE_SIZE}`,
+      `${API_ENDPOINTS.ingredient.getAll()}?${query.toString()}`,
       { headers: { Accept: '*/*' } }
     );
 
@@ -235,47 +330,21 @@ export default function CreateRecipeScreen() {
       .map((item) => {
         const id = Number(item?.ingredientId ?? item?.id ?? 0);
         const name = String(item?.name ?? item?.ingredientName ?? '').trim();
-        return { id, name } as IngredientOption;
+        const category = String(item?.category ?? item?.ingredientCategory ?? '').trim();
+        return { id, name, category } as IngredientOption;
       })
-      .filter((item) => item.id > 0 && item.name.length > 0)
-      .filter((item) => allowedIds.has(item.id));
+      .filter((item) => item.id > 0 && item.name.length > 0);
 
     return { mapped, totalCount };
   }, []);
 
-  const fetchInventoryIngredientIds = useCallback(async () => {
-    if (!coffeeShopId) {
-      setInventoryIngredientIds([]);
-      return new Set<number>();
-    }
-
-    const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(coffeeShopId), {
-      headers: { Accept: '*/*' },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Load inventory failed (${response.status})`);
-    }
-
-    const payload = await response.json();
-    const { items } = mapListPayload<any>(payload);
-
-    const ids = Array.from(
-      new Set(
-        items
-          .map((item) => Number(item?.ingredientId ?? item?.ingredient?.ingredientId ?? 0))
-          .filter((id) => Number.isFinite(id) && id > 0)
-      )
-    );
-
-    setInventoryIngredientIds(ids);
-    return new Set(ids);
-  }, [coffeeShopId]);
-
-  const loadInitialIngredients = useCallback(async (allowedIds: Set<number>) => {
-    const { mapped, totalCount } = await fetchIngredientPage(1, allowedIds);
+  const loadInitialIngredients = useCallback(async (searchByName = '') => {
+    const { mapped, totalCount } = await fetchIngredientPage(1, searchByName);
     setIngredientOptions(mapped);
-    setSelectedIngredientId((prev) => prev ?? mapped[0]?.id ?? null);
+    setSelectedIngredientId((prev) => {
+      if (prev && mapped.some((item) => item.id === prev)) return prev;
+      return mapped[0]?.id ?? null;
+    });
     setIngredientPage(1);
     setIngredientHasMore(mapped.length < totalCount);
   }, [fetchIngredientPage]);
@@ -286,13 +355,15 @@ export default function CreateRecipeScreen() {
     try {
       setLoadingIngredientMore(true);
       const nextPage = ingredientPage + 1;
-      const { mapped, totalCount } = await fetchIngredientPage(nextPage, inventoryIngredientIdSet);
+      const { mapped, totalCount } = await fetchIngredientPage(nextPage, ingredientSearchDebounced);
+      let loadedCount = 0;
       setIngredientOptions((prev) => {
         const dedup = new Map<number, IngredientOption>();
         for (const item of [...prev, ...mapped]) dedup.set(item.id, item);
-        return Array.from(dedup.values());
+        const next = Array.from(dedup.values());
+        loadedCount = next.length;
+        return next;
       });
-      const loadedCount = ingredientOptions.length + mapped.length;
       setIngredientPage(nextPage);
       setIngredientHasMore(loadedCount < totalCount && mapped.length > 0);
     } catch (error) {
@@ -301,7 +372,15 @@ export default function CreateRecipeScreen() {
     } finally {
       setLoadingIngredientMore(false);
     }
-  }, [fetchIngredientPage, ingredientHasMore, ingredientOptions.length, ingredientPage, inventoryIngredientIdSet, loadingIngredientMore]);
+  }, [fetchIngredientPage, ingredientHasMore, ingredientPage, ingredientSearchDebounced, loadingIngredientMore]);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setIngredientSearchDebounced(ingredientSearchKeyword);
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [ingredientSearchKeyword]);
 
   useEffect(() => {
     let mounted = true;
@@ -309,8 +388,7 @@ export default function CreateRecipeScreen() {
     const hydrate = async () => {
       try {
         setLoadingInit(true);
-        const [_, allowedIds] = await Promise.all([fetchBeverages(), fetchInventoryIngredientIds()]);
-        await loadInitialIngredients(allowedIds);
+        await Promise.all([fetchBeverages(), loadInitialIngredients()]);
       } catch (error) {
         if (!mounted) return;
         const message = error instanceof Error ? error.message : 'Unable to load data.';
@@ -324,7 +402,22 @@ export default function CreateRecipeScreen() {
     return () => {
       mounted = false;
     };
-  }, [fetchBeverages, fetchInventoryIngredientIds, loadInitialIngredients]);
+  }, [fetchBeverages, loadInitialIngredients]);
+
+  useEffect(() => {
+    if (loadingInit) return;
+
+    const run = async () => {
+      try {
+        await loadInitialIngredients(ingredientSearchDebounced);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unable to search ingredients.';
+        Toast.show({ type: 'error', text1: 'Ingredient search', text2: message });
+      }
+    };
+
+    run();
+  }, [ingredientSearchDebounced, loadInitialIngredients, loadingInit]);
 
   const handlePickCoverImage = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -354,14 +447,9 @@ export default function CreateRecipeScreen() {
     setShowNoteInput(false);
   };
 
-  const handleAddIngredient = () => {
+  const handleAddIngredient = async () => {
     if (!selectedIngredientId) {
       Toast.show({ type: 'error', text1: 'Ingredient required' });
-      return;
-    }
-
-    if (!inventoryIngredientIdSet.has(selectedIngredientId)) {
-      Toast.show({ type: 'error', text1: 'Ingredient not in shop inventory' });
       return;
     }
 
@@ -372,16 +460,72 @@ export default function CreateRecipeScreen() {
     }
 
     const ingredientName = ingredientOptions.find((item) => item.id === selectedIngredientId)?.name;
-    const measurement = ingredientDraft.measurement.trim() || 'g';
+    const measurement =
+      allowedMeasurementOptions.includes(ingredientDraft.measurement)
+        ? ingredientDraft.measurement
+        : allowedMeasurementOptions[0] ?? 'g';
+
+    let averagePrice: number | null = null;
+
+    try {
+      const averagePayload = [
+        {
+          ingredientId: selectedIngredientId,
+          quantity,
+          measurement,
+        },
+      ];
+
+      console.log('[Create Recipe] average-price payload:', JSON.stringify(averagePayload, null, 2));
+
+      const averageResponse = await authorizedFetch(API_ENDPOINTS.supplierProduct.averagePriceByIngredients(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(averagePayload),
+      });
+
+      const averageText = await averageResponse.text();
+      console.log('[Create Recipe] average-price status:', averageResponse.status);
+      console.log('[Create Recipe] average-price body:', averageText);
+
+      if (!averageResponse.ok) {
+        throw new Error(averageText || `Request failed: ${averageResponse.status}`);
+      }
+
+      let averageData: any = null;
+      try {
+        averageData = averageText ? JSON.parse(averageText) : null;
+      } catch {
+        const asNumber = Number(averageText);
+        averageData = Number.isFinite(asNumber) ? asNumber : averageText;
+      }
+
+      averagePrice = extractAveragePrice(averageData);
+
+      if (averagePrice !== null) {
+        Toast.show({
+          type: 'success',
+          text1: 'Average price calculated',
+          text2: `${averagePrice.toLocaleString('vi-VN')} VND`,
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to calculate average price.';
+      Toast.show({ type: 'error', text1: 'Average price error', text2: message });
+    }
 
     setIngredients((prev) => {
       const existingIndex = prev.findIndex((item) => item.ingredientId === selectedIngredientId);
       const nextItem: IngredientItem = {
         ingredientId: selectedIngredientId,
         name: ingredientName || `Ingredient #${selectedIngredientId}`,
-        note: 'Selected from inventory',
+        note: averagePrice !== null ? `Avg: ${averagePrice.toLocaleString('vi-VN')} VND` : 'Avg price unavailable',
         amount: String(quantity),
         measurement,
+        averagePrice,
         icon: 'nutrition',
         tint: '#F3EFEA',
         iconColor: palette.accent,
@@ -397,6 +541,17 @@ export default function CreateRecipeScreen() {
     setIngredientDraft({ quantity: '', measurement: 'g' });
     setShowIngredientInput(false);
   };
+
+  useEffect(() => {
+    if (!showIngredientInput) return;
+
+    if (!allowedMeasurementOptions.includes(ingredientDraft.measurement)) {
+      setIngredientDraft((prev) => ({
+        ...prev,
+        measurement: allowedMeasurementOptions[0] ?? 'g',
+      }));
+    }
+  }, [allowedMeasurementOptions, ingredientDraft.measurement, showIngredientInput]);
 
   const handleToggleHot = (next: boolean) => {
     setIsHot(next);
@@ -427,6 +582,10 @@ export default function CreateRecipeScreen() {
     setSteps((prev) => [...prev, { title, body }]);
     setStepDraft({ title: '', body: '' });
     setShowStepInput(false);
+  };
+
+  const handleRemoveStep = (targetIndex: number) => {
+    setSteps((prev) => prev.filter((_, index) => index !== targetIndex));
   };
 
   const handleIngredientDropdownScroll = (event: any) => {
@@ -467,7 +626,10 @@ export default function CreateRecipeScreen() {
     console.log('[Create Recipe] validation passed');
 
     const proposedSellingPrice = Number(price);
-    const profitMarginPercent = Number(String(marginOptions[marginIndex]).replace('%', ''));
+    const profitMarginPercent =
+      calculatedProfitMarginPercent !== null && Number.isFinite(calculatedProfitMarginPercent)
+        ? Number(calculatedProfitMarginPercent.toFixed(2))
+        : 0;
 
     const payload = {
       recipeName: trimmedName,
@@ -837,13 +999,10 @@ export default function CreateRecipeScreen() {
             </View>
             <View style={styles.flexItem}>
               <Text style={styles.sectionLabel}>EST. MARGIN (%)</Text>
-              <Pressable
-                style={styles.marginPill}
-                onPress={() => setMarginIndex((prev) => (prev + 1) % marginOptions.length)}
-              >
-                <Text style={styles.marginText}>{marginOptions[marginIndex]}</Text>
+              <View style={styles.marginPill}>
+                <Text style={styles.marginText}>{calculatedProfitMarginLabel}</Text>
                 <Ionicons name="trending-up" size={14} color={palette.greenText} />
-              </Pressable>
+              </View>
             </View>
           </View>
 
@@ -919,7 +1078,13 @@ export default function CreateRecipeScreen() {
           ))}
 
           {!showIngredientInput ? (
-            <Pressable style={styles.addRow} onPress={() => setShowIngredientInput(true)}>
+            <Pressable
+              style={styles.addRow}
+              onPress={() => {
+                setIngredientSearchKeyword('');
+                setShowIngredientInput(true);
+              }}
+            >
               <Ionicons name="add" size={16} color={palette.accentDeep} />
               <Text style={styles.addRowText}>Add Ingredient</Text>
             </Pressable>
@@ -934,6 +1099,16 @@ export default function CreateRecipeScreen() {
               </Pressable>
               {showIngredientDropdown ? (
                 <View style={styles.dropdownCard}>
+                  <View style={styles.dropdownSearchWrap}>
+                    <Ionicons name="search" size={14} color={palette.muted} />
+                    <TextInput
+                      style={styles.dropdownSearchInput}
+                      placeholder="Search ingredient name..."
+                      placeholderTextColor={palette.muted}
+                      value={ingredientSearchKeyword}
+                      onChangeText={setIngredientSearchKeyword}
+                    />
+                  </View>
                   <ScrollView
                     nestedScrollEnabled
                     style={styles.dropdownList}
@@ -985,14 +1160,28 @@ export default function CreateRecipeScreen() {
                   <Text style={styles.measurementLabel}>Measurement</Text>
                   <View style={styles.measurementOptions}>
                     {measurementOptions.map((unit) => {
+                      const disabled = !allowedMeasurementOptions.includes(unit);
                       const selected = ingredientDraft.measurement === unit;
                       return (
                         <Pressable
                           key={unit}
-                          style={[styles.measureChip, selected && styles.measureChipSelected]}
+                          style={[
+                            styles.measureChip,
+                            selected && styles.measureChipSelected,
+                            disabled && styles.measureChipDisabled,
+                          ]}
+                          disabled={disabled}
                           onPress={() => setIngredientDraft((prev) => ({ ...prev, measurement: unit }))}
                         >
-                          <Text style={[styles.measureChipText, selected && styles.measureChipTextSelected]}>{unit}</Text>
+                          <Text
+                            style={[
+                              styles.measureChipText,
+                              selected && styles.measureChipTextSelected,
+                              disabled && styles.measureChipTextDisabled,
+                            ]}
+                          >
+                            {unit}
+                          </Text>
                         </Pressable>
                       );
                     })}
@@ -1033,7 +1222,12 @@ export default function CreateRecipeScreen() {
                 <Text style={styles.stepNumber}>{index + 1}</Text>
               </View>
               <View style={styles.stepCard}>
-                <Text style={styles.stepTitle}>{step.title}</Text>
+                <View style={styles.stepCardHeader}>
+                  <Text style={styles.stepTitle}>{step.title}</Text>
+                  <Pressable style={styles.stepRemoveButton} onPress={() => handleRemoveStep(index)}>
+                    <Ionicons name="trash-outline" size={14} color={palette.accentDeep} />
+                  </Pressable>
+                </View>
                 <Text style={styles.stepBody}>{step.body}</Text>
               </View>
             </View>
@@ -1256,6 +1450,22 @@ const styles = StyleSheet.create({
     backgroundColor: palette.card,
     overflow: 'hidden',
   },
+  dropdownSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2EBE2',
+  },
+  dropdownSearchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: palette.ink,
+    fontWeight: '500',
+    paddingVertical: 0,
+  },
   dropdownList: {
     maxHeight: 180,
   },
@@ -1328,6 +1538,9 @@ const styles = StyleSheet.create({
     borderColor: palette.accent,
     backgroundColor: palette.accentSoft,
   },
+  measureChipDisabled: {
+    opacity: 0.35,
+  },
   measureChipText: {
     fontSize: 12,
     color: palette.muted,
@@ -1335,6 +1548,9 @@ const styles = StyleSheet.create({
   },
   measureChipTextSelected: {
     color: palette.accentDeep,
+  },
+  measureChipTextDisabled: {
+    color: palette.muted,
   },
   card: {
     marginTop: 18,
@@ -1637,7 +1853,24 @@ const styles = StyleSheet.create({
     borderColor: palette.line,
     gap: 6,
   },
+  stepCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  stepRemoveButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: palette.line,
+    backgroundColor: palette.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stepTitle: {
+    flex: 1,
     fontSize: 14,
     fontWeight: '700',
     color: palette.ink,
