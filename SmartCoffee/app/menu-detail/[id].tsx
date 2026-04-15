@@ -533,6 +533,7 @@ export default function MenuDetailScreen() {
         recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
         recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
         ingredients: JSON.stringify(shopRecipeIngredients),
+        flow: typeof flow === 'string' ? flow : '',
       },
     });
   };
