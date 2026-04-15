@@ -10,7 +10,6 @@ import {
   Modal,
   FlatList,
   Image,
-  Alert,
   BackHandler,
   Dimensions,
 } from 'react-native';
@@ -43,6 +42,7 @@ interface MenuItem {
     beverageSizeId?: number;
     menuItemId?: number;
     sellingPrice?: number;
+    scaledTotalCost?: number;
     beverageSize?: {
       beverageSizeId: number;
       sizeName?: string;
@@ -67,6 +67,7 @@ interface MenuItem {
     recipeId: number;
     recipeName: string;
     image: string | null;
+    totalCost?: number | null;
   };
   isExisting?: boolean;
 }
@@ -110,6 +111,7 @@ interface DailySaleRecord {
 
 interface MenuItemCostPayload {
   menuItemId: number;
+  totalCost?: number | null;
   shopRecipe?: {
     totalCost?: number | null;
     ingredients?: Array<{
@@ -178,6 +180,48 @@ const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
 
 const getSizeDraftLabel = (size: SizePriceDraft, index: number) =>
   size.sizeName || (size.volume ? `${size.volume}ml` : `Size ${index + 1}`);
+
+const getMenuItemSizeLabel = (
+  size: { beverageSize?: { sizeName?: string; volume?: number } },
+  index: number
+) => {
+  const sizeName = String(size?.beverageSize?.sizeName ?? '').trim();
+  const volume = Number(size?.beverageSize?.volume ?? 0);
+  if (sizeName && Number.isFinite(volume) && volume > 0) {
+    return `${sizeName} (${volume}ml)`;
+  }
+  if (sizeName) return sizeName;
+  if (Number.isFinite(volume) && volume > 0) return `${volume}ml`;
+  return `Size ${index + 1}`;
+};
+
+const normalizeSizeToken = (value: string) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[()]/g, '');
+
+const getSizeVariantAliases = (
+  size: { beverageSize?: { sizeName?: string; volume?: number } } | null,
+  index: number
+) => {
+  if (!size) return [] as string[];
+
+  const sizeName = String(size?.beverageSize?.sizeName ?? '').trim();
+  const volume = Number(size?.beverageSize?.volume ?? 0);
+  const label = getMenuItemSizeLabel(size, index);
+
+  const aliases = new Set<string>();
+  if (sizeName) aliases.add(sizeName);
+  if (Number.isFinite(volume) && volume > 0) {
+    aliases.add(`${volume}ml`);
+    if (sizeName) aliases.add(`${sizeName}${volume}ml`);
+  }
+  if (label) aliases.add(label);
+
+  return Array.from(aliases);
+};
 
 const resolveImageUrl = (raw?: string | null) => {
   if (!raw || raw === 'null' || raw === 'undefined') return null;
@@ -258,6 +302,7 @@ export default function MenuInsightsScreen() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [itemSalesMap, setItemSalesMap] = useState<Map<number, number>>(new Map());
+  const [itemSalesBySizeMap, setItemSalesBySizeMap] = useState<Map<string, number>>(new Map());
   const [itemUnitCostMap, setItemUnitCostMap] = useState<Map<number, number>>(new Map());
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
@@ -296,6 +341,9 @@ export default function MenuInsightsScreen() {
   const [duplicateItemMessage, setDuplicateItemMessage] = useState('');
   const [deletingItem, setDeletingItem] = useState<MenuItem | null>(null);
   const [generatingImageItemIds, setGeneratingImageItemIds] = useState<number[]>([]);
+  const [showWarningModal, setShowWarningModal] = useState(false);
+  const [warningModalTitle, setWarningModalTitle] = useState('Warning');
+  const [warningModalMessage, setWarningModalMessage] = useState('');
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -329,6 +377,34 @@ export default function MenuInsightsScreen() {
     if (!state || state.index <= 0) return '';
     return String(state.routes[state.index - 1]?.name ?? '');
   });
+
+  const normalizeWarningMessage = useCallback((raw: string) => {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) return 'An unexpected error occurred.';
+    if (!(trimmed.startsWith('{') && trimmed.endsWith('}'))) return trimmed;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed?.error === 'string' && parsed.error.trim().length > 0) {
+        return parsed.error.trim();
+      }
+      if (typeof parsed?.message === 'string' && parsed.message.trim().length > 0) {
+        return parsed.message.trim();
+      }
+      return trimmed;
+    } catch {
+      return trimmed;
+    }
+  }, []);
+
+  const openWarningModal = useCallback(
+    (title: string, message: string) => {
+      setWarningModalTitle(title || 'Warning');
+      setWarningModalMessage(normalizeWarningMessage(message));
+      setShowWarningModal(true);
+    },
+    [normalizeWarningMessage]
+  );
 
   const resetZoom = () => {
     scale.value = 1;
@@ -475,6 +551,11 @@ export default function MenuInsightsScreen() {
       deletedMenuItemIds.length > 0,
     [addedMenuItemIds.length, deletedMenuItemIds.length, menuItems]
   );
+  const shouldShowManualEditCard =
+    hasEditedMenuItemsForVersion ||
+    hasActualUnsavedChanges ||
+    savingManualEdits ||
+    creatingMenuVersion;
 
   const navigateToMenuVersion = useCallback(() => {
     if (previousRouteName.toLowerCase().includes('menu-version') && router.canGoBack()) {
@@ -553,6 +634,11 @@ export default function MenuInsightsScreen() {
         return true;
       }
 
+      if (showWarningModal) {
+        setShowWarningModal(false);
+        return true;
+      }
+
       if (showBackConfirm) {
         setShowBackConfirm(false);
         return true;
@@ -564,7 +650,14 @@ export default function MenuInsightsScreen() {
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
     return () => subscription.remove();
-  }, [handleBackPress, showBackConfirm, showDeleteConfirm, showDuplicateItemModal, showEditModal]);
+  }, [
+    handleBackPress,
+    showBackConfirm,
+    showDeleteConfirm,
+    showDuplicateItemModal,
+    showEditModal,
+    showWarningModal,
+  ]);
 
   const openEditModalForItem = (item: MenuItem, options?: { readOnly?: boolean }) => {
     setEditingItem(item);
@@ -887,23 +980,23 @@ export default function MenuInsightsScreen() {
 
   const handleSaveManualEdits = async () => {
     if (!hasActualUnsavedChanges) {
-      Alert.alert('No changes', 'There are no pending menu item changes to save.');
+      openWarningModal('No changes', 'There are no pending menu item changes to save.');
       return;
     }
 
     if (!menuId) {
-      Alert.alert('Missing menu', 'Menu ID is missing.');
+      openWarningModal('Missing menu', 'Menu ID is missing.');
       return;
     }
 
     const id = Number(menuId);
     if (!Number.isFinite(id)) {
-      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      openWarningModal('Invalid menu', 'Menu ID is invalid.');
       return;
     }
 
     if (!currentMenuRaw) {
-      Alert.alert('Missing menu', 'Menu data is not loaded yet.');
+      openWarningModal('Missing menu', 'Menu data is not loaded yet.');
       return;
     }
 
@@ -965,7 +1058,7 @@ export default function MenuInsightsScreen() {
       await fetchMenuItems();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save menu updates.';
-      Alert.alert('Save failed', message);
+      openWarningModal('Save failed', message);
     } finally {
       setSavingManualEdits(false);
       setSaveProgressText('');
@@ -974,7 +1067,7 @@ export default function MenuInsightsScreen() {
 
   const fetchShopRecipes = useCallback(async () => {
     if (!coffeeShopId) {
-      Alert.alert('Missing coffee shop', 'Could not determine coffee shop for this account.');
+      openWarningModal('Missing coffee shop', 'Could not determine coffee shop for this account.');
       return;
     }
 
@@ -1018,11 +1111,11 @@ export default function MenuInsightsScreen() {
       setAvailableRecipes(mapped.filter((item) => Number.isFinite(item.recipeId) && item.recipeId > 0));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load recipes.';
-      Alert.alert('Load recipes failed', message);
+      openWarningModal('Load recipes failed', message);
     } finally {
       setLoadingAvailableRecipes(false);
     }
-  }, [coffeeShopId]);
+  }, [coffeeShopId, openWarningModal]);
 
   const fetchShopSizes = useCallback(async () => {
     if (!coffeeShopId) return;
@@ -1501,7 +1594,7 @@ export default function MenuInsightsScreen() {
 
   const handleCreateNewMenuVersion = async () => {
     if (!hasEditedMenuItemsForVersion) {
-      Alert.alert(
+      openWarningModal(
         'No menu changes',
         'Please add, delete, or edit at least one menu item before creating a new version.'
       );
@@ -1509,18 +1602,18 @@ export default function MenuInsightsScreen() {
     }
 
     if (!menuId) {
-      Alert.alert('Missing menu', 'Menu ID is missing.');
+      openWarningModal('Missing menu', 'Menu ID is missing.');
       return;
     }
 
     const id = Number(menuId);
     if (!Number.isFinite(id)) {
-      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      openWarningModal('Invalid menu', 'Menu ID is invalid.');
       return;
     }
 
     if (!currentMenuRaw) {
-      Alert.alert('Missing menu', 'Menu data is not loaded yet.');
+      openWarningModal('Missing menu', 'Menu data is not loaded yet.');
       return;
     }
 
@@ -1671,7 +1764,7 @@ export default function MenuInsightsScreen() {
       router.replace('/(tabs)/menu');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to create menu version.';
-      Alert.alert('Create failed', message);
+      openWarningModal('Create failed', message);
     } finally {
       setCreatingMenuVersion(false);
       setCreateVersionProgressText('');
@@ -1860,9 +1953,18 @@ export default function MenuInsightsScreen() {
             ? byMenuPayload.data
             : [];
 
+      const totalCostByMenuItemId = new Map<number, number>();
       const unitCostMap = new Map<number, number>();
       byMenuItems.forEach((menuItem) => {
-        const recipeCost = Number(menuItem?.shopRecipe?.totalCost ?? 0);
+        const recipeCost = Number(
+          (menuItem as any)?.shopRecipe?.totalCost ?? (menuItem as any)?.shopRecipe?.TotalCost ?? 0
+        );
+        const itemTotalCost = Number((menuItem as any)?.totalCost ?? (menuItem as any)?.TotalCost ?? 0);
+        const mappedTotalCost = recipeCost > 0 ? recipeCost : itemTotalCost;
+        if (mappedTotalCost > 0) {
+          totalCostByMenuItemId.set(menuItem.menuItemId, mappedTotalCost);
+        }
+
         const ingredientCost = Array.isArray(menuItem?.shopRecipe?.ingredients)
           ? menuItem.shopRecipe!.ingredients!.reduce((sum, ingredient) => {
               const value = Number(ingredient?.cost ?? 0);
@@ -1870,9 +1972,26 @@ export default function MenuInsightsScreen() {
             }, 0)
           : 0;
 
-        const unitCost = recipeCost > 0 ? recipeCost : ingredientCost;
+        const unitCost = mappedTotalCost > 0 ? mappedTotalCost : ingredientCost;
         unitCostMap.set(menuItem.menuItemId, unitCost > 0 ? unitCost : 0);
       });
+
+      if (totalCostByMenuItemId.size > 0) {
+        setMenuItems((prev) =>
+          prev.map((item) => {
+            const totalCost = totalCostByMenuItemId.get(item.menuItemId);
+            if (totalCost == null) return item;
+
+            return {
+              ...item,
+              shopRecipe: {
+                ...item.shopRecipe,
+                totalCost,
+              },
+            };
+          })
+        );
+      }
 
       setItemUnitCostMap(unitCostMap);
     } catch (err) {
@@ -1888,6 +2007,7 @@ export default function MenuInsightsScreen() {
       if (!selectedData) return;
 
       const salesMap = new Map<number, number>();
+      const salesBySize = new Map<string, number>();
       
       // Fetch sales data for each menu item for the selected date
       const salesPromises = menuItems.map(async (item) => {
@@ -1903,13 +2023,24 @@ export default function MenuInsightsScreen() {
 
           if (response.ok) {
             const salesRecords: DailySaleRecord[] = await response.json();
-            
+
             // Filter records for the selected date and sum totalCups
             const selectedDateStr = selectedData.date.split('T')[0];
-            const totalCups = salesRecords
-              .filter(record => record.saleDate.startsWith(selectedDateStr))
-              .reduce((sum, record) => sum + record.totalCups, 0);
-            
+            const sameDateRecords = salesRecords.filter((record) =>
+              record.saleDate.startsWith(selectedDateStr)
+            );
+
+            const totalCups = sameDateRecords.reduce((sum, record) => sum + record.totalCups, 0);
+
+            sameDateRecords.forEach((record) => {
+              const sizeToken = normalizeSizeToken(String(record.cupSize ?? ''));
+              if (!sizeToken) return;
+
+              const key = `${item.menuItemId}:${sizeToken}`;
+              const current = salesBySize.get(key) ?? 0;
+              salesBySize.set(key, current + Number(record.totalCups ?? 0));
+            });
+
             if (totalCups > 0) {
               salesMap.set(item.menuItemId, totalCups);
             }
@@ -1921,6 +2052,7 @@ export default function MenuInsightsScreen() {
 
       await Promise.all(salesPromises);
       setItemSalesMap(salesMap);
+      setItemSalesBySizeMap(salesBySize);
     } catch (err) {
       console.error('Error fetching items sales data:', err);
     }
@@ -1928,13 +2060,13 @@ export default function MenuInsightsScreen() {
 
   const handleGenerateMenuVersion = async () => {
     if (!menuId) {
-      Alert.alert('Missing menu', 'Menu ID is missing.');
+      openWarningModal('Missing menu', 'Menu ID is missing.');
       return;
     }
 
     const id = Number(menuId);
     if (!Number.isFinite(id)) {
-      Alert.alert('Invalid menu', 'Menu ID is invalid.');
+      openWarningModal('Invalid menu', 'Menu ID is invalid.');
       return;
     }
 
@@ -2131,7 +2263,7 @@ export default function MenuInsightsScreen() {
 
       const modifiedCount = getModifiedCount(normalizedPayload);
       if (unappliedFeedbackItems.length > 0 && modifiedCount === 0) {
-        Alert.alert(
+        openWarningModal(
           'No menu items updated',
           `Detected ${unappliedFeedbackItems.length} unapplied feedback item(s), but AI returned no modified items. Please review feedback mapping for this menu version.`
         );
@@ -2153,7 +2285,7 @@ export default function MenuInsightsScreen() {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to generate menu.';
-      Alert.alert('Generate failed', message);
+      openWarningModal('Generate failed', message);
     } finally {
       setGeneratingMenu(false);
     }
@@ -2163,6 +2295,12 @@ export default function MenuInsightsScreen() {
     return new Intl.NumberFormat('vi-VN', {
       style: 'currency',
       currency: 'VND',
+    }).format(amount);
+  };
+
+  const formatAmountNoUnit = (amount: number) => {
+    return new Intl.NumberFormat('vi-VN', {
+      maximumFractionDigits: 0,
     }).format(amount);
   };
 
@@ -2444,6 +2582,37 @@ export default function MenuInsightsScreen() {
           </ScrollView>
         </View>
 
+        {/* AI Suggestions */}
+        <View style={styles.itemsList}>
+          <View style={styles.aiSection}>
+            <View style={styles.aiHeader}>
+              <View style={styles.aiIconContainer}>
+                <Ionicons name="bulb" size={24} color="#FFF" />
+              </View>
+              <View style={styles.aiTextContainer}>
+                <Text style={styles.aiTitle}>AI Suggestions</Text>
+                <Text style={styles.aiDescription}>
+                  Analyze your menu performance and get AI-powered recommendations to improve profit.
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.aiButton, generatingMenu && styles.aiButtonDisabled]}
+              onPress={handleGenerateMenuVersion}
+              disabled={generatingMenu}
+            >
+              {generatingMenu ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <>
+                  <Text style={styles.aiButtonText}>Generate New Menu Version</Text>
+                  <Ionicons name="rocket" size={16} color="#FFF" />
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* Search Bar */}
         <View style={styles.searchSection}>
           <View style={styles.searchBar}>
@@ -2463,67 +2632,69 @@ export default function MenuInsightsScreen() {
           </View>
         </View>
 
-        <View style={styles.manualEditCard}>
-          <View style={styles.manualEditText}>
-            <Text style={styles.manualEditTitle}>Manual edit</Text>
-            <Text style={styles.manualEditSubtitle}>
-              Keep current menu updated, or save as a new version.
-            </Text>
-            {hasActualUnsavedChanges && (
-              <Text style={styles.manualEditHint}>Unsaved changes</Text>
-            )}
-            {savingManualEdits && saveProgressText.length > 0 && (
-              <Text style={styles.manualEditProgress}>{saveProgressText}</Text>
-            )}
-            {creatingMenuVersion && createVersionProgressText.length > 0 && (
-              <Text style={styles.manualEditProgress}>{createVersionProgressText}</Text>
-            )}
-          </View>
-          <View style={styles.manualActionColumn}>
-            <TouchableOpacity
-              style={[
-                styles.manualSaveButton,
-                (!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion) &&
-                  styles.manualSaveButtonDisabled,
-              ]}
-              onPress={handleSaveManualEdits}
-              disabled={!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion}
-            >
-              {savingManualEdits ? (
-                <View style={styles.manualSaveLoading}>
-                  <ActivityIndicator size="small" color="#FFF" />
-                  <Text style={styles.manualSaveButtonText}>Saving...</Text>
-                </View>
-              ) : (
-                <>
-                  <Ionicons name="save-outline" size={14} color="#FFF" />
-                  <Text style={styles.manualSaveButtonText}>Save</Text>
-                </>
+        {shouldShowManualEditCard && (
+          <View style={styles.manualEditCard}>
+            <View style={styles.manualEditText}>
+              <Text style={styles.manualEditTitle}>Manual edit</Text>
+              <Text style={styles.manualEditSubtitle}>
+                Keep current menu updated, or save as a new version.
+              </Text>
+              {hasActualUnsavedChanges && (
+                <Text style={styles.manualEditHint}>Unsaved changes</Text>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.manualCreateVersionButton,
-                (!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits) &&
-                  styles.manualSaveButtonDisabled,
-              ]}
-              onPress={handleCreateNewMenuVersion}
-              disabled={!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits}
-            >
-              {creatingMenuVersion ? (
-                <View style={styles.manualSaveLoading}>
-                  <ActivityIndicator size="small" color="#FFF" />
-                  <Text style={styles.manualSaveButtonText}>Creating...</Text>
-                </View>
-              ) : (
-                <>
-                  <Ionicons name="git-branch-outline" size={14} color="#FFF" />
-                  <Text style={styles.manualSaveButtonText}>Version</Text>
-                </>
+              {savingManualEdits && saveProgressText.length > 0 && (
+                <Text style={styles.manualEditProgress}>{saveProgressText}</Text>
               )}
-            </TouchableOpacity>
+              {creatingMenuVersion && createVersionProgressText.length > 0 && (
+                <Text style={styles.manualEditProgress}>{createVersionProgressText}</Text>
+              )}
+            </View>
+            <View style={styles.manualActionColumn}>
+              <TouchableOpacity
+                style={[
+                  styles.manualSaveButton,
+                  (!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion) &&
+                    styles.manualSaveButtonDisabled,
+                ]}
+                onPress={handleSaveManualEdits}
+                disabled={!hasActualUnsavedChanges || savingManualEdits || creatingMenuVersion}
+              >
+                {savingManualEdits ? (
+                  <View style={styles.manualSaveLoading}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                    <Text style={styles.manualSaveButtonText}>Saving...</Text>
+                  </View>
+                ) : (
+                  <>
+                    <Ionicons name="save-outline" size={14} color="#FFF" />
+                    <Text style={styles.manualSaveButtonText}>Save</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.manualCreateVersionButton,
+                  (!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits) &&
+                    styles.manualSaveButtonDisabled,
+                ]}
+                onPress={handleCreateNewMenuVersion}
+                disabled={!hasEditedMenuItemsForVersion || creatingMenuVersion || savingManualEdits}
+              >
+                {creatingMenuVersion ? (
+                  <View style={styles.manualSaveLoading}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                    <Text style={styles.manualSaveButtonText}>Creating...</Text>
+                  </View>
+                ) : (
+                  <>
+                    <Ionicons name="git-branch-outline" size={14} color="#FFF" />
+                    <Text style={styles.manualSaveButtonText}>Version</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Menu Items Section */}
         <View style={styles.section}>
@@ -2558,139 +2729,192 @@ export default function MenuInsightsScreen() {
               </Text>
             </View>
           ) : (
-            getFilteredMenuItems().slice(0, visibleCount).map((item) => (
-              <TouchableOpacity
-                key={item.menuItemId}
-                style={[styles.menuItem, isMenuItemEdited(item) && styles.menuItemEdited]}
-                activeOpacity={0.9}
-                onPress={() => {
-                  let shopRecipe: any = item?.shopRecipe || null;
-                  const shopRecipes =
-                    item?.shopBeverage && Array.isArray((item.shopBeverage as any).shopRecipes)
-                      ? (item.shopBeverage as any).shopRecipes
-                      : [];
+            getFilteredMenuItems().slice(0, visibleCount).map((item) => {
+              const cupsSold = itemSalesMap.get(item.menuItemId) ?? 0;
+              const costPerCup = Number(
+                item.shopRecipe?.totalCost ?? itemUnitCostMap.get(item.menuItemId) ?? 0
+              );
+              const hasRecipeImage = Boolean(String(item.shopRecipe?.image ?? '').trim());
+              const sizeVariants = [...(item.itemSizeViewModels ?? [])].sort((left, right) => {
+                const leftVolume = Number(left?.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+                const rightVolume = Number(right?.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER);
+                return leftVolume - rightVolume;
+              });
+              const menuItemVariants = sizeVariants.length > 0 ? sizeVariants : [null];
 
-                  if (!shopRecipe && shopRecipes.length > 0) {
-                    shopRecipe = shopRecipes[0];
-                  }
+              return (
+                <ScrollView
+                  key={item.menuItemId}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.menuItemCarousel}
+                  contentContainerStyle={styles.menuItemCarouselContent}
+                >
+                  {menuItemVariants.map((sizeVariant, variantIndex) => {
+                    const variantPrice = Number(sizeVariant?.sellingPrice ?? item.sellingPrice ?? 0);
+                    const variantLabel = getMenuItemSizeLabel(sizeVariant ?? {}, variantIndex);
+                    const variantAliases = getSizeVariantAliases(sizeVariant, variantIndex);
+                    const variantCupsSold = sizeVariant
+                      ? variantAliases.reduce((maxCups, alias) => {
+                          const key = `${item.menuItemId}:${normalizeSizeToken(alias)}`;
+                          const cups = itemSalesBySizeMap.get(key) ?? 0;
+                          return cups > maxCups ? cups : maxCups;
+                        }, 0)
+                      : cupsSold;
+                    const variantCostPerCup = sizeVariant
+                      ? Number((sizeVariant as any)?.scaledTotalCost ?? (sizeVariant as any)?.ScaledTotalCost ?? 0)
+                      : Number(item.shopRecipe?.totalCost ?? itemUnitCostMap.get(item.menuItemId) ?? 0);
+                    const variantRevenue = variantCupsSold > 0 ? variantPrice * variantCupsSold : 0;
+                    const variantTotalCost =
+                      variantCupsSold > 0 ? variantCostPerCup * variantCupsSold : 0;
+                    const isLastVariant = variantIndex === menuItemVariants.length - 1;
 
-                  const shopRecipeIngredients = Array.isArray(
-                    shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients
-                  )
-                    ? shopRecipe.ingredients ?? shopRecipe.shopRecipeIngredients
-                    : [];
+                    return (
+                      <TouchableOpacity
+                        key={`${item.menuItemId}-${sizeVariant?.itemSizeId ?? 'base'}-${variantIndex}`}
+                        style={[
+                          styles.menuItem,
+                          styles.menuItemVariantCard,
+                          !isLastVariant && styles.menuItemVariantSpacing,
+                          isMenuItemEdited(item) && styles.menuItemEdited,
+                        ]}
+                        activeOpacity={0.9}
+                        onPress={() => {
+                          let shopRecipe: any = item?.shopRecipe || null;
+                          const shopRecipes =
+                            item?.shopBeverage && Array.isArray((item.shopBeverage as any).shopRecipes)
+                              ? (item.shopBeverage as any).shopRecipes
+                              : [];
 
-                  router.push({
-                    pathname: '/recipe-detail/[id]',
-                    params: {
-                      id: String(item.menuItemId || 0),
-                      menuItemId: String(item.menuItemId || 0),
-                      recipeId: String(item.shopRecipe?.recipeId || 0),
-                      beverageName: item.shopBeverage?.name ?? '',
-                      recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
-                      recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
-                      ingredients: JSON.stringify(shopRecipeIngredients),
-                    },
-                  });
-                }}
-              >
-                <View style={styles.menuItemImage}>
-                  {item.shopRecipe?.image ? (
-                    <Image
-                      source={{ uri: item.shopRecipe.image }}
-                      style={styles.menuItemImageAsset}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.menuItemImageFallback}>
-                      <Ionicons name="cafe" size={32} color="#847362" />
-                    </View>
-                  )}
-                </View>
-                <View style={styles.menuItemContent}>
-                  <View style={styles.menuItemHeader}>
-                    <Text style={styles.menuItemTitle} numberOfLines={2}>
-                      {item.shopRecipe?.recipeName || 'Unnamed Item'}
-                    </Text>
-                    <View style={styles.menuItemActionGroup}>
-                      <TouchableOpacity
-                        style={styles.menuItemGenerateImageButton}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          handleGenerateMenuItemImage(item);
-                        }}
-                        disabled={generatingImageItemIds.includes(item.menuItemId)}
-                      >
-                        {generatingImageItemIds.includes(item.menuItemId) ? (
-                          <ActivityIndicator size="small" color="#2D6A4F" />
-                        ) : (
-                          <Ionicons name="image-outline" size={18} color="#2D6A4F" />
-                        )}
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.menuItemEditButton}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          openEditModalForItem(item, { readOnly: false });
-                        }}
-                      >
-                        <Ionicons name="create-outline" size={18} color="#4a3621" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.menuItemDeleteButton}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          handleDeleteMenuItem(item);
+                          if (!shopRecipe && shopRecipes.length > 0) {
+                            shopRecipe = shopRecipes[0];
+                          }
+
+                          const shopRecipeIngredients = Array.isArray(
+                            shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients
+                          )
+                            ? shopRecipe.ingredients ?? shopRecipe.shopRecipeIngredients
+                            : [];
+
+                          router.push({
+                            pathname: '/recipe-detail/[id]',
+                            params: {
+                              id: String(item.menuItemId || 0),
+                              menuItemId: String(item.menuItemId || 0),
+                              recipeId: String(item.shopRecipe?.recipeId || 0),
+                              beverageName: item.shopBeverage?.name ?? '',
+                              recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
+                              recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
+                              ingredients: JSON.stringify(shopRecipeIngredients),
+                            },
+                          });
                         }}
                       >
-                        <Ionicons name="trash-outline" size={18} color="#a13e2a" />
+                        <View style={styles.menuItemMediaColumn}>
+                          <View style={styles.menuItemImage}>
+                            {item.shopRecipe?.image ? (
+                              <Image
+                                source={{ uri: item.shopRecipe.image }}
+                                style={styles.menuItemImageAsset}
+                                resizeMode="cover"
+                              />
+                            ) : (
+                              <View style={styles.menuItemImageFallback}>
+                                <Ionicons name="cafe" size={32} color="#847362" />
+                              </View>
+                            )}
+                          </View>
+                          <View style={styles.menuItemLeftMeta}>
+                            <View style={styles.cupsBadge}>
+                              <Ionicons name="cafe" size={12} color="#4a3621" />
+                              <Text style={styles.cupsBadgeText}>{variantCupsSold} cups sold</Text>
+                            </View>
+                            <View style={styles.menuItemMetricBadgeWrap}>
+                              <View style={[styles.menuItemMetricBadge, styles.menuItemCostBadge]}>
+                                <Text style={[styles.menuItemMetricBadgeText, styles.menuItemCostBadgeText]}>
+                                  Cost/cup: {formatCurrency(variantCostPerCup)}
+                                </Text>
+                              </View>
+                              <View style={[styles.menuItemMetricBadge, styles.menuItemSizeBadge]}>
+                                <Text style={[styles.menuItemMetricBadgeText, styles.menuItemSizeBadgeText]}>
+                                  Size: {variantLabel}
+                                </Text>
+                              </View>
+                            </View>
+                          </View>
+                        </View>
+                        <View style={styles.menuItemContent}>
+                          <View style={styles.menuItemHeader}>
+                            <View style={styles.menuItemHeaderSpacer} />
+                            <View style={styles.menuItemActionGroup}>
+                              {!hasRecipeImage && (
+                                <TouchableOpacity
+                                  style={styles.menuItemGenerateImageButton}
+                                  onPress={(event) => {
+                                    event.stopPropagation();
+                                    handleGenerateMenuItemImage(item);
+                                  }}
+                                  disabled={generatingImageItemIds.includes(item.menuItemId)}
+                                >
+                                  {generatingImageItemIds.includes(item.menuItemId) ? (
+                                    <ActivityIndicator size="small" color="#2D6A4F" />
+                                  ) : (
+                                    <Ionicons name="image-outline" size={18} color="#2D6A4F" />
+                                  )}
+                                </TouchableOpacity>
+                              )}
+                              <TouchableOpacity
+                                style={styles.menuItemEditButton}
+                                onPress={(event) => {
+                                  event.stopPropagation();
+                                  openEditModalForItem(item, { readOnly: false });
+                                }}
+                              >
+                                <Ionicons name="create-outline" size={18} color="#4a3621" />
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.menuItemDeleteButton}
+                                onPress={(event) => {
+                                  event.stopPropagation();
+                                  handleDeleteMenuItem(item);
+                                }}
+                              >
+                                <Ionicons name="trash-outline" size={18} color="#a13e2a" />
+                              </TouchableOpacity>
+                            </View>
+                          </View>
+                          <Text style={styles.menuItemTitle} numberOfLines={2}>
+                            {item.shopRecipe?.recipeName || 'Unnamed Item'}
+                          </Text>
+                          {item.description && (
+                            <Text style={styles.menuItemDescription} numberOfLines={2}>
+                              {item.description}
+                            </Text>
+                          )}
+                          <View style={styles.menuItemPriceRow}>
+                            <Text style={styles.menuItemPrice}>{formatCurrency(variantPrice)}</Text>
+                          </View>
+                          <View style={styles.menuItemFinanceRow}>
+                            <View style={styles.menuItemFinanceCell}>
+                              <Text style={styles.menuItemFinanceLabel}>Revenue</Text>
+                              <Text style={styles.menuItemFinanceValue}>
+                                {formatAmountNoUnit(variantRevenue)}
+                              </Text>
+                            </View>
+                            <View style={styles.menuItemFinanceCell}>
+                              <Text style={styles.menuItemFinanceLabel}>Total cost</Text>
+                              <Text style={styles.menuItemFinanceValue}>
+                                {formatAmountNoUnit(variantTotalCost)}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
                       </TouchableOpacity>
-                    </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                    <View style={styles.cupsBadge}>
-                      <Ionicons name="cafe" size={12} color="#4a3621" />
-                      <Text style={styles.cupsBadgeText}>
-                        {itemSalesMap.get(item.menuItemId) ?? 0} cups sold
-                      </Text>
-                    </View>
-                    {item.shopBeverage?.beverageCategoryName && (
-                      <View style={styles.categoryBadge}>
-                        <Text style={styles.categoryBadgeText}>
-                          {item.shopBeverage?.beverageCategoryName}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  {item.description && (
-                    <Text style={styles.menuItemDescription} numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                  )}
-                  <View style={styles.menuItemPriceRow}>
-                    <Text style={styles.menuItemPrice}>
-                      {formatCurrency(item.sellingPrice)}
-                    </Text>
-                  </View>
-                  <Text style={styles.menuItemCostText}>
-                    Total cost: {formatCurrency(getItemTotalCost(item.menuItemId))}
-                  </Text>
-                  {/* {item.itemSizeViewModels && item.itemSizeViewModels.length > 0 && (
-                    <View style={styles.sizesContainer}>
-                      <Text style={styles.sizesLabel}>Sizes: </Text>
-                      {item.itemSizeViewModels.map((size, index) => (
-                        <Text key={size.itemSizeId} style={styles.sizeText}>
-                          {size.beverageSize?.sizeName || size.beverageSize?.volume ? 
-                            `${size.beverageSize?.sizeName || ''}${size.beverageSize?.volume ? ` (${size.beverageSize.volume}ml)` : ''}` : 
-                            size.sellingPrice ? formatCurrency(size.sellingPrice) : 'Size'}
-                          {index < item.itemSizeViewModels!.length - 1 ? ', ' : ''}
-                        </Text>
-                      ))}
-                    </View>
-                  )} */}
-                </View>
-              </TouchableOpacity>
-            ))
+                    );
+                  })}
+                </ScrollView>
+              );
+            })
           )}
         </View>
 
@@ -2705,37 +2929,6 @@ export default function MenuInsightsScreen() {
             </TouchableOpacity>
           </View>
         )}
-
-        {/* AI Suggestions */}
-        <View style={styles.itemsList}>
-          <View style={styles.aiSection}>
-            <View style={styles.aiHeader}>
-              <View style={styles.aiIconContainer}>
-                <Ionicons name="bulb" size={24} color="#FFF" />
-              </View>
-              <View style={styles.aiTextContainer}>
-                <Text style={styles.aiTitle}>AI Suggestions</Text>
-                <Text style={styles.aiDescription}>
-                  Analyze your menu performance and get AI-powered recommendations to improve profit.
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={[styles.aiButton, generatingMenu && styles.aiButtonDisabled]}
-              onPress={handleGenerateMenuVersion}
-              disabled={generatingMenu}
-            >
-              {generatingMenu ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <>
-                  <Text style={styles.aiButtonText}>Generate New Menu Version</Text>
-                  <Ionicons name="rocket" size={16} color="#FFF" />
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
 
         <View style={styles.bottomSpacing} />
       </ScrollView>
@@ -2831,6 +3024,31 @@ export default function MenuInsightsScreen() {
                     setShowDuplicateItemModal(false);
                     setDuplicateItemMessage('');
                   }}
+                >
+                  <Text style={styles.confirmLeaveText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          visible={showWarningModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowWarningModal(false)}
+        >
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <View style={[styles.confirmIconWrap, styles.warningConfirmIconWrap]}>
+                <Ionicons name="warning-outline" size={22} color="#d17a22" />
+              </View>
+              <Text style={styles.confirmTitle}>{warningModalTitle}</Text>
+              <Text style={styles.confirmMessage}>{warningModalMessage}</Text>
+              <View style={[styles.confirmActions, styles.confirmSingleAction]}>
+                <TouchableOpacity
+                  style={styles.confirmLeaveButton}
+                  onPress={() => setShowWarningModal(false)}
                 >
                   <Text style={styles.confirmLeaveText}>OK</Text>
                 </TouchableOpacity>
@@ -3836,6 +4054,21 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 4,
+    alignItems: 'flex-start',
+  },
+  menuItemCarousel: {
+    overflow: 'visible',
+  },
+  menuItemCarouselContent: {
+    paddingRight: 4,
+    paddingTop: 2,
+    paddingBottom: 10,
+  },
+  menuItemVariantCard: {
+    width: SCREEN_WIDTH - 64,
+  },
+  menuItemVariantSpacing: {
+    marginRight: 10,
   },
   menuItemEdited: {
     borderColor: '#d17a22',
@@ -3845,9 +4078,16 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#e71008',
   },
+  menuItemMediaColumn: {
+    width: 128,
+    alignSelf: 'flex-start',
+    justifyContent: 'flex-start',
+    marginTop: 0,
+    gap: 8,
+  },
   menuItemImage: {
-    width: 80,
-    height: 80,
+    width: '100%',
+    height: 96,
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -3867,12 +4107,16 @@ const styles = StyleSheet.create({
   },
   menuItemContent: {
     flex: 1,
+    minHeight: 96,
   },
   menuItemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  menuItemHeaderSpacer: {
+    flex: 1,
   },
   menuItemActionGroup: {
     flexDirection: 'row',
@@ -3913,8 +4157,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: '#4a3621',
-    flex: 1,
-    marginRight: 8,
+    lineHeight: 22,
+    marginBottom: 6,
+  },
+  menuItemLeftMeta: {
+    gap: 6,
+    alignItems: 'stretch',
+  },
+  menuItemMetricBadgeWrap: {
+    gap: 6,
+  },
+  menuItemMetricBadge: {
+    backgroundColor: 'rgba(74, 54, 33, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  menuItemMetricBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4a3621',
+  },
+  menuItemCostBadge: {
+    backgroundColor: 'rgba(45, 106, 79, 0.14)',
+  },
+  menuItemCostBadgeText: {
+    color: '#275743',
+  },
+  menuItemSizeBadge: {
+    backgroundColor: 'rgba(56, 96, 160, 0.12)',
+  },
+  menuItemSizeBadgeText: {
+    color: '#2f4e7a',
   },
   loadMoreWrap: {
     paddingHorizontal: 24,
@@ -4104,26 +4379,50 @@ const styles = StyleSheet.create({
   },
   menuItemPriceRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    marginTop: 'auto',
+    gap: 8,
   },
   menuItemPrice: {
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '700',
     color: '#4a3621',
+  },
+  menuItemFinanceRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  menuItemFinanceCell: {
+    flex: 1,
+  },
+  menuItemFinanceLabel: {
+    fontSize: 12,
+    color: '#847362',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  menuItemFinanceValue: {
+    fontSize: 15,
+    color: '#4a3621',
+    fontWeight: '700',
   },
   menuItemCostText: {
     fontSize: 12,
     fontWeight: '600',
     color: '#6b5a47',
-    marginBottom: 6,
+    flexShrink: 1,
   },
   categoryBadge: {
     backgroundColor: 'rgba(74, 54, 33, 0.1)',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
+  },
+  categoryBadgeLeft: {
+    alignSelf: 'stretch',
+    alignItems: 'center',
   },
   categoryBadgeText: {
     fontSize: 10,
@@ -4506,6 +4805,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#fdebea',
   },
   duplicateConfirmIconWrap: {
+    backgroundColor: '#fff2e6',
+  },
+  warningConfirmIconWrap: {
     backgroundColor: '#fff2e6',
   },
   confirmTitle: {

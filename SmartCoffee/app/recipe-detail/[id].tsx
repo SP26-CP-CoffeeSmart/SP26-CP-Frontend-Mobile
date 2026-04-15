@@ -112,9 +112,13 @@ export default function RecipeDetailScreen() {
         ingredients: ingredientsParam,
         beverageName: beverageNameParam,
         returnTo: returnToParam,
+        flow: flowParam,
     } = useLocalSearchParams();
     const router = useRouter();
     const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
+    const resolvedFlow = Array.isArray(flowParam) ? flowParam[0] : flowParam;
+    const isRecommendationMenuItem =
+        resolvedFlow === 'create-menu' || resolvedFlow === 'menu-recommendation';
     const [showChipsSelector, setShowChipsSelector] = useState(false);
     const [recipeData, setRecipeData] = useState<RecipeData | null>(null);
     const [recipes, setRecipes] = useState<RecipeData[]>([]);
@@ -127,6 +131,14 @@ export default function RecipeDetailScreen() {
     const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
 
     const handleOpenPublish = () => {
+        if (isRecommendationMenuItem) {
+            Toast.show({
+                type: 'info',
+                text1: 'Action not available',
+                text2: 'Menu items from recommendations cannot publish recipe.',
+            });
+            return;
+        }
         if (!recipeData) return;
         const resolvedRecipeId = Number(recipeData.shopRecipeId ?? recipeData.recipeId);
         router.push({
@@ -644,6 +656,14 @@ export default function RecipeDetailScreen() {
     };
 
     const handleUploadRecipeImage = async () => {
+        if (isRecommendationMenuItem) {
+            Toast.show({
+                type: 'info',
+                text1: 'Action not available',
+                text2: 'Menu items from recommendations cannot upload recipe image.',
+            });
+            return;
+        }
         if (!recipeData?.recipeId || uploadingRecipeImage) {
             return;
         }
@@ -838,15 +858,17 @@ export default function RecipeDetailScreen() {
                                 resizeMode="cover"
                             />
 
-                            <TouchableOpacity
-                                className="absolute top-3 right-3 bg-black/65 rounded-full px-4 py-2 flex-row items-center"
-                                onPress={handleOpenPublish}
-                                activeOpacity={0.85}
-                            >
-                                <Text className="text-white text-xs font-semibold">Publish Recipe</Text>
-                            </TouchableOpacity>
+                            {!isRecommendationMenuItem && (
+                                <TouchableOpacity
+                                    className="absolute top-3 right-3 bg-black/65 rounded-full px-4 py-2 flex-row items-center"
+                                    onPress={handleOpenPublish}
+                                    activeOpacity={0.85}
+                                >
+                                    <Text className="text-white text-xs font-semibold">Publish Recipe</Text>
+                                </TouchableOpacity>
+                            )}
 
-                            {!hasRealRecipeImage() && (
+                            {!isRecommendationMenuItem && !hasRealRecipeImage() && (
                                 <TouchableOpacity
                                     className="absolute right-3 bottom-3 bg-black/70 rounded-full px-4 py-2 flex-row items-center"
                                     onPress={handleUploadRecipeImage}
