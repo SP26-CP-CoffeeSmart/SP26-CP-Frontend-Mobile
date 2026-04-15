@@ -2584,6 +2584,8 @@ export default function MenuInsightsScreen() {
                     pathname: '/recipe-detail/[id]',
                     params: {
                       id: String(item.menuItemId || 0),
+                      menuItemId: String(item.menuItemId || 0),
+                      recipeId: String(item.shopRecipe?.recipeId || 0),
                       beverageName: item.shopBeverage?.name ?? '',
                       recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
                       recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
