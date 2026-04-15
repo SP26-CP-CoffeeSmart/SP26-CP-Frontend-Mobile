@@ -204,6 +204,11 @@ const getStatusStyle = (status?: string) => {
 const isImportedOrder = (order: OrderResponse) =>
   (order.notes ?? '').toLowerCase().includes('[imported]');
 
+const isCompletedOrDelivered = (status?: string) => {
+  const normalized = (status ?? '').trim().toLowerCase();
+  return normalized === 'completed' || normalized === 'delivered';
+};
+
 const resolveManualImportMeasurement = (ingredient: Ingredient) => {
   const normalizedCategory = (ingredient.category ?? '').trim().toLowerCase();
 
@@ -424,20 +429,47 @@ export default function ImportRequestScreen() {
     try {
       setOrderLoading(true);
       setOrderError(null);
-      const url = `${API_ENDPOINTS.order.byOwner(coffeeShopId)}?page=1&pageSize=20&orderStatus=Delivered`;
-      const response = await authorizedFetch(url, {
-        headers: {
-          Accept: '*/*',
-        },
-      });
+      const fetchOrdersByStatus = async (status: 'Completed' | 'Delivered') => {
+        const url = API_ENDPOINTS.order.byOwner(coffeeShopId, {
+          page: 1,
+          pageSize: 20,
+          orderStatus: status,
+        });
 
-      if (!response.ok) {
-        throw new Error(`Request failed: ${response.status}`);
+        const response = await authorizedFetch(url, {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
+        return Array.isArray(data) ? data : data.items ?? [];
+      };
+
+      const [completedResult, deliveredResult] = await Promise.allSettled([
+        fetchOrdersByStatus('Completed'),
+        fetchOrdersByStatus('Delivered'),
+      ]);
+
+      const completedOrders = completedResult.status === 'fulfilled' ? completedResult.value : [];
+      const deliveredOrders = deliveredResult.status === 'fulfilled' ? deliveredResult.value : [];
+
+      if (!completedOrders.length && !deliveredOrders.length) {
+        throw new Error('Unable to load completed or delivered orders.');
       }
 
-      const data = (await response.json()) as OrderResponse[] | PagedOrderResponse;
-      const list = Array.isArray(data) ? data : data.items ?? [];
-      const filtered = list.filter((order) => !isImportedOrder(order));
+      const mergedOrders = [...completedOrders, ...deliveredOrders];
+      const uniqueOrders = Array.from(
+        new Map(mergedOrders.map((order) => [order.orderId ?? 0, order])).values()
+      );
+
+      const filtered = uniqueOrders.filter(
+        (order) => !isImportedOrder(order) && isCompletedOrDelivered(order.status)
+      );
       const mapped = filtered.map(mapOrderToSummary);
       console.log('Fetched orders:', mapped);
       setOrders(mapped);
@@ -492,6 +524,11 @@ export default function ImportRequestScreen() {
     }
     if (!details.length) {
       Alert.alert('Missing items', 'Please add at least one ingredient.');
+      return;
+    }
+
+    if (activeTab === 'manual' && !details.some((detail) => detail.importQuantity > 0)) {
+      Alert.alert('Invalid quantity', 'Please set at least one import quantity greater than 0.');
       return;
     }
 
@@ -592,7 +629,6 @@ export default function ImportRequestScreen() {
 
     if (activeTab === 'manual') {
       try {
-        setIsSubmitting(true);
         const items = details
           .filter((detail) => detail.importQuantity > 0)
           .map((detail) => ({
@@ -601,6 +637,13 @@ export default function ImportRequestScreen() {
             measurement: resolveManualImportMeasurement(detail.ingredient),
             note: null,
           }));
+
+        if (!items.length) {
+          Alert.alert('Invalid quantity', 'Please set at least one import quantity greater than 0.');
+          return;
+        }
+
+        setIsSubmitting(true);
 
         const response = await authorizedFetch(API_ENDPOINTS.shopInventory.manualImport(), {
           method: 'POST',
@@ -697,7 +740,7 @@ export default function ImportRequestScreen() {
 
         {activeTab === 'order' ? (
           <View style={styles.card}>
-            <Text style={styles.sectionLabel}>Delivered orders</Text>
+            <Text style={styles.sectionLabel}>Completed or delivered orders</Text>
             <View style={styles.searchRow}>
               <Ionicons name="search" size={18} color={COLORS.muted} />
               <TextInput
