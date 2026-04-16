@@ -219,21 +219,6 @@ export default function AIRecommendationsScreen() {
         </View>
       </ImageBackground>
 
-      <View style={styles.filtersWrapper}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtersContainer}
-        >
-          <Pressable style={[styles.filterChip, styles.filterChipActive]}>
-            <Text style={[styles.filterText, styles.filterTextActive]}>All</Text>
-          </Pressable>
-          <Pressable style={styles.filterChip}>
-            <Text style={styles.filterText}>AI Generated</Text>
-          </Pressable>
-        </ScrollView>
-      </View>
-
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -327,7 +312,7 @@ export default function AIRecommendationsScreen() {
           <TouchableOpacity style={styles.addButton} onPress={() => router.replace('/(tabs)/menu')}>
             <Text style={styles.addButtonText}>Go back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.purchaseButton} onPress={() => router.push('/ai-create')}>
+          <TouchableOpacity style={styles.purchaseButton} onPress={() => router.push('/create-recipe')}>
             <Text style={styles.purchaseButtonText}>Create Manually</Text>
           </TouchableOpacity>
         </View>
@@ -374,38 +359,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     flex: 1,
   },
-  filtersWrapper: {
-    backgroundColor: '#F6F2EE',
-    paddingVertical: 12,
-  },
-  filtersContainer: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  filterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#EEE6DC',
-  },
-  filterChipActive: {
-    backgroundColor: '#2C1B13',
-    borderColor: '#2C1B13',
-  },
-  filterText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#3E2A22',
-  },
-  filterTextActive: {
-    color: '#FFF',
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
+    paddingTop: 12,
     paddingHorizontal: 16,
     paddingBottom: 28,
     gap: 14,

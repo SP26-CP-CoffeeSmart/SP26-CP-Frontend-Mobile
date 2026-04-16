@@ -8,6 +8,8 @@ import {
     ActivityIndicator,
     RefreshControl,
     BackHandler,
+    Alert,
+    Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -757,6 +759,36 @@ export default function RecipeDetailScreen() {
         return { fileName, mimeType };
     };
 
+    const ensureMediaLibraryPermission = useCallback(async () => {
+        const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (current.granted) {
+            return true;
+        }
+
+        const requested = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (requested.granted) {
+            return true;
+        }
+
+        if (requested.canAskAgain === false) {
+            Alert.alert(
+                'Permission required',
+                'Please allow photo library access in Settings to upload recipe image.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Open Settings',
+                        onPress: () => {
+                            Linking.openSettings();
+                        },
+                    },
+                ]
+            );
+        }
+
+        return false;
+    }, []);
+
     const handleUploadRecipeImage = async () => {
         if (isRecommendationMenuItem) {
             Toast.show({
@@ -773,8 +805,8 @@ export default function RecipeDetailScreen() {
         try {
             setUploadingRecipeImage(true);
 
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permission.granted) {
+            const granted = await ensureMediaLibraryPermission();
+            if (!granted) {
                 Toast.show({
                     type: 'info',
                     text1: 'Permission required',

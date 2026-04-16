@@ -13,8 +13,11 @@ export function AiSavedRecipeProvider({ children }: { children: React.ReactNode 
   const [savedRecipeIds, setSavedRecipeIds] = useState<number[]>([]);
   const [savedRecipeTokens, setSavedRecipeTokens] = useState<string[]>([]);
 
+  const isValidRecipeId = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0;
+
   const markRecipeSaved = useCallback((recipeId?: number | null, recipeToken?: string | null) => {
-    if (typeof recipeId === 'number' && Number.isFinite(recipeId)) {
+    if (isValidRecipeId(recipeId)) {
       setSavedRecipeIds((prev) => (prev.includes(recipeId) ? prev : [...prev, recipeId]));
     }
 
@@ -28,8 +31,7 @@ export function AiSavedRecipeProvider({ children }: { children: React.ReactNode 
 
   const isRecipeSaved = useCallback(
     (recipeId?: number | null, recipeToken?: string | null) => {
-      const matchedById =
-        typeof recipeId === 'number' && Number.isFinite(recipeId) && savedRecipeIds.includes(recipeId);
+      const matchedById = isValidRecipeId(recipeId) && savedRecipeIds.includes(recipeId);
       const normalizedToken = typeof recipeToken === 'string' ? recipeToken.trim() : '';
       const matchedByToken = normalizedToken ? savedRecipeTokens.includes(normalizedToken) : false;
       return matchedById || matchedByToken;

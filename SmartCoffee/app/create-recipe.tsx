@@ -9,6 +9,8 @@ import {
   Switch,
   ActivityIndicator,
   Image,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
@@ -419,9 +421,39 @@ export default function CreateRecipeScreen() {
     run();
   }, [ingredientSearchDebounced, loadInitialIngredients, loadingInit]);
 
+  const ensureMediaLibraryPermission = useCallback(async () => {
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (current.granted) {
+      return true;
+    }
+
+    const requested = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (requested.granted) {
+      return true;
+    }
+
+    if (requested.canAskAgain === false) {
+      Alert.alert(
+        'Permission required',
+        'Please allow photo library access in Settings to set recipe image.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              Linking.openSettings();
+            },
+          },
+        ]
+      );
+    }
+
+    return false;
+  }, []);
+
   const handlePickCoverImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
+    const granted = await ensureMediaLibraryPermission();
+    if (!granted) {
       Toast.show({ type: 'info', text1: 'Permission required', text2: 'Please allow photo access.' });
       return;
     }

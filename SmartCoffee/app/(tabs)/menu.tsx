@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   StyleSheet,
   View,
   Text,
@@ -15,6 +16,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -88,16 +90,39 @@ const SUBSCRIPTION_BG_IMAGE = require('../../assets/background.png');
 
 type SubscriptionPackage = {
   subscriptionPackageId?: number;
+  packageId?: number;
   id?: number;
   name?: string;
   tier?: string;
   price?: number | string;
+  amount?: number | string;
+  cost?: number | string;
+  monthlyPrice?: number | string;
+  annualPrice?: number | string;
+  pricePerMonth?: number | string;
   duration?: number | string;
+  durationMonths?: number | string;
+  durationDays?: number | string;
+  billingCycle?: string;
+  cycle?: string;
   description?: string;
+  summary?: string;
+  subtitle?: string;
+  detail?: string;
+  features?: string[] | string;
+  featureList?: string[] | string;
+  benefits?: string[] | string;
+  details?: string[] | string;
+  staffQuantity?: number;
+  menuSuggestLimit?: number;
+  recipeRecommendLimit?: number;
+  productRecommendLimit?: number;
+  menuAnalyzeFeedbackLimit?: number;
+  inventoryForecastLimit?: number;
 };
 
 const getSubscriptionPackageId = (item: SubscriptionPackage) =>
-  item.subscriptionPackageId ?? item.id ?? (item as any).packageId ?? null;
+  item.subscriptionPackageId ?? item.packageId ?? item.id ?? null;
 
 const formatSubscriptionPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
@@ -112,6 +137,77 @@ const getNumericPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getSubscriptionPackagePrice = (item: SubscriptionPackage) => {
+  const raw =
+    item?.price ??
+    item?.amount ??
+    item?.cost ??
+    item?.monthlyPrice ??
+    item?.annualPrice ??
+    item?.pricePerMonth;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') {
+    const parsed = Number(raw.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getSubscriptionDuration = (item: SubscriptionPackage) => {
+  const duration =
+    item?.duration ??
+    item?.durationMonths ??
+    item?.durationDays ??
+    item?.billingCycle ??
+    item?.cycle;
+  if (!duration) return '';
+  if (typeof duration === 'number') {
+    return duration > 1 ? `${duration} months` : `${duration} month`;
+  }
+  return String(duration);
+};
+
+const getSubscriptionDescription = (item: SubscriptionPackage) => {
+  const description = item?.description ?? item?.summary ?? item?.subtitle ?? item?.detail;
+  return description ? String(description) : '';
+};
+
+const getSubscriptionFeatures = (item: SubscriptionPackage) => {
+  const defaultFeatures: string[] = [];
+
+  if (item.staffQuantity !== undefined) {
+    defaultFeatures.push(`Staff Accounts: ${item.staffQuantity}`);
+  }
+  if (item.menuSuggestLimit !== undefined) {
+    defaultFeatures.push(`Menu Suggestions Limit: ${item.menuSuggestLimit}`);
+  }
+  if (item.recipeRecommendLimit !== undefined) {
+    defaultFeatures.push(`Recipe Recommendations Limit: ${item.recipeRecommendLimit}`);
+  }
+  if (item.productRecommendLimit !== undefined) {
+    defaultFeatures.push(`Product Recommendations Limit: ${item.productRecommendLimit}`);
+  }
+  if (item.menuAnalyzeFeedbackLimit !== undefined) {
+    defaultFeatures.push(`Menu Feedback Analysis Limit: ${item.menuAnalyzeFeedbackLimit}`);
+  }
+  if (item.inventoryForecastLimit !== undefined) {
+    defaultFeatures.push(`Inventory Forecasts Limit: ${item.inventoryForecastLimit}`);
+  }
+
+  const raw = item?.features ?? item?.featureList ?? item?.benefits ?? item?.details;
+  if (Array.isArray(raw)) {
+    return [...defaultFeatures, ...raw.map((value) => String(value)).filter(Boolean)];
+  }
+  if (typeof raw === 'string') {
+    const parsed = raw
+      .split(/\n|;|\r|\r\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    return [...defaultFeatures, ...parsed];
+  }
+  return defaultFeatures;
 };
 
 const getSubscriptionPackageIdFromSubscription = (value: any) => {
@@ -186,6 +282,7 @@ export default function MenuScreen() {
   const [uploadingBeverageId, setUploadingBeverageId] = useState<string | null>(null);
   const [subscriptionGateVisible, setSubscriptionGateVisible] = useState(false);
   const [subscriptionGateShown, setSubscriptionGateShown] = useState(false);
+  const [subscriptionGateReady, setSubscriptionGateReady] = useState(false);
   const [subscriptionPackages, setSubscriptionPackages] = useState<SubscriptionPackage[]>([]);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -195,7 +292,7 @@ export default function MenuScreen() {
   const [subscribeSubmitting, setSubscribeSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
-  const [checkingRecipeGate, setCheckingRecipeGate] = useState(false);
+  const [checkingRecipeGate, setCheckingRecipeGate] = useState<'/ai-create' | '/create-recipe' | null>(null);
   const [checkingMenuGate, setCheckingMenuGate] = useState(false);
   const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
   const subscriptionSuccessRef = useRef(false);
@@ -219,7 +316,15 @@ export default function MenuScreen() {
       const payload = await response.json();
       const items: SubscriptionPackage[] = Array.isArray(payload)
         ? payload
-        : payload?.items ?? payload?.data ?? [];
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.data?.items)
+              ? payload.data.items
+              : Array.isArray(payload?.result)
+                ? payload.result
+                : [];
       const sorted = [...items].sort(
         (a, b) => Number(isTrialSubscription(b)) - Number(isTrialSubscription(a))
       );
@@ -427,19 +532,23 @@ export default function MenuScreen() {
       try {
         const onboardingDone = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
         if (onboardingDone !== 'true') {
+          setSubscriptionGateReady(true);
           return;
         }
 
         const skipOnce = await AsyncStorage.getItem(SUBSCRIPTION_SKIP_ONCE_KEY);
         if (skipOnce === 'true') {
           await AsyncStorage.removeItem(SUBSCRIPTION_SKIP_ONCE_KEY);
+          setSubscriptionGateReady(true);
           return;
         }
 
         setSubscriptionGateVisible(true);
         setSubscriptionGateShown(true);
+        setSubscriptionGateReady(true);
       } catch {
         // Ignore storage errors.
+        setSubscriptionGateReady(true);
       }
     };
 
@@ -447,16 +556,26 @@ export default function MenuScreen() {
   }, [authLoading, subscriptionGateShown]);
 
   useEffect(() => {
-    if (subscriptionGateVisible && subscriptionPackages.length === 0 && !subscriptionLoading) {
-      loadSubscriptionPackages();
+    if (authLoading) {
+      return;
     }
-  }, [loadSubscriptionPackages, subscriptionGateVisible, subscriptionLoading, subscriptionPackages.length]);
+
+    if (subscriptionGateShown) {
+      setSubscriptionGateReady(true);
+    }
+  }, [authLoading, subscriptionGateShown]);
 
   useEffect(() => {
-    if (subscriptionGateVisible && !subscriptionInfoLoading) {
+    if (subscriptionGateVisible) {
+      loadSubscriptionPackages();
+    }
+  }, [loadSubscriptionPackages, subscriptionGateVisible]);
+
+  useEffect(() => {
+    if (subscriptionGateVisible) {
       loadCurrentSubscription();
     }
-  }, [loadCurrentSubscription, subscriptionGateVisible, subscriptionInfoLoading]);
+  }, [loadCurrentSubscription, subscriptionGateVisible]);
 
   const fetchMenus = useCallback(async () => {
     if (authLoading) {
@@ -661,7 +780,7 @@ export default function MenuScreen() {
     }
 
     try {
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/count`, {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/count?coffeeShopId=${coffeeShopId}`, {
         headers: {
           Accept: '*/*',
         },
@@ -678,9 +797,10 @@ export default function MenuScreen() {
           : result?.totalBeverages ?? result?.count ?? result?.total ?? result?.data ?? 0
       );
 
-      setTotalBeverages(Number.isFinite(countValue) ? countValue : 0);
+      // Temporarily disabled storing global count to avoid bypassing `totalBeverages === 0` check
+      // setTotalBeverages(Number.isFinite(countValue) ? countValue : 0);
     } catch (error) {
-      setTotalBeverages(0);
+      // do nothing
     }
   }, [authLoading, coffeeShopId]);
 
@@ -712,7 +832,9 @@ export default function MenuScreen() {
         : Array.isArray(result?.items)
           ? result.items
           : [];
-    const totalCount = Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? 0);
+    const totalCount = Array.isArray(result) 
+      ? result.length 
+      : Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? rawList.length);
     return { rawList, totalCount };
   };
 
@@ -745,6 +867,10 @@ export default function MenuScreen() {
       }
       const result = await response.json();
       const { rawList, totalCount } = parseBeverageResponse(result);
+
+      if (!searchQuery) {
+        setTotalBeverages(totalCount);
+      }
 
       const mapped = mapBeverageItems(rawList);
 
@@ -959,7 +1085,7 @@ export default function MenuScreen() {
 
   const handleCreateRecipeEntry = useCallback(
     async (target: '/ai-create' | '/create-recipe') => {
-      if (checkingRecipeGate) {
+      if (checkingRecipeGate !== null) {
         return;
       }
 
@@ -968,8 +1094,17 @@ export default function MenuScreen() {
         return;
       }
 
+      if (totalBeverages === 0) {
+        Toast.show({
+          type: 'error',
+          text1: 'Cannot create recipe',
+          text2: 'Shop must have at least 1 beverage. Please add a beverage first.',
+        });
+        return;
+      }
+
       try {
-        setCheckingRecipeGate(true);
+        setCheckingRecipeGate(target);
         const sizes = await beverageSizeService.getByShop(coffeeShopId);
         const hasActiveSize = sizes.some(isBeverageSizeActive);
 
@@ -986,10 +1121,10 @@ export default function MenuScreen() {
           text2: 'Please try again in a moment.',
         });
       } finally {
-        setCheckingRecipeGate(false);
+        setCheckingRecipeGate(null);
       }
     },
-    [checkingRecipeGate, coffeeShopId, router]
+    [checkingRecipeGate, coffeeShopId, totalBeverages, router]
   );
 
   const handleSelectCategory = (category: BeverageCategory) => {
@@ -1022,6 +1157,36 @@ export default function MenuScreen() {
     return { fileName, mimeType };
   };
 
+  const ensureMediaLibraryPermission = useCallback(async () => {
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (current.granted) {
+      return true;
+    }
+
+    const requested = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (requested.granted) {
+      return true;
+    }
+
+    if (requested.canAskAgain === false) {
+      Alert.alert(
+        'Permission required',
+        'Please allow photo library access in Settings to upload images.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              Linking.openSettings();
+            },
+          },
+        ]
+      );
+    }
+
+    return false;
+  }, []);
+
   const handlePickAndUploadImage = async () => {
     if (createImageUploading) {
       return;
@@ -1031,8 +1196,8 @@ export default function MenuScreen() {
       setCreateImageUploading(true);
       setCreateError(null);
 
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
+      const granted = await ensureMediaLibraryPermission();
+      if (!granted) {
         setCreateError('Please allow photo access to upload an image.');
         return;
       }
@@ -1074,8 +1239,8 @@ export default function MenuScreen() {
 
     try {
       setUploadingBeverageId(String(beverageId));
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
+      const granted = await ensureMediaLibraryPermission();
+      if (!granted) {
         Toast.show({
           type: 'info',
           text1: 'Permission required',
@@ -1275,6 +1440,16 @@ export default function MenuScreen() {
     }
   };
 
+  if (!subscriptionGateReady) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.subscriptionGateBooting}>
+          <ActivityIndicator size="large" color={stylesVars.espresso} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Modal
@@ -1318,9 +1493,16 @@ export default function MenuScreen() {
                 showsVerticalScrollIndicator={false}
               >
                 {subscriptionPackages.map((item) => {
-                  const price = formatSubscriptionPrice(item.price);
+                  const price = formatSubscriptionPrice(getSubscriptionPackagePrice(item) ?? item.price);
                   const isTrial = isTrialSubscription(item);
-                  const targetPrice = getNumericPrice(item.price) ?? 0;
+                  const targetPrice = getNumericPrice(getSubscriptionPackagePrice(item) ?? item.price) ?? 0;
+                  const description = getSubscriptionDescription(item);
+                  const descriptionLines = description
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean);
+                  const features = getSubscriptionFeatures(item);
+                  const durationText = getSubscriptionDuration(item);
                   const resolvedCurrentPackageId =
                     currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
                   const currentPrice = resolvedCurrentPackageId
@@ -1368,20 +1550,49 @@ export default function MenuScreen() {
                       {price ? (
                         <Text style={styles.subscriptionPackagePrice}>{price}</Text>
                       ) : null}
-                      {item.description ? (
-                        <Text style={styles.subscriptionPackageDesc}>{item.description}</Text>
+                      {descriptionLines.length > 0 ? (
+                        <View style={styles.subscriptionPackageDescList}>
+                          {descriptionLines.map((line, index) => (
+                            <Text
+                              key={`${getSubscriptionPackageId(item) ?? item.name}-desc-${index}`}
+                              style={styles.subscriptionPackageDesc}
+                            >
+                              - {line}
+                            </Text>
+                          ))}
+                        </View>
                       ) : null}
-                      {item.duration ? (
-                        <Text style={styles.subscriptionPackageMeta}>
-                          Duration: {item.duration}
-                        </Text>
+                      {features.length > 0 ? (
+                        <View style={styles.subscriptionFeatureList}>
+                          {features.map((feature, index) => (
+                            <Text
+                              key={`${getSubscriptionPackageId(item) ?? item.name}-feature-${index}`}
+                              style={styles.subscriptionFeatureText}
+                            >
+                              • {feature}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                      {durationText ? (
+                        <View style={styles.subscriptionMetaBadge}>
+                          <Text style={styles.subscriptionPackageMeta}>Duration: {durationText}</Text>
+                        </View>
                       ) : null}
                       <TouchableOpacity
-                        style={styles.subscriptionPackageAction}
+                        style={[
+                          styles.subscriptionPackageAction,
+                          disableSubscribe && styles.subscriptionPackageActionDisabled,
+                        ]}
                         onPress={() => handleSubscribePackage(item)}
                         disabled={subscribeSubmitting || disableSubscribe}
                       >
-                        <Text style={styles.subscriptionPackageActionText}>
+                        <Text
+                          style={[
+                            styles.subscriptionPackageActionText,
+                            disableSubscribe && styles.subscriptionPackageActionTextDisabled,
+                          ]}
+                        >
                           {subscribeSubmitting
                             ? 'Processing...'
                             : isCurrent
@@ -1733,24 +1944,24 @@ export default function MenuScreen() {
               </View>
               <View style={styles.suggestionButtons}>
                 <TouchableOpacity
-                  style={[styles.aiButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  style={[styles.aiButton, checkingRecipeGate !== null && styles.suggestionActionDisabled]}
                   onPress={() => handleCreateRecipeEntry('/ai-create')}
-                  disabled={checkingRecipeGate}
+                  disabled={checkingRecipeGate !== null}
                 >
                   <Text style={styles.aiButtonText}>AI Suggestions</Text>
-                  {checkingRecipeGate ? (
+                  {checkingRecipeGate === '/ai-create' ? (
                     <ActivityIndicator size="small" color={stylesVars.espresso} />
                   ) : (
                     <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.manualButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  style={[styles.manualButton, checkingRecipeGate !== null && styles.suggestionActionDisabled]}
                   onPress={() => handleCreateRecipeEntry('/create-recipe')}
-                  disabled={checkingRecipeGate}
+                  disabled={checkingRecipeGate !== null}
                 >
                   <Text style={styles.manualButtonText}>Manually</Text>
-                  {checkingRecipeGate ? (
+                  {checkingRecipeGate === '/create-recipe' ? (
                     <ActivityIndicator size="small" color={stylesVars.espresso} />
                   ) : (
                     <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
@@ -2996,14 +3207,15 @@ const styles = StyleSheet.create({
   },
   subscriptionCard: {
     backgroundColor: 'rgba(255,255,255,0.95)',
-    borderRadius: 26,
-    padding: 20,
+    borderRadius: 28,
+    padding: 22,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 6,
-    minHeight: 520,
+    minHeight: 620,
+    maxHeight: '86%',
   },
   subscriptionLogo: {
     width: 90,
@@ -3014,7 +3226,7 @@ const styles = StyleSheet.create({
   subscriptionHeader: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
     position: 'relative',
   },
   subscriptionHeaderText: {
@@ -3034,25 +3246,25 @@ const styles = StyleSheet.create({
   },
   subscriptionClose: {
     position: 'absolute',
-    top: -100,
-    right: -6,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    top: -4,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#F1E7D8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   subscriptionList: {
-    maxHeight: 260,
+    flex: 1,
   },
   subscriptionListContent: {
     gap: 12,
-    paddingBottom: 8,
+    paddingBottom: 14,
   },
   subscriptionPackageCard: {
-    padding: 14,
-    borderRadius: 18,
+    padding: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(62,39,35,0.15)',
     backgroundColor: '#FFF',
@@ -3071,7 +3283,7 @@ const styles = StyleSheet.create({
     color: stylesVars.espresso,
   },
   subscriptionPackageName: {
-    fontSize: 14,
+    fontSize: 20,
     fontWeight: '700',
     color: stylesVars.espresso,
   },
@@ -3081,37 +3293,69 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   subscriptionPackagePrice: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: stylesVars.primary,
     marginTop: 6,
   },
+  subscriptionPackageDescList: {
+    marginTop: 8,
+    gap: 2,
+  },
   subscriptionPackageDesc: {
-    fontSize: 12,
+    fontSize: 15,
     color: stylesVars.espresso,
-    marginTop: 6,
+    lineHeight: 24,
+  },
+  subscriptionFeatureList: {
+    marginTop: 8,
+    gap: 2,
+  },
+  subscriptionFeatureText: {
+    fontSize: 13,
+    color: '#6B5E52',
+    lineHeight: 20,
+  },
+  subscriptionMetaBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#F5EBDD',
   },
   subscriptionPackageMeta: {
-    fontSize: 11,
-    color: stylesVars.muted,
-    marginTop: 6,
+    fontSize: 12,
+    color: '#6B5E52',
   },
   subscriptionPackageAction: {
-    marginTop: 10,
+    marginTop: 12,
     backgroundColor: stylesVars.espresso,
     borderRadius: 18,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
   },
+  subscriptionPackageActionDisabled: {
+    backgroundColor: '#EDE4D8',
+  },
   subscriptionPackageActionText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#FFF',
+  },
+  subscriptionPackageActionTextDisabled: {
+    color: '#6B5E52',
   },
   subscriptionError: {
     fontSize: 12,
     color: '#B22222',
     textAlign: 'center',
+  },
+  subscriptionGateBooting: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: stylesVars.background,
   },
   payosContainer: {
     flex: 1,

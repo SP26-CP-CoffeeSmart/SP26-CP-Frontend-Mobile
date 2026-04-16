@@ -91,6 +91,11 @@ export default function AiResultScreen() {
 
   const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
 
+  const resolveValidRecipeId = (value: unknown): number | null => {
+    const id = Number(value);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  };
+
   const buildRecipeSaveToken = (targetRecipe: Recipe | null): string | null => {
     if (!targetRecipe) return null;
 
@@ -284,8 +289,8 @@ export default function AiResultScreen() {
   const recipeSaveToken = useMemo(() => buildRecipeSaveToken(recipe), [recipe]);
 
   useEffect(() => {
-    const recipeId = Number(recipe?.recipeId);
-    setIsSaved(isRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken));
+    const recipeId = resolveValidRecipeId(recipe?.recipeId);
+    setIsSaved(isRecipeSaved(recipeId, recipeSaveToken));
   }, [isRecipeSaved, recipe?.recipeId, recipeSaveToken]);
 
   useEffect(() => {
@@ -487,8 +492,8 @@ export default function AiResultScreen() {
       const result = JSON.parse(responseText);
       console.log('Recipe saved successfully:', result);
 
-      const recipeId = Number(recipe?.recipeId);
-      markRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken);
+      const recipeId = resolveValidRecipeId(recipe?.recipeId);
+      markRecipeSaved(recipeId, recipeSaveToken);
 
       setIsSaved(true);
       showToast('Recipe saved successfully!');
