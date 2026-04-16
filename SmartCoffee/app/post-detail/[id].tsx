@@ -217,6 +217,7 @@ export default function PostDetailScreen() {
   const [loadingComments, setLoadingComments] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [commentDraft, setCommentDraft] = useState('');
+  const [replyDraft, setReplyDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState<PostCommentItem | null>(null);
   const [sendingComment, setSendingComment] = useState(false);
   const [commentAuthorMap, setCommentAuthorMap] = useState<Record<number, string>>({});
@@ -505,18 +506,13 @@ export default function PostDetailScreen() {
 
     try {
       setSendingComment(true);
-      const payload: { content: string; parentId?: number } = { content };
-      if (replyTarget?.commentId) {
-        payload.parentId = replyTarget.commentId;
-      }
-
       const response = await authorizedFetch(API_ENDPOINTS.postComment.create(post.postId), {
         method: 'POST',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ content }),
       });
 
       if (!response.ok) {
@@ -524,6 +520,46 @@ export default function PostDetailScreen() {
       }
 
       setCommentDraft('');
+
+      const refreshedPost = await loadPost({ showLoader: false, syncEditor: false });
+      const nextCommentIds = refreshedPost?.postCommentIds ?? post?.postCommentIds ?? [];
+      await loadComments(nextCommentIds);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Comment posted',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to submit comment.';
+      Toast.show({ type: 'error', text1: 'Comment failed', text2: message });
+    } finally {
+      setSendingComment(false);
+    }
+  }, [commentDraft, loadComments, loadPost, post?.postCommentIds, post?.postId]);
+  const handleSubmitReply = useCallback(async () => {
+    if (!post?.postId || !replyTarget?.commentId) return;
+    const content = replyDraft.trim();
+    if (!content) {
+      Toast.show({ type: 'error', text1: 'Missing reply', text2: 'Please type your reply.' });
+      return;
+    }
+
+    try {
+      setSendingComment(true);
+      const response = await authorizedFetch(API_ENDPOINTS.postComment.create(post.postId), {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content, parentId: replyTarget.commentId }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+
+      setReplyDraft('');
       setReplyTarget(null);
 
       const refreshedPost = await loadPost({ showLoader: false, syncEditor: false });
@@ -532,15 +568,15 @@ export default function PostDetailScreen() {
 
       Toast.show({
         type: 'success',
-        text1: replyTarget?.commentId ? 'Reply posted' : 'Comment posted',
+        text1: 'Reply posted',
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to submit comment.';
-      Toast.show({ type: 'error', text1: 'Comment failed', text2: message });
+      const message = err instanceof Error ? err.message : 'Unable to submit reply.';
+      Toast.show({ type: 'error', text1: 'Reply failed', text2: message });
     } finally {
       setSendingComment(false);
     }
-  }, [commentDraft, loadComments, loadPost, post?.postCommentIds, post?.postId, replyTarget]);
+  }, [loadComments, loadPost, post?.postCommentIds, post?.postId, replyDraft, replyTarget]);
 
   const handleSave = useCallback(async () => {
     if (!post) return;
@@ -749,6 +785,17 @@ export default function PostDetailScreen() {
   const handleLoadMoreComments = useCallback(() => {
     setVisibleCommentLimit((prev) => Math.min(prev + COMMENT_PAGE_SIZE, comments.length));
   }, [comments.length]);
+  const handleStartReply = useCallback(
+    (comment: PostCommentItem) => {
+      setReplyTarget(comment);
+      setReplyDraft('');
+    },
+    [setReplyTarget, setReplyDraft]
+  );
+  const handleCancelReply = useCallback(() => {
+    setReplyTarget(null);
+    setReplyDraft('');
+  }, [setReplyTarget, setReplyDraft]);
 
   if (loading) {
     return (
@@ -1095,9 +1142,7 @@ export default function PostDetailScreen() {
               onPress={handleSubmitComment}
               disabled={sendingComment}
             >
-              <Text style={styles.commentSubmitText}>
-                {sendingComment ? 'Sending...' : replyTarget ? 'Post reply' : 'Post comment'}
-              </Text>
+              <Text style={styles.commentSubmitText}>{sendingComment ? 'Sending...' : 'Post comment'}</Text>
             </TouchableOpacity>
           </View>
 
@@ -1128,7 +1173,7 @@ export default function PostDetailScreen() {
                   <Text style={styles.commentContent}>{comment.content || ''}</Text>
                   <TouchableOpacity
                     style={styles.commentReplyButton}
-                    onPress={() => setReplyTarget(comment)}
+                    onPress={() => handleStartReply(comment)}
                     disabled={sendingComment}
                   >
                     <Ionicons name="return-down-forward-outline" size={14} color={COLORS.accent} />
@@ -1156,21 +1201,21 @@ export default function PostDetailScreen() {
                     <View style={styles.inlineReplyComposer}>
                       <View style={styles.replyHintRow}>
                         <Text style={styles.replyHintText}>Replying to comment #{comment.commentId}</Text>
-                        <TouchableOpacity onPress={() => setReplyTarget(null)} disabled={sendingComment}>
+                        <TouchableOpacity onPress={handleCancelReply} disabled={sendingComment}>
                           <Text style={styles.replyHintAction}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
                       <TextInput
                         style={[styles.input, styles.commentInput]}
-                        value={commentDraft}
-                        onChangeText={setCommentDraft}
+                        value={replyDraft}
+                        onChangeText={setReplyDraft}
                         placeholder={`Write a reply to #${comment.commentId}...`}
                         placeholderTextColor={COLORS.muted}
                         multiline
                       />
                       <TouchableOpacity
                         style={[styles.commentSubmitButton, sendingComment && styles.commentSubmitButtonDisabled]}
-                        onPress={handleSubmitComment}
+                        onPress={handleSubmitReply}
                         disabled={sendingComment}
                       >
                         <Text style={styles.commentSubmitText}>
