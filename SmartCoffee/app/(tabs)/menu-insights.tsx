@@ -139,6 +139,7 @@ interface RecipeOption {
   recipeName: string;
   image?: string | null;
   proposedSellingPrice?: number | null;
+  totalCost?: number | null;
   beverageId?: number | null;
   beverageName?: string | null;
   beverageCategoryId?: number | null;
@@ -177,6 +178,7 @@ const fallbackMenuImage =
 const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const MAX_S_SIZE_PRICE = 120000;
 
 const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
   if (!Array.isArray(drafts) || drafts.length === 0) return null;
@@ -434,6 +436,14 @@ export default function MenuInsightsScreen() {
     if (!normalized) return fallback;
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const parsePriceInputValue = (value: string): number | null => {
+    const normalized = value.replace(/[^0-9.]/g, '');
+    if (!normalized) return null;
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return parsed;
   };
 
   const normalizeDescriptionInput = (value: string) => {
@@ -699,19 +709,63 @@ export default function MenuInsightsScreen() {
 
   const updateSizePriceDraft = (itemSizeId: number, value: string) => {
     setEditSizePrices((prev) => {
-      const nextDrafts = prev.map((draft) =>
+      let nextDrafts = prev.map((draft) =>
         draft.itemSizeId === itemSizeId ? { ...draft, sellingPrice: value } : draft
       );
       const anchorSizeId = getAnchorSizeDraftId(nextDrafts);
       if (anchorSizeId != null && anchorSizeId === itemSizeId) {
         setEditSellingPrice(value);
+
+        const anchorDraft = nextDrafts.find((draft) => draft.itemSizeId === anchorSizeId);
+        const anchorPrice = parsePriceInputValue(value);
+        const anchorVolume = Number(anchorDraft?.volume ?? 0);
+        const hasAnchorVolume = Number.isFinite(anchorVolume) && anchorVolume > 0;
+
+        if (anchorPrice != null) {
+          nextDrafts = nextDrafts.map((draft) => {
+            if (draft.itemSizeId === anchorSizeId) {
+              return { ...draft, sellingPrice: value };
+            }
+
+            const draftVolume = Number(draft.volume ?? 0);
+            const hasDraftVolume = Number.isFinite(draftVolume) && draftVolume > 0;
+            const ratio = hasAnchorVolume && hasDraftVolume ? draftVolume / anchorVolume : 1;
+            const autoPrice = Math.max(anchorPrice, Math.round(anchorPrice * ratio));
+
+            return {
+              ...draft,
+              sellingPrice: String(autoPrice),
+            };
+          });
+        }
       }
       return nextDrafts;
     });
   };
 
+  const getMenuItemCostFloor = (item?: MenuItem | null) => {
+    if (!item) return 0;
+
+    const itemLevelCost = Number((item as any)?.totalCost ?? 0);
+    const recipeLevelCost = Number(item?.shopRecipe?.totalCost ?? 0);
+    const mappedUnitCost = Number(itemUnitCostMap.get(item.menuItemId) ?? 0);
+
+    const sizeSorted = [...(item.itemSizeViewModels ?? [])].sort(
+      (left, right) => Number(left?.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER) - Number(right?.beverageSize?.volume ?? Number.MAX_SAFE_INTEGER)
+    );
+    const sSizeCost = Number(sizeSorted[0]?.scaledTotalCost ?? 0);
+
+    const resolvedCost =
+      [sSizeCost, recipeLevelCost, mappedUnitCost, itemLevelCost].find(
+        (value) => Number.isFinite(value) && value > 0
+      ) ?? 0;
+
+    return Math.ceil(resolvedCost);
+  };
+
   const validateEditForm = () => {
     const errors: EditErrors = {};
+    const costFloor = getMenuItemCostFloor(editingItem);
     const trimmedDescription = normalizeDescriptionInput(editDescription);
     if (!trimmedDescription) {
       errors.description = 'Description is required.';
@@ -726,6 +780,8 @@ export default function MenuInsightsScreen() {
         errors.sellingPrice = 'Enter a valid price.';
       } else if (parsedPrice <= 0) {
         errors.sellingPrice = 'Price must be greater than 0.';
+      } else if (Number.isFinite(costFloor) && costFloor > 0 && parsedPrice < costFloor) {
+        errors.sellingPrice = `Price must be at least cost (${formatAmountNoUnit(costFloor)} VND).`;
       }
     }
 
@@ -740,6 +796,25 @@ export default function MenuInsightsScreen() {
           sizeErrors[size.itemSizeId] = 'Price must be greater than 0.';
         }
       });
+
+      const anchorSizeId = getAnchorSizeDraftId(editSizePrices);
+      if (anchorSizeId != null) {
+        const anchorDraft = editSizePrices.find((size) => size.itemSizeId === anchorSizeId);
+        const anchorPrice = Number(anchorDraft?.sellingPrice?.replace(/[^0-9.]/g, '') ?? 0);
+        const recipeCostFloor = costFloor;
+
+        if (Number.isFinite(anchorPrice) && anchorPrice > MAX_S_SIZE_PRICE) {
+          sizeErrors[anchorSizeId] = `Size S price must not exceed ${formatAmountNoUnit(MAX_S_SIZE_PRICE)} VND.`;
+        } else if (
+          Number.isFinite(recipeCostFloor) &&
+          recipeCostFloor > 0 &&
+          Number.isFinite(anchorPrice) &&
+          anchorPrice > 0 &&
+          anchorPrice < recipeCostFloor
+        ) {
+          sizeErrors[anchorSizeId] = `Size S price must be at least cost (${formatAmountNoUnit(recipeCostFloor)} VND).`;
+        }
+      }
 
       const sizesSortedByVolume = [...editSizePrices].sort((left, right) => {
         const leftVolume = Number(left.volume ?? Number.MAX_SAFE_INTEGER);
@@ -1124,6 +1199,7 @@ export default function MenuInsightsScreen() {
         recipeName: String(item?.recipeName ?? item?.RecipeName ?? 'Unnamed recipe'),
         image: item?.image ?? item?.Image ?? null,
         proposedSellingPrice: Number(item?.proposedSellingPrice ?? item?.ProposedSellingPrice ?? 0),
+        totalCost: Number(item?.totalCost ?? item?.TotalCost ?? 0),
         beverageId: Number(item?.beverage?.beverageId ?? item?.beverageId ?? 0),
         beverageName: String(item?.beverage?.name ?? item?.beverageName ?? item?.recipeName ?? 'Unknown'),
         beverageCategoryId: Number(
@@ -1255,24 +1331,68 @@ export default function MenuInsightsScreen() {
 
       const nextTempId = -(Date.now() + Math.floor(Math.random() * 1000));
       const defaultPrice = Number(recipe.proposedSellingPrice ?? 0);
+      const recipeCost = Number(recipe.totalCost ?? 0);
       const nowIso = new Date().toISOString();
-      const basePrice = Number.isFinite(defaultPrice) && defaultPrice > 0 ? defaultPrice : 10000;
+      const costFloorPrice = Number.isFinite(recipeCost) && recipeCost > 0 ? Math.ceil(recipeCost) : 0;
 
-      const sizeOptions = shopSizes.filter((size) => size.isActive);
+      if (costFloorPrice > MAX_S_SIZE_PRICE) {
+        openWarningModal(
+          'Cannot add item',
+          `Recipe cost is ${formatAmountNoUnit(costFloorPrice)} VND, which exceeds the max Size S price (${formatAmountNoUnit(
+            MAX_S_SIZE_PRICE
+          )} VND).`
+        );
+        return;
+      }
+
+      const candidateSPrice =
+        Number.isFinite(defaultPrice) && defaultPrice > 0
+          ? defaultPrice
+          : costFloorPrice > 0
+            ? costFloorPrice
+            : 10000;
+
+      const sizeOptions = [...shopSizes]
+        .filter((size) => size.isActive)
+        .sort((left, right) => Number(left.volume ?? 0) - Number(right.volume ?? 0));
+
+      const explicitSSize = sizeOptions.find((size) => {
+        const normalized = String(size.sizeName ?? '').trim().toLowerCase();
+        return normalized === 's' || normalized === 'size s' || normalized === 'small';
+      });
+      const fallbackSSize = sizeOptions[0];
+      const sSizeOption = explicitSSize ?? fallbackSSize;
+      const sSizeId = Number(sSizeOption?.beverageSizeId ?? 0);
+      const sVolume = Number(sSizeOption?.volume ?? 0);
+      const hasValidSVolume = Number.isFinite(sVolume) && sVolume > 0;
+
+      const basePrice =
+        costFloorPrice > MAX_S_SIZE_PRICE
+          ? MAX_S_SIZE_PRICE
+          : Math.min(MAX_S_SIZE_PRICE, Math.max(costFloorPrice, candidateSPrice));
+
       const generatedSizeViewModels =
         sizeOptions.length > 0
-          ? sizeOptions.map((size, index) => ({
-              itemSizeId: -(Math.abs(nextTempId) + index + 1),
-              beverageSizeId: size.beverageSizeId,
-              menuItemId: nextTempId,
-              sellingPrice: basePrice,
-              beverageSize: {
+          ? sizeOptions.map((size, index) => {
+              const sizeVolume = Number(size.volume ?? 0);
+              const hasValidSizeVolume = Number.isFinite(sizeVolume) && sizeVolume > 0;
+              const isSSize = Number(size.beverageSizeId) === sSizeId;
+              const ratio =
+                hasValidSVolume && hasValidSizeVolume ? sizeVolume / sVolume : isSSize ? 1 : 1;
+
+              return {
+                itemSizeId: -(Math.abs(nextTempId) + index + 1),
                 beverageSizeId: size.beverageSizeId,
-                sizeName: size.sizeName,
-                volume: Number(size.volume ?? 0),
-                isActive: size.isActive,
-              },
-            }))
+                menuItemId: nextTempId,
+                sellingPrice: isSSize ? basePrice : Math.max(basePrice, Math.round(basePrice * ratio)),
+                beverageSize: {
+                  beverageSizeId: size.beverageSizeId,
+                  sizeName: size.sizeName,
+                  volume: Number(size.volume ?? 0),
+                  isActive: size.isActive,
+                },
+              };
+            })
           : [];
 
       const nextItem: MenuItem = {
@@ -1312,11 +1432,11 @@ export default function MenuInsightsScreen() {
         text1: 'Item added',
         text2:
           generatedSizeViewModels.length > 0
-            ? `${nextItem.shopRecipe.recipeName} was added. You can edit description and size prices now.`
+            ? `${nextItem.shopRecipe.recipeName} was added. Size S is capped at 120,000 and other sizes follow size ratio.`
             : `${nextItem.shopRecipe.recipeName} was added. No active beverage sizes found for this shop.`,
       });
     },
-    [existingMenuItemNameSet, menuId, openEditModalForItem, shopSizes]
+    [existingMenuItemNameSet, menuId, openEditModalForItem, openWarningModal, shopSizes]
   );
 
   const handleDeleteMenuItem = useCallback((item: MenuItem) => {
