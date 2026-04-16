@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     ScrollView,
     View,
@@ -82,6 +82,20 @@ interface Ingredient {
     };
 }
 
+interface MenuItemSize {
+    itemSizeId: number;
+    beverageSizeId?: number;
+    menuItemId?: number;
+    sellingPrice?: number;
+    scaledTotalCost?: number;
+    beverageSize?: {
+        beverageSizeId?: number;
+        sizeName?: string;
+        volume?: number;
+    } | null;
+    scaledIngredients?: Ingredient[];
+}
+
 interface SupplierProductApiItem {
     ingredientId?: number;
     image?: string | null;
@@ -110,6 +124,8 @@ export default function RecipeDetailScreen() {
         recipe: recipeParam,
         recipes: recipesParam,
         ingredients: ingredientsParam,
+        itemSizes: itemSizesParam,
+        selectedItemSizeId: selectedItemSizeIdParam,
         beverageName: beverageNameParam,
         returnTo: returnToParam,
         flow: flowParam,
@@ -127,6 +143,8 @@ export default function RecipeDetailScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+    const [itemSizes, setItemSizes] = useState<MenuItemSize[]>([]);
+    const [activeSizeId, setActiveSizeId] = useState<number | null>(null);
     const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
     const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
 
@@ -249,6 +267,29 @@ export default function RecipeDetailScreen() {
         });
     };
 
+    const normalizeMenuItemSizes = (raw: any): MenuItemSize[] => {
+        if (!Array.isArray(raw)) return [];
+
+        return raw
+            .map((entry: any) => ({
+                ...entry,
+                itemSizeId: Number(entry?.itemSizeId ?? entry?.ItemSizeId ?? 0),
+                beverageSizeId: Number(entry?.beverageSizeId ?? entry?.BeverageSizeId ?? 0),
+                menuItemId: Number(entry?.menuItemId ?? entry?.MenuItemId ?? 0),
+                sellingPrice: Number(entry?.sellingPrice ?? entry?.SellingPrice ?? 0),
+                scaledTotalCost: Number(entry?.scaledTotalCost ?? entry?.ScaledTotalCost ?? 0),
+                beverageSize: entry?.beverageSize ?? entry?.BeverageSize ?? null,
+                scaledIngredients: normalizeIngredients(
+                    entry?.scaledIngredients ?? entry?.ScaledIngredients ?? []
+                ),
+            }))
+            .filter((entry) => Number.isFinite(entry.itemSizeId) && entry.itemSizeId > 0)
+            .sort(
+                (a, b) =>
+                    Number(a?.beverageSize?.volume ?? 0) - Number(b?.beverageSize?.volume ?? 0)
+            );
+    };
+
     const normalizeImageUrl = (url: unknown): string | null => {
         if (!url || typeof url !== 'string') return null;
         const trimmed = url.trim();
@@ -266,6 +307,36 @@ export default function RecipeDetailScreen() {
             '';
         return String(fromParam || fromRecipe || '').trim();
     };
+
+    const formatCurrency = (value?: number | null) => {
+        if (!Number.isFinite(value)) return '';
+        return `${Math.round(Number(value)).toLocaleString()} VND`;
+    };
+
+    const formatQuantity = (value?: number | null) => {
+        if (!Number.isFinite(value)) return '0';
+        const rounded = Math.round(Number(value) * 100) / 100;
+        return rounded.toLocaleString(undefined, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 2,
+        });
+    };
+
+    const activeItemSize = useMemo(() => {
+        if (itemSizes.length === 0) return null;
+        if (activeSizeId != null) {
+            const matched = itemSizes.find((size) => size.itemSizeId === activeSizeId);
+            if (matched) return matched;
+        }
+        return itemSizes[0];
+    }, [itemSizes, activeSizeId]);
+
+    const totalCost = useMemo(() => {
+        if (Number.isFinite(activeItemSize?.scaledTotalCost)) {
+            return Number(activeItemSize?.scaledTotalCost ?? 0);
+        }
+        return ingredients.reduce((sum, item) => sum + Number(item?.cost ?? 0), 0);
+    }, [activeItemSize?.scaledTotalCost, ingredients]);
 
     const fetchRecipe = async (options?: { isRefresh?: boolean; forceApi?: boolean }) => {
         const isRefresh = Boolean(options?.isRefresh);
@@ -287,6 +358,27 @@ export default function RecipeDetailScreen() {
             }
 
             const parsedRecipes = safeParseJson(recipesParam as string);
+            const parsedItemSizes = safeParseJson(itemSizesParam as string);
+            const selectedItemSizeId = Number(
+                Array.isArray(selectedItemSizeIdParam) ? selectedItemSizeIdParam[0] : selectedItemSizeIdParam ?? 0
+            );
+
+            if (Array.isArray(parsedItemSizes) && parsedItemSizes.length > 0) {
+                const normalizedSizes = normalizeMenuItemSizes(parsedItemSizes);
+                setItemSizes(normalizedSizes);
+                setActiveSizeId((prev) =>
+                    Number.isFinite(selectedItemSizeId) &&
+                        selectedItemSizeId > 0 &&
+                        normalizedSizes.some((size) => size.itemSizeId === selectedItemSizeId)
+                        ? selectedItemSizeId
+                        : prev != null && normalizedSizes.some((size) => size.itemSizeId === prev)
+                            ? prev
+                            : normalizedSizes[0]?.itemSizeId ?? null
+                );
+            } else {
+                setItemSizes([]);
+                setActiveSizeId(null);
+            }
 
             if (!forceApi && (recipeParam || parsedRecipes)) {
                 let defaultRecipe = null;
@@ -417,7 +509,7 @@ export default function RecipeDetailScreen() {
         if (id || recipeParam) {
             fetchRecipe();
         }
-    }, [id, recipeIdParam, menuItemIdParam, recipeParam, ingredientsParam]);
+    }, [id, recipeIdParam, menuItemIdParam, recipeParam, recipesParam, ingredientsParam, itemSizesParam, selectedItemSizeIdParam]);
 
     useEffect(() => {
         if (!recipeData) return;
@@ -428,6 +520,11 @@ export default function RecipeDetailScreen() {
 
     // Fetch ingredients when recipeData changes
     useEffect(() => {
+        if (activeItemSize?.scaledIngredients && activeItemSize.scaledIngredients.length > 0) {
+            setIngredients(normalizeIngredients(activeItemSize.scaledIngredients));
+            return;
+        }
+
         const parsedIngredientsFromParam = safeParseJson(ingredientsParam as string);
         if (Array.isArray(parsedIngredientsFromParam) && parsedIngredientsFromParam.length > 0) {
             setIngredients(normalizeIngredients(parsedIngredientsFromParam));
@@ -454,7 +551,7 @@ export default function RecipeDetailScreen() {
             };
             fetchIngredients();
         }
-    }, [recipeData?.recipeId, recipeData?.ingredients, ingredientsParam]);
+    }, [recipeData?.recipeId, recipeData?.ingredients, ingredientsParam, activeItemSize]);
 
     const getEmojiForIngredient = (category: string, ingredientName: string): string => {
         // Map by category first
@@ -547,8 +644,13 @@ export default function RecipeDetailScreen() {
             milkIce: recipeData.containsMilk ? 'Có Sữa' : 'Không Sữa',
             occasions: recipeData.suggestedOccasions || '',
             presentation: getPresentationData(),
-            cogs: '',
-            price: recipeData.proposedSellingPrice ? `${recipeData.proposedSellingPrice.toLocaleString()} VND` : '',
+            cogs: formatCurrency(totalCost),
+            price:
+                Number(activeItemSize?.sellingPrice ?? 0) > 0
+                    ? formatCurrency(activeItemSize?.sellingPrice)
+                    : recipeData.proposedSellingPrice
+                        ? `${recipeData.proposedSellingPrice.toLocaleString()} VND`
+                        : '',
             margin: recipeData.profitMarginPercent ? `${recipeData.profitMarginPercent}%` : '',
         };
     };
@@ -907,6 +1009,41 @@ export default function RecipeDetailScreen() {
                         ))}
                     </View>
 
+                    {itemSizes.length > 0 && (
+                        <View className="mb-4">
+                            <Text className={`text-sm font-semibold mb-2 ${isDark ? 'text-gray-300' : 'text-[#6F5547]'}`}>
+                                Choose size
+                            </Text>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                className="gap-2"
+                                contentContainerStyle={{ gap: 8 }}
+                            >
+                                {itemSizes.map((size) => {
+                                    const isActive = activeItemSize?.itemSizeId === size.itemSizeId;
+                                    const label = size?.beverageSize?.sizeName || `Size ${size.itemSizeId}`;
+                                    return (
+                                        <TouchableOpacity
+                                            key={size.itemSizeId}
+                                            className={`px-4 py-2 rounded-full border ${isActive
+                                                ? 'bg-primary border-primary'
+                                                : isDark
+                                                    ? 'bg-surface-dark border-gray-700'
+                                                    : 'bg-white border-[#E8E1D9]'
+                                                }`}
+                                            onPress={() => setActiveSizeId(size.itemSizeId)}
+                                        >
+                                            <Text className={`text-sm font-semibold ${isActive ? 'text-white' : isDark ? 'text-text-dark' : 'text-[#3C2A21]'}`}>
+                                                {label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+                    )}
+
                     {recipes.length > 1 && showChipsSelector && (
                         <ScrollView
                             horizontal
@@ -1059,9 +1196,9 @@ export default function RecipeDetailScreen() {
                                                 />
                                                 <Text numberOfLines={2} className={`text-base font-semibold text-center ${isDark ? 'text-text-dark' : 'text-[#2E2220]'}`}>{item.ingredient?.name || 'Unnamed ingredient'}</Text>
                                                 <Text className={`text-sm mt-0.5 text-center ${isDark ? 'text-gray-400' : 'text-[#6A6764]'}`}>
-                                                    {item.quantity}{item.measurement ? ` ${item.measurement}` : ''}
+                                                    {formatQuantity(item.quantity)}{item.measurement ? ` ${item.measurement}` : ''}
                                                 </Text>
-                                                <Text className={`text-[24px] mt-1 font-bold text-center ${isDark ? 'text-[#F3AA4F]' : 'text-[#D38B2A]'}`}>{item.cost?.toLocaleString()} VND</Text>
+                                                <Text className={`text-[24px] mt-1 font-bold text-center ${isDark ? 'text-[#F3AA4F]' : 'text-[#D38B2A]'}`}>{formatCurrency(item.cost)}</Text>
                                             </View>
                                         ))}
                                     </View>
@@ -1086,6 +1223,12 @@ export default function RecipeDetailScreen() {
                             {/* Recipe Economics */}
                             <View className={`rounded-3xl border p-5 ${isDark ? 'bg-surface-dark border-gray-700' : 'bg-white border-[#E8E1D9]'}`}>
                                 <Text className="text-xl font-bold italic text-primary mb-4">Recipe Economics</Text>
+                                <View className="flex-row justify-between items-center mb-3">
+                                    <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Total Cost</Text>
+                                    <Text className={`text-base font-semibold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>
+                                        {variant.cogs || ''}
+                                    </Text>
+                                </View>
                                 <View className="flex-row justify-between items-center mb-4">
                                     <Text className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Selling Price</Text>
                                     <Text className={`text-lg font-bold ${isDark ? 'text-text-dark' : 'text-text-light'}`}>

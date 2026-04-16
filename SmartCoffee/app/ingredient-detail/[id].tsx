@@ -1,16 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
   Image,
   Modal,
-  Platform,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
@@ -53,6 +54,25 @@ interface ShopInventoryDetail {
   coffeeShop: CoffeeShopInfo | null;
 }
 
+const MAX_ZOOM_SCALE = 3;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
+const COLORS = {
+  bg: '#F7F3EF',
+  white: '#FFFFFF',
+  text: '#3C2A21',
+  textSecondary: '#8E7B6F',
+  border: '#E8E1D9',
+  accent: '#A36D2D',
+  accentSoft: '#EFE5D9',
+  successBg: '#E3F7E6',
+  successText: '#2F7D4D',
+  warningBg: '#FFF2DE',
+  warningText: '#9B6A2F',
+  dangerBg: '#FDECEC',
+  dangerText: '#A33434',
+};
+
 const formatMeasurement = (measurement?: string) => {
   if (!measurement) return 'units';
   const normalized = measurement.trim().toLowerCase();
@@ -64,11 +84,18 @@ const formatMeasurement = (measurement?: string) => {
   return measurement;
 };
 
-const MAX_ZOOM_SCALE = 3;
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const formatDate = (value?: string | null) => {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
 
 export default function IngredientDetailScreen() {
-  const isDark = false;
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { role } = useAuth();
@@ -86,18 +113,6 @@ export default function IngredientDetailScreen() {
   const translateY = useSharedValue(0);
   const savedTranslateX = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
-
-  const COLORS = {
-    background: '#F6F1EE',
-    card: '#FFFFFF',
-    ink: '#2B1C15',
-    muted: '#8E837B',
-    accent: '#5B3B35',
-    chip: '#EDE4DE',
-    success: '#E5F8E6',
-    successText: '#1B7A34',
-    border: '#EFE7E1',
-  };
 
   const normalizedRole = (role ?? '').trim().toLowerCase();
   const canSetThreshold = normalizedRole === 'shopowner' || normalizedRole === 'owner';
@@ -164,33 +179,27 @@ export default function IngredientDetailScreen() {
   const imageGesture = Gesture.Exclusive(doubleTapGesture, pinchPanGesture);
 
   const animatedImageStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
+    transform: [{ translateX: translateX.value }, { translateY: translateY.value }, { scale: scale.value }],
   }));
 
   const fetchIngredientDetail = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('Fetching shop inventory detail for ID:', id);
+
       const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getById(Number(id)), {
-        headers: {
-          Accept: '*/*',
-        },
+        headers: { Accept: '*/*' },
       });
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
+
       const data = (await response.json()) as ShopInventoryDetail;
-      console.log('Shop inventory detail response:', data);
       setInventoryDetail(data);
       const nextMinStock = Number(data.minStock ?? 0);
       setManualThresholdText(Number.isFinite(nextMinStock) ? nextMinStock.toFixed(1) : '');
-    } catch (err) {
-      console.error('Error fetching ingredient:', err);
+    } catch {
       setError('Failed to load ingredient details');
     } finally {
       setLoading(false);
@@ -207,16 +216,14 @@ export default function IngredientDetailScreen() {
       return;
     }
 
-    if (!inventoryDetail || isUpdating) {
-      return;
-    }
+    if (!inventoryDetail || isUpdating) return;
 
     const parsedManual = Number.parseFloat(manualThresholdText.replace(',', '.'));
     if (!Number.isFinite(parsedManual)) {
       Toast.show({
         type: 'error',
         text1: 'Invalid threshold',
-        text2: 'Please enter a valid number for the manual threshold.',
+        text2: 'Please enter a valid number for the threshold.',
       });
       return;
     }
@@ -226,27 +233,24 @@ export default function IngredientDetailScreen() {
 
     try {
       setIsUpdating(true);
-      const response = await authorizedFetch(
-        API_ENDPOINTS.shopInventory.update(inventoryDetail.inventoryDetailId),
-        {
-          method: 'PUT',
-          headers: {
-            Accept: '*/*',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            inventoryDetailId: inventoryDetail.inventoryDetailId,
-            coffeeShopId: inventoryDetail.coffeeShopId,
-            ingredientId: inventoryDetail.ingredientId,
-            quantity: inventoryDetail.quantity,
-            minStock: valueToApply,
-            expirationDate: inventoryDetail.expirationDate,
-            measurement: inventoryDetail.measurement,
-            ingredient: inventoryDetail.ingredient,
-            coffeeShop: inventoryDetail.coffeeShop,
-          }),
-        }
-      );
+      const response = await authorizedFetch(API_ENDPOINTS.shopInventory.update(inventoryDetail.inventoryDetailId), {
+        method: 'PUT',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inventoryDetailId: inventoryDetail.inventoryDetailId,
+          coffeeShopId: inventoryDetail.coffeeShopId,
+          ingredientId: inventoryDetail.ingredientId,
+          quantity: inventoryDetail.quantity,
+          minStock: valueToApply,
+          expirationDate: inventoryDetail.expirationDate,
+          measurement: inventoryDetail.measurement,
+          ingredient: inventoryDetail.ingredient,
+          coffeeShop: inventoryDetail.coffeeShop,
+        }),
+      });
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
@@ -255,21 +259,17 @@ export default function IngredientDetailScreen() {
       const responseText = await response.text();
       const updated = responseText
         ? (JSON.parse(responseText) as ShopInventoryDetail)
-        : {
-            ...inventoryDetail,
-            minStock: valueToApply,
-          };
+        : { ...inventoryDetail, minStock: valueToApply };
+
       setInventoryDetail(updated);
       const updatedValue = Number(updated.minStock ?? valueToApply);
-      setManualThresholdText(
-        Number.isFinite(updatedValue) ? updatedValue.toFixed(1) : manualThresholdText
-      );
+      setManualThresholdText(Number.isFinite(updatedValue) ? updatedValue.toFixed(1) : manualThresholdText);
       Toast.show({
         type: 'success',
         text1: 'Minimum stock updated',
-        text2: `Minimum stock level set to ${valueToApply.toFixed(1)} ${unitLabel}.`,
+        text2: `Minimum stock set to ${valueToApply.toFixed(1)} ${unitLabel}.`,
       });
-    } catch (err) {
+    } catch {
       Toast.show({
         type: 'error',
         text1: 'Update failed',
@@ -280,255 +280,173 @@ export default function IngredientDetailScreen() {
     }
   };
 
+  const statusInfo = useMemo(() => {
+    if (!inventoryDetail) return { label: 'UNKNOWN', bg: COLORS.dangerBg, text: COLORS.dangerText };
+
+    const quantity = Number(inventoryDetail.quantity ?? 0);
+    const minStock = Number(inventoryDetail.minStock ?? 0);
+
+    if (quantity <= 0) return { label: 'OUT OF STOCK', bg: COLORS.dangerBg, text: COLORS.dangerText };
+    if (quantity <= minStock) return { label: 'LOW STOCK', bg: COLORS.warningBg, text: COLORS.warningText };
+    return { label: 'IN STOCK', bg: COLORS.successBg, text: COLORS.successText };
+  }, [inventoryDetail]);
+
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: COLORS.background,
-        }}
-      >
-        <ActivityIndicator size="large" color="#B87333" />
-      </View>
+      <SafeAreaView style={styles.centerWrap}>
+        <ActivityIndicator size="large" color={COLORS.accent} />
+      </SafeAreaView>
     );
   }
 
   if (error || !inventoryDetail) {
     return (
-      <View
-        style={{
-          flex: 1,
-          justifyContent: 'center',
-          alignItems: 'center',
-          backgroundColor: COLORS.background,
-          padding: 20,
-        }}
-      >
-        <Text style={{ color: COLORS.ink, fontSize: 16, textAlign: 'center' }}>
-          {error || 'Ingredient not found'}
-        </Text>
-        <TouchableOpacity
-          onPress={() => router.back()}
-          style={{
-            marginTop: 20,
-            backgroundColor: '#B87333',
-            paddingHorizontal: 30,
-            paddingVertical: 12,
-            borderRadius: 8,
-          }}
-        >
-          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Go Back</Text>
+      <SafeAreaView style={styles.centerWrap}>
+        <Text style={styles.errorText}>{error || 'Ingredient not found'}</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backToListBtn}>
+          <Text style={styles.backToListText}>Go Back</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
-  // Extract ingredient info with fallbacks
   const ingredientName = inventoryDetail.ingredient?.name || `Ingredient #${inventoryDetail.inventoryDetailId}`;
   const ingredientImage =
     inventoryDetail.image || inventoryDetail.imageUrl || inventoryDetail.ingredient?.image || null;
-  const ingredientCategory = inventoryDetail.ingredient?.category || 'Unknown';
+  const ingredientCategory = inventoryDetail.ingredient?.category || 'Uncategorized';
   const ingredientEndDate = inventoryDetail.ingredient?.endDate || new Date().toISOString();
+  const ingredientCreateDate = inventoryDetail.ingredient?.createDate || null;
   const measurementUnit = formatMeasurement(inventoryDetail.measurement);
   const quantityValue = Number(inventoryDetail.quantity ?? 0);
-  const statusLabel = quantityValue > 0 ? 'IN STOCK' : 'OUT OF STOCK';
 
   return (
-    <View style={{ flex: 1, backgroundColor: COLORS.background }}>
-      {/* Header */}
-      <View
-        style={{
-          backgroundColor: COLORS.background,
-          paddingTop: Platform.OS === 'ios' ? 50 : 40,
-          paddingBottom: 8,
-          paddingHorizontal: 16,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color={COLORS.ink} />
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+          <Ionicons name="arrow-back" size={20} color={COLORS.text} />
         </TouchableOpacity>
-        <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.ink }}>
-          Ingredient Detail
-        </Text>
-        <View style={{ width: 22 }} />
+        <Text style={styles.headerTitle}>Ingredient Detail</Text>
+        <View style={styles.headerPlaceholder} />
       </View>
 
-      <ScrollView style={{ flex: 1, paddingHorizontal: 16 }}>
-        {/* Ingredient Image and Info */}
-        <View
-          style={{
-            backgroundColor: COLORS.card,
-            marginTop: 14,
-            marginBottom: 12,
-            borderRadius: 16,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.1,
-            shadowRadius: 8,
-            elevation: 3,
-          }}
-        >
-          <View style={{ height: 150, borderTopLeftRadius: 16, borderTopRightRadius: 16, overflow: 'hidden' }}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.heroCard}>
+          <View style={styles.imageWrap}>
             {ingredientImage ? (
               <TouchableOpacity
                 activeOpacity={0.92}
-                style={{ width: '100%', height: '100%' }}
+                style={styles.imageTouch}
                 onPress={() => {
                   resetZoom();
                   setShowImageViewer(true);
                 }}
               >
-                <Image source={{ uri: ingredientImage }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                <View
-                  style={{
-                    position: 'absolute',
-                    right: 10,
-                    bottom: 10,
-                    paddingHorizontal: 10,
-                    paddingVertical: 6,
-                    borderRadius: 20,
-                    backgroundColor: 'rgba(31, 31, 31, 0.78)',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 5,
-                  }}
-                >
+                <Image source={{ uri: ingredientImage }} style={styles.heroImage} resizeMode="cover" />
+                <View style={styles.zoomHint}>
                   <Ionicons name="expand-outline" size={14} color="#FFFFFF" />
-                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}>Tap to zoom</Text>
+                  <Text style={styles.zoomHintText}>Tap to zoom</Text>
                 </View>
               </TouchableOpacity>
             ) : (
-              <View style={{ flex: 1, backgroundColor: COLORS.chip, alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name="leaf" size={48} color="#B87333" />
+              <View style={styles.imageFallback}>
+                <Ionicons name="leaf" size={46} color={COLORS.accent} />
               </View>
             )}
           </View>
-          <View style={{ padding: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.ink, flex: 1, marginRight: 10 }}>
-                {ingredientName}
-              </Text>
-              <View
-                style={{
-                  backgroundColor: statusLabel === 'IN STOCK' ? COLORS.success : '#FEE2E2',
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 999,
-                }}>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    fontWeight: '800',
-                    color: statusLabel === 'IN STOCK' ? COLORS.successText : '#B91C1C',
-                    letterSpacing: 0.3,
-                  }}
-                >
-                  {statusLabel}
-                </Text>
+
+          <View style={styles.heroBody}>
+            <View style={styles.heroTop}>
+              <Text style={styles.ingredientName}>{ingredientName}</Text>
+              <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
+                <Text style={[styles.statusText, { color: statusInfo.text }]}>{statusInfo.label}</Text>
               </View>
             </View>
-            <View style={{ marginTop: 10 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                <Ionicons name="business-outline" size={14} color={COLORS.muted} />
-                <Text style={{ fontSize: 13, color: COLORS.muted, marginLeft: 8 }}>
-                  Shop: {inventoryDetail.coffeeShop?.shopName || 'Unknown'}
+
+            <Text style={styles.categoryText}>{ingredientCategory}</Text>
+
+            <View style={styles.heroMetrics}>
+              <View style={styles.metricPill}>
+                <Ionicons name="cube-outline" size={14} color={COLORS.accent} />
+                <Text style={styles.metricText}>
+                  {quantityValue.toFixed(1)} {measurementUnit}
                 </Text>
               </View>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="calendar-outline" size={14} color={COLORS.muted} />
-                <Text style={{ fontSize: 13, color: COLORS.muted, marginLeft: 8 }}>
-                  Expiry: {new Date(ingredientEndDate).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  })}
+              <View style={styles.metricPill}>
+                <Ionicons name="warning-outline" size={14} color={COLORS.accent} />
+                <Text style={styles.metricText}>
+                  Min {Number(inventoryDetail.minStock ?? 0).toFixed(1)} {measurementUnit}
                 </Text>
               </View>
             </View>
           </View>
         </View>
 
-        {/* Minimum Stock Level */}
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Inventory Information</Text>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Shop</Text>
+            <Text style={styles.infoValue}>{inventoryDetail.coffeeShop?.shopName || 'Unknown'}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Created date</Text>
+            <Text style={styles.infoValue}>{formatDate(ingredientCreateDate)}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Expiry date</Text>
+            <Text style={styles.infoValue}>{formatDate(ingredientEndDate)}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Measurement</Text>
+            <Text style={styles.infoValue}>{measurementUnit}</Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Inventory detail ID</Text>
+            <Text style={styles.infoValue}>#{inventoryDetail.inventoryDetailId}</Text>
+          </View>
+        </View>
+
         {canSetThreshold ? (
-          <View
-            style={{
-              backgroundColor: COLORS.card,
-              padding: 16,
-              marginBottom: 12,
-              borderRadius: 16,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 8,
-              elevation: 3,
-            }}
-          >
-            <Text
-              style={{
-                fontSize: 12,
-                fontWeight: '700',
-                color: COLORS.muted,
-                letterSpacing: 1,
-                marginBottom: 12,
-              }}
-            >
-              Minimum Stock Level
-            </Text>
-            <Text style={{ fontSize: 12, color: COLORS.muted, marginBottom: 8 }}>
-              Threshold ({measurementUnit})
-            </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Minimum Stock Level</Text>
+            <Text style={styles.helperText}>Set the alert threshold ({measurementUnit}).</Text>
+
+            <View style={styles.thresholdRow}>
               <TextInput
                 value={manualThresholdText}
-                onChangeText={(value) => {
-                  const normalized = value.replace(',', '.');
-                  setManualThresholdText(normalized);
-                }}
+                onChangeText={(value) => setManualThresholdText(value.replace(',', '.'))}
                 onBlur={() => {
                   const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
-                  if (Number.isFinite(next)) {
-                    setManualThresholdText(next.toFixed(1));
-                  }
+                  if (Number.isFinite(next)) setManualThresholdText(next.toFixed(1));
                 }}
                 keyboardType="decimal-pad"
-                style={{
-                  flex: 1,
-                  borderWidth: 1,
-                  borderColor: COLORS.border,
-                  borderRadius: 10,
-                  paddingVertical: 10,
-                  paddingHorizontal: 12,
-                  fontSize: 16,
-                  color: COLORS.ink,
-                  marginRight: 10,
-                }}
+                style={styles.thresholdInput}
               />
               <TouchableOpacity
                 onPress={handleApplyChanges}
                 disabled={isUpdating}
-                style={{
-                  backgroundColor: COLORS.accent,
-                  paddingHorizontal: 20,
-                  paddingVertical: 12,
-                  borderRadius: 10,
-                  opacity: isUpdating ? 0.7 : 1,
-                }}
+                style={[styles.updateBtn, isUpdating && styles.updateBtnDisabled]}
               >
-                <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
-                  {isUpdating ? 'Updating...' : 'Update'}
-                </Text>
+                <Text style={styles.updateBtnText}>{isUpdating ? 'Updating...' : 'Update'}</Text>
               </TouchableOpacity>
             </View>
           </View>
-        ) : null}
-
-        {/* Bottom spacing */}
-        <View style={{ height: 20 }} />
+        ) : (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Minimum Stock Level</Text>
+            <Text style={styles.readOnlyText}>
+              Only owners can update this value. Current minimum stock is{' '}
+              <Text style={styles.readOnlyHighlight}>
+                {Number(inventoryDetail.minStock ?? 0).toFixed(1)} {measurementUnit}
+              </Text>
+              .
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
       <Modal
@@ -541,27 +459,9 @@ export default function IngredientDetailScreen() {
         }}
       >
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <View
-            style={{
-              flex: 1,
-              backgroundColor: 'rgba(0, 0, 0, 0.95)',
-              justifyContent: 'center',
-              alignItems: 'center',
-            }}
-          >
+          <View style={styles.viewerOverlay}>
             <TouchableOpacity
-              style={{
-                position: 'absolute',
-                top: 52,
-                right: 24,
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                justifyContent: 'center',
-                alignItems: 'center',
-                zIndex: 2,
-              }}
+              style={styles.viewerCloseBtn}
               onPress={() => {
                 setShowImageViewer(false);
                 resetZoom();
@@ -570,25 +470,277 @@ export default function IngredientDetailScreen() {
               <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <View
-              style={{
-                width: SCREEN_WIDTH,
-                height: '100%',
-                justifyContent: 'center',
-                alignItems: 'center',
-              }}
-            >
+            <View style={styles.viewerImageWrap}>
               <GestureDetector gesture={imageGesture}>
                 <Animated.Image
                   source={{ uri: ingredientImage || undefined }}
                   resizeMode="contain"
-                  style={[{ width: '95%', height: '75%' }, animatedImageStyle]}
+                  style={[styles.viewerImage, animatedImageStyle]}
                 />
               </GestureDetector>
             </View>
           </View>
         </GestureHandlerRootView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.bg,
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  centerWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.bg,
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    color: COLORS.text,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  backToListBtn: {
+    marginTop: 20,
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 26,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  backToListText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  headerPlaceholder: {
+    width: 36,
+  },
+  heroCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  imageWrap: {
+    height: 180,
+  },
+  imageTouch: {
+    width: '100%',
+    height: '100%',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageFallback: {
+    flex: 1,
+    backgroundColor: COLORS.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zoomHint: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(31, 31, 31, 0.78)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  zoomHintText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  heroBody: {
+    padding: 14,
+  },
+  heroTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  ingredientName: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    flex: 1,
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  statusText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  categoryText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  heroMetrics: {
+    marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  metricPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  metricText: {
+    fontSize: 12,
+    color: COLORS.accent,
+    fontWeight: '700',
+  },
+  card: {
+    backgroundColor: COLORS.white,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 14,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    color: COLORS.text,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 8,
+  },
+  infoLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+  },
+  infoValue: {
+    flexShrink: 1,
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  helperText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 10,
+  },
+  thresholdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  thresholdInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: COLORS.text,
+    backgroundColor: '#FFFDFC',
+  },
+  updateBtn: {
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  updateBtnDisabled: {
+    opacity: 0.7,
+  },
+  updateBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  readOnlyText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.textSecondary,
+  },
+  readOnlyHighlight: {
+    color: COLORS.text,
+    fontWeight: '800',
+  },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.95)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerCloseBtn: {
+    position: 'absolute',
+    top: 52,
+    right: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  viewerImageWrap: {
+    width: SCREEN_WIDTH,
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewerImage: {
+    width: '95%',
+    height: '75%',
+  },
+});

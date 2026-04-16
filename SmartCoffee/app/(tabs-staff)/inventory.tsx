@@ -54,6 +54,7 @@ const COLORS = {
     surface: '#FBF7F2',
     success: '#15803D',
     warning: '#B45309',
+    danger: '#B91C1C',
 };
 
 export default function InventoryScreen() {
@@ -86,7 +87,7 @@ export default function InventoryScreen() {
     const fetchIngredients = async () => {
         if (!coffeeShopId) {
             setIngredients([]);
-            setError('Không tìm thấy shopId của tài khoản hiện tại.');
+            setError('Missing coffee shop ID for current account.');
             setLoading(false);
             setRefreshing(false);
             return;
@@ -116,6 +117,21 @@ export default function InventoryScreen() {
         fetchIngredients();
     }, [coffeeShopId]);
 
+    const getStatus = (item: ShopInventoryItem) => {
+        const quantity = Number(item.quantity ?? 0);
+        const minStock = Number(item.minStock ?? defaultMinStock);
+
+        if (quantity <= 0) {
+            return { key: 'out' as const, label: 'OUT OF STOCK', color: COLORS.danger, bgColor: '#FEE2E2' };
+        }
+
+        if (quantity <= minStock) {
+            return { key: 'low' as const, label: 'LOW STOCK', color: COLORS.warning, bgColor: '#FEF3C7' };
+        }
+
+        return { key: 'in' as const, label: 'IN STOCK', color: COLORS.success, bgColor: '#DCFCE7' };
+    };
+
     const filteredIngredients = useMemo(() => {
         let filtered = ingredients;
 
@@ -128,10 +144,7 @@ export default function InventoryScreen() {
 
         if (selectedStatus !== 'all') {
             filtered = filtered.filter((item) => {
-                const label = getStatus(item).label;
-                if (label === 'OUT OF STOCK') return selectedStatus === 'out';
-                if (label === 'LOW STOCK') return selectedStatus === 'low';
-                return selectedStatus === 'in';
+                return getStatus(item).key === selectedStatus;
             });
         }
 
@@ -158,6 +171,22 @@ export default function InventoryScreen() {
 
         return filtered;
     }, [ingredients, searchQuery, selectedCategory, selectedStatus, sortOption]);
+
+    const inventoryStats = useMemo(() => {
+        const total = ingredients.length;
+        const out = ingredients.filter((item) => getStatus(item).key === 'out').length;
+        const low = ingredients.filter((item) => getStatus(item).key === 'low').length;
+        const inStock = Math.max(0, total - out - low);
+        return { total, inStock, low, out };
+    }, [ingredients]);
+
+    const activeFilterCount = useMemo(() => {
+        let count = 0;
+        if (selectedCategory !== 'All') count += 1;
+        if (selectedStatus !== 'all') count += 1;
+        if (sortOption !== 'alpha') count += 1;
+        return count;
+    }, [selectedCategory, selectedStatus, sortOption]);
 
     const openFilter = () => {
         setDraftCategory(selectedCategory);
@@ -186,21 +215,6 @@ export default function InventoryScreen() {
     const onRefresh = () => {
         setRefreshing(true);
         fetchIngredients();
-    };
-
-    const getStatus = (item: ShopInventoryItem) => {
-        const quantity = Number(item.quantity ?? 0);
-        const minStock = Number(item.minStock ?? defaultMinStock);
-
-        if (quantity <= 0) {
-            return { label: 'OUT OF STOCK', color: '#B91C1C', bgColor: '#FEE2E2' };
-        }
-
-        if (quantity <= minStock) {
-            return { label: 'LOW STOCK', color: COLORS.warning, bgColor: '#FEF3C7' };
-        }
-
-        return { label: 'IN STOCK', color: COLORS.success, bgColor: '#DCFCE7' };
     };
 
     const renderItem = ({ item }: { item: ShopInventoryItem }) => {
@@ -240,7 +254,7 @@ export default function InventoryScreen() {
                         {quantity.toFixed(1)} {measurement}
                     </Text>
                 </View>
-                <Ionicons name="ellipsis-horizontal" size={20} color={COLORS.muted} />
+                <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
             </TouchableOpacity>
         );
     };
@@ -283,7 +297,7 @@ export default function InventoryScreen() {
                     <View>
                         <View style={styles.headerRow}>
                             <View style={styles.headerSpacer} />
-                            <Text style={styles.headerTitle}>Staff Inventory</Text>
+                            <Text style={styles.headerTitle}>Inventory</Text>
                             <TouchableOpacity
                                 style={styles.headerIcon}
                                 onPress={() => router.push('/inventory-history')}
@@ -292,21 +306,42 @@ export default function InventoryScreen() {
                             </TouchableOpacity>
                         </View>
 
+                        <Text style={styles.headerSubtitle}>Track stock levels and request restocks quickly.</Text>
+
                         <View style={styles.requestRow}>
                             <TouchableOpacity
                                 style={[styles.requestCard, { backgroundColor: COLORS.accent }]}
                                 onPress={() => router.push('/import-request')}
                             >
                                 <Ionicons name="download-outline" size={20} color="#FFFFFF" />
-                                <Text style={styles.requestLabel}>Request{`\n`}Import</Text>
+                                <Text style={styles.requestLabel}>Request Import</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.requestCard, { backgroundColor: COLORS.accentAlt, marginRight: 0 }]}
                                 onPress={() => router.push('/export-request')}
                             >
                                 <Ionicons name="arrow-up-circle-outline" size={20} color="#FFFFFF" />
-                                <Text style={styles.requestLabel}>Request{`\n`}Export</Text>
+                                <Text style={styles.requestLabel}>Request Export</Text>
                             </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.statsRow}>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statValue}>{inventoryStats.total}</Text>
+                                <Text style={styles.statLabel}>Total</Text>
+                            </View>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statValue}>{inventoryStats.inStock}</Text>
+                                <Text style={styles.statLabel}>In stock</Text>
+                            </View>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statValue}>{inventoryStats.low}</Text>
+                                <Text style={styles.statLabel}>Low</Text>
+                            </View>
+                            <View style={styles.statCard}>
+                                <Text style={styles.statValue}>{inventoryStats.out}</Text>
+                                <Text style={styles.statLabel}>Out</Text>
+                            </View>
                         </View>
 
                         <View style={styles.searchRow}>
@@ -314,7 +349,7 @@ export default function InventoryScreen() {
                                 <Ionicons name="search" size={18} color={COLORS.muted} />
                                 <TextInput
                                     style={styles.searchInput}
-                                    placeholder="Search ingredients..."
+                                    placeholder="Search by ingredient name..."
                                     placeholderTextColor={COLORS.muted}
                                     value={searchQuery}
                                     onChangeText={setSearchQuery}
@@ -326,6 +361,11 @@ export default function InventoryScreen() {
                                 disabled={!hasInventory}
                             >
                                 <Ionicons name="options-outline" size={18} color="#FFFFFF" />
+                                {activeFilterCount > 0 ? (
+                                    <View style={styles.filterCountBadge}>
+                                        <Text style={styles.filterCountText}>{activeFilterCount}</Text>
+                                    </View>
+                                ) : null}
                             </TouchableOpacity>
                         </View>
 
@@ -534,6 +574,13 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         color: COLORS.ink,
     },
+    headerSubtitle: {
+        marginTop: -8,
+        marginBottom: 14,
+        textAlign: 'center',
+        color: COLORS.muted,
+        fontSize: 12,
+    },
     requestRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -548,11 +595,35 @@ const styles = StyleSheet.create({
     },
     requestLabel: {
         color: '#FFFFFF',
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: '700',
         marginTop: 10,
         textAlign: 'center',
-        letterSpacing: 0.6,
+    },
+    statsRow: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 14,
+    },
+    statCard: {
+        flex: 1,
+        backgroundColor: COLORS.card,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        borderRadius: 12,
+        paddingVertical: 10,
+        alignItems: 'center',
+    },
+    statValue: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: COLORS.ink,
+    },
+    statLabel: {
+        marginTop: 2,
+        fontSize: 11,
+        color: COLORS.muted,
+        fontWeight: '600',
     },
     searchRow: {
         flexDirection: 'row',
@@ -584,6 +655,25 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.chipActive,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    filterCountBadge: {
+        position: 'absolute',
+        top: -5,
+        right: -5,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1,
+        borderColor: COLORS.chipActive,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 3,
+    },
+    filterCountText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: COLORS.chipActive,
     },
     filterButtonDisabled: {
         opacity: 0.5,
