@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   View,
@@ -84,11 +84,13 @@ export default function ProductPage() {
     params.fromSuggestions === '1' || params.fromSuggestions === 'true';
   const { items: suggestionItems, addItems } = useSuggestions();
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [products, setProducts] = useState<SupplierProductApiItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedForSuggestion, setSelectedForSuggestion] = useState<SupplierProductApiItem[]>([]);
+  const latestRequestId = useRef(0);
 
   // Pagination states
   const [page, setPage] = useState(1);
@@ -115,13 +117,29 @@ export default function ProductPage() {
     return new Set<number>(ids);
   }, [fromSuggestions, suggestionItems]);
 
-  const fetchProducts = async (currentPage: number, isLoadMore = false) => {
+  const fetchProducts = async (
+    currentPage: number,
+    isLoadMore = false,
+    nameFilter = ''
+  ) => {
+    const requestId = ++latestRequestId.current;
+
     try {
       if (isLoadMore) setLoadingMore(true);
       else setLoading(true);
       setError(null);
 
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct?page=${currentPage}&pageSize=${PAGE_SIZE}`, {
+      const query = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(PAGE_SIZE),
+      });
+
+      const normalizedName = nameFilter.trim();
+      if (normalizedName) {
+        query.set('name', normalizedName);
+      }
+
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct?${query.toString()}`, {
         headers: {
           Accept: '*/*',
         },
@@ -129,6 +147,10 @@ export default function ProductPage() {
 
       if (!response.ok) {
         throw new Error(`Request failed: ${response.status}`);
+      }
+
+      if (requestId !== latestRequestId.current) {
+        return;
       }
 
       const data = (await response.json()) as SupplierProductListResponse | SupplierProductApiItem[];
@@ -152,25 +174,40 @@ export default function ProductPage() {
         return [...prev, ...newItems];
       });
     } catch (fetchError) {
+      if (requestId !== latestRequestId.current) {
+        return;
+      }
       setError('Failed to load supplier products.');
       setHasMore(false);
     } finally {
+      if (requestId !== latestRequestId.current) {
+        return;
+      }
       if (isLoadMore) setLoadingMore(false);
       else setLoading(false);
     }
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     setPage(1);
-    fetchProducts(1, false);
-  }, []);
+    setHasMore(true);
+    fetchProducts(1, false, debouncedSearch);
+  }, [debouncedSearch]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    setSearch('');
     setActiveCategory(null);
     setPage(1);
-    await fetchProducts(1, false);
+    setHasMore(true);
+    await fetchProducts(1, false, debouncedSearch);
     setRefreshing(false);
   };
 
@@ -183,7 +220,7 @@ export default function ProductPage() {
     if (isCloseToBottom && !loading && !loadingMore && hasMore) {
       const nextPage = page + 1;
       setPage(nextPage);
-      fetchProducts(nextPage, true);
+      fetchProducts(nextPage, true, debouncedSearch);
     }
   };
   const filteredProducts = useMemo(() => {
@@ -191,15 +228,6 @@ export default function ProductPage() {
 
     if (activeCategory) {
       result = result.filter((item) => item?.ingredient?.category === activeCategory);
-    }
-
-    if (search.trim()) {
-      const term = search.trim().toLowerCase();
-      result = result.filter((item) =>
-        String(item?.ingredient?.name ?? '')
-          .toLowerCase()
-          .includes(term)
-      );
     }
 
     // Nếu đi từ suggestions sang thì loại bỏ các product
@@ -212,14 +240,13 @@ export default function ProductPage() {
     }
 
     return result;
-  }, [products, search, activeCategory, fromSuggestions, excludedIdsFromSuggestions]);
+  }, [products, activeCategory, fromSuggestions, excludedIdsFromSuggestions]);
 
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
   const handleAddToSuggestedList = (item: SupplierProductApiItem) => {
     const name = item?.ingredient?.name ?? 'Unknown';
-    const category = item?.ingredient?.category ?? (item.measurement || 'Other');
     const imageUrl = item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
 
     const availableStock = Math.max(0, Number(item.stock ?? 0) - Number(item.holdStock ?? 0));
@@ -230,7 +257,6 @@ export default function ProductPage() {
       supplierId: item.supplierId,
       supplierName: item.supplierName ?? null,
       name,
-      category,
       priceVnd: item.price,
       image: imageUrl,
       subtitle: item.description ?? '',
