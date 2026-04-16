@@ -43,6 +43,20 @@ interface MenuItem {
     menuItemId?: number;
     sellingPrice?: number;
     scaledTotalCost?: number;
+    scaledIngredients?: Array<{
+      id?: number;
+      quantity?: number;
+      cost?: number;
+      measurement?: string | null;
+      meassurement?: string | null;
+      ingredient_id?: number;
+      ingredient?: {
+        ingredientId?: number;
+        name?: string;
+        image?: string | null;
+        category?: string;
+      } | null;
+    }>;
     beverageSize?: {
       beverageSizeId: number;
       sizeName?: string;
@@ -941,8 +955,25 @@ export default function MenuInsightsScreen() {
             recipeId: Number(item.shopRecipe?.recipeId ?? 0),
           },
           itemSizeViewModels: (item.itemSizeViewModels ?? []).map((size) => ({
+            itemSizeId: Number(size.itemSizeId ?? 0),
             beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
             sellingPrice: Number(size.sellingPrice ?? 0),
+            scaledTotalCost: Number(size.scaledTotalCost ?? 0),
+            scaledIngredients: Array.isArray(size.scaledIngredients)
+              ? size.scaledIngredients.map((ingredient) => ({
+                  ...ingredient,
+                  quantity: Number(ingredient?.quantity ?? 0),
+                  cost: Number(ingredient?.cost ?? 0),
+                }))
+              : [],
+            beverageSize: size.beverageSize
+              ? {
+                  beverageSizeId: Number(size.beverageSize.beverageSizeId ?? size.beverageSizeId ?? 0),
+                  sizeName: String(size.beverageSize.sizeName ?? ''),
+                  volume: Number(size.beverageSize.volume ?? 0),
+                  isActive: Boolean(size.beverageSize.isActive ?? true),
+                }
+              : undefined,
           })),
         })),
         menuGroups: menuGroupsSource.map((group: any, index: number) => ({
@@ -1513,6 +1544,14 @@ export default function MenuInsightsScreen() {
         beverageSizeId: Number(size.beverageSizeId ?? size.beverageSize?.beverageSizeId ?? 0),
         menuItemId: Number(item.menuItemId ?? 0) > 0 ? Number(item.menuItemId) : 0,
         sellingPrice: Number(size.sellingPrice ?? 0),
+        scaledTotalCost: Number(size.scaledTotalCost ?? 0),
+        scaledIngredients: Array.isArray(size.scaledIngredients)
+          ? size.scaledIngredients.map((ingredient) => ({
+              ...ingredient,
+              quantity: Number(ingredient?.quantity ?? 0),
+              cost: Number(ingredient?.cost ?? 0),
+            }))
+          : [],
         beverageSize: size.beverageSize
           ? {
               beverageSizeId: Number(size.beverageSize.beverageSizeId ?? size.beverageSizeId ?? 0),
@@ -2806,6 +2845,12 @@ export default function MenuInsightsScreen() {
                               recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
                               recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
                               ingredients: JSON.stringify(shopRecipeIngredients),
+                              itemSizes:
+                                Array.isArray(item.itemSizeViewModels) &&
+                                item.itemSizeViewModels.length > 0
+                                  ? JSON.stringify(item.itemSizeViewModels)
+                                  : '',
+                              selectedItemSizeId: String(sizeVariant?.itemSizeId ?? ''),
                             },
                           });
                         }}
