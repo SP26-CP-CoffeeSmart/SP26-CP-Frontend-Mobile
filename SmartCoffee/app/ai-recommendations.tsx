@@ -12,8 +12,8 @@ export default function AIRecommendationsScreen() {
     beverageId?: string;
     beverage?: string;
   }>();
-  const fallbackImage =
-    'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
+  const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
+  const fallbackImage = Image.resolveAssetSource(recommendationBgImage).uri;
   const [recipeItems, setRecipeItems] = useState<any[]>([]);
   const [recipeLoading, setRecipeLoading] = useState<Record<number, boolean>>({});
   const [beverageName, setBeverageName] = useState('AI Recommendations');
@@ -206,7 +206,7 @@ export default function AIRecommendationsScreen() {
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        source={recommendationBgImage}
         style={styles.header}
         imageStyle={styles.headerImage}
       >
@@ -218,21 +218,6 @@ export default function AIRecommendationsScreen() {
           <Text style={styles.headerTitle}>Recipes of {beverageName.replace('Recipes of ', '')}</Text>
         </View>
       </ImageBackground>
-
-      <View style={styles.filtersWrapper}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtersContainer}
-        >
-          <Pressable style={[styles.filterChip, styles.filterChipActive]}>
-            <Text style={[styles.filterText, styles.filterTextActive]}>All</Text>
-          </Pressable>
-          <Pressable style={styles.filterChip}>
-            <Text style={styles.filterText}>AI Generated</Text>
-          </Pressable>
-        </ScrollView>
-      </View>
 
       <ScrollView
         style={styles.scrollView}
@@ -327,7 +312,7 @@ export default function AIRecommendationsScreen() {
           <TouchableOpacity style={styles.addButton} onPress={() => router.replace('/(tabs)/menu')}>
             <Text style={styles.addButtonText}>Go back</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.purchaseButton} onPress={() => router.push('/ai-create')}>
+          <TouchableOpacity style={styles.purchaseButton} onPress={() => router.push('/create-recipe')}>
             <Text style={styles.purchaseButtonText}>Create Manually</Text>
           </TouchableOpacity>
         </View>
@@ -374,38 +359,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
     flex: 1,
   },
-  filtersWrapper: {
-    backgroundColor: '#F6F2EE',
-    paddingVertical: 12,
-  },
-  filtersContainer: {
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  filterChip: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#EEE6DC',
-  },
-  filterChipActive: {
-    backgroundColor: '#2C1B13',
-    borderColor: '#2C1B13',
-  },
-  filterText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#3E2A22',
-  },
-  filterTextActive: {
-    color: '#FFF',
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
+    paddingTop: 12,
     paddingHorizontal: 16,
     paddingBottom: 28,
     gap: 14,

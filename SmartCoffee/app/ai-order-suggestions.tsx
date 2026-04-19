@@ -18,6 +18,9 @@ import { useSuggestions } from '@/context/suggestion-context';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
+const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
+const recommendationBgUri = Image.resolveAssetSource(recommendationBgImage).uri;
+
 type SupplierProductStockItem = {
   productId: number;
   stock?: number | null;
@@ -268,9 +271,7 @@ export default function AIOrderSuggestionsScreen() {
     <View style={styles.container}>
       {/* Header */}
       <ImageBackground
-        source={{
-          uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200',
-        }}
+        source={recommendationBgImage}
         style={styles.header}
         imageStyle={styles.headerImage}
       >
@@ -377,9 +378,7 @@ export default function AIOrderSuggestionsScreen() {
                 </View>
                 <Image
                   source={{
-                    uri:
-                      item.image ||
-                      'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200',
+                    uri: item.image || recommendationBgUri,
                   }}
                   style={styles.itemImage}
                 />

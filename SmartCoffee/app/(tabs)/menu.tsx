@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   StyleSheet,
   View,
   Text,
@@ -15,6 +16,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
@@ -74,10 +76,9 @@ const BEVERAGE_PAGE_WIDTH = width - 48;
 const BEVERAGE_PAGE_GUTTER = 16;
 const BEVERAGE_PAGE_ITEM_WIDTH = BEVERAGE_PAGE_WIDTH + BEVERAGE_PAGE_GUTTER;
 
-const fallbackMenuImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
-const fallbackBeverageImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
+const fallbackAssetUri = Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
+const fallbackMenuImage = fallbackAssetUri;
+const fallbackBeverageImage = fallbackAssetUri;
 
 const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
@@ -88,16 +89,39 @@ const SUBSCRIPTION_BG_IMAGE = require('../../assets/background.png');
 
 type SubscriptionPackage = {
   subscriptionPackageId?: number;
+  packageId?: number;
   id?: number;
   name?: string;
   tier?: string;
   price?: number | string;
+  amount?: number | string;
+  cost?: number | string;
+  monthlyPrice?: number | string;
+  annualPrice?: number | string;
+  pricePerMonth?: number | string;
   duration?: number | string;
+  durationMonths?: number | string;
+  durationDays?: number | string;
+  billingCycle?: string;
+  cycle?: string;
   description?: string;
+  summary?: string;
+  subtitle?: string;
+  detail?: string;
+  features?: string[] | string;
+  featureList?: string[] | string;
+  benefits?: string[] | string;
+  details?: string[] | string;
+  staffQuantity?: number;
+  menuSuggestLimit?: number;
+  recipeRecommendLimit?: number;
+  productRecommendLimit?: number;
+  menuAnalyzeFeedbackLimit?: number;
+  inventoryForecastLimit?: number;
 };
 
 const getSubscriptionPackageId = (item: SubscriptionPackage) =>
-  item.subscriptionPackageId ?? item.id ?? (item as any).packageId ?? null;
+  item.subscriptionPackageId ?? item.packageId ?? item.id ?? null;
 
 const formatSubscriptionPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
@@ -112,6 +136,77 @@ const getNumericPrice = (value: unknown) => {
   if (value === null || value === undefined) return null;
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
+};
+
+const getSubscriptionPackagePrice = (item: SubscriptionPackage) => {
+  const raw =
+    item?.price ??
+    item?.amount ??
+    item?.cost ??
+    item?.monthlyPrice ??
+    item?.annualPrice ??
+    item?.pricePerMonth;
+  if (typeof raw === 'number') return raw;
+  if (typeof raw === 'string') {
+    const parsed = Number(raw.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getSubscriptionDuration = (item: SubscriptionPackage) => {
+  const duration =
+    item?.duration ??
+    item?.durationMonths ??
+    item?.durationDays ??
+    item?.billingCycle ??
+    item?.cycle;
+  if (!duration) return '';
+  if (typeof duration === 'number') {
+    return duration > 1 ? `${duration} months` : `${duration} month`;
+  }
+  return String(duration);
+};
+
+const getSubscriptionDescription = (item: SubscriptionPackage) => {
+  const description = item?.description ?? item?.summary ?? item?.subtitle ?? item?.detail;
+  return description ? String(description) : '';
+};
+
+const getSubscriptionFeatures = (item: SubscriptionPackage) => {
+  const defaultFeatures: string[] = [];
+
+  if (item.staffQuantity !== undefined) {
+    defaultFeatures.push(`Staff Accounts: ${item.staffQuantity}`);
+  }
+  if (item.menuSuggestLimit !== undefined) {
+    defaultFeatures.push(`Menu Suggestions Limit: ${item.menuSuggestLimit}`);
+  }
+  if (item.recipeRecommendLimit !== undefined) {
+    defaultFeatures.push(`Recipe Recommendations Limit: ${item.recipeRecommendLimit}`);
+  }
+  if (item.productRecommendLimit !== undefined) {
+    defaultFeatures.push(`Product Recommendations Limit: ${item.productRecommendLimit}`);
+  }
+  if (item.menuAnalyzeFeedbackLimit !== undefined) {
+    defaultFeatures.push(`Menu Feedback Analysis Limit: ${item.menuAnalyzeFeedbackLimit}`);
+  }
+  if (item.inventoryForecastLimit !== undefined) {
+    defaultFeatures.push(`Inventory Forecasts Limit: ${item.inventoryForecastLimit}`);
+  }
+
+  const raw = item?.features ?? item?.featureList ?? item?.benefits ?? item?.details;
+  if (Array.isArray(raw)) {
+    return [...defaultFeatures, ...raw.map((value) => String(value)).filter(Boolean)];
+  }
+  if (typeof raw === 'string') {
+    const parsed = raw
+      .split(/\n|;|\r|\r\n/)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    return [...defaultFeatures, ...parsed];
+  }
+  return defaultFeatures;
 };
 
 const getSubscriptionPackageIdFromSubscription = (value: any) => {
@@ -195,6 +290,7 @@ export default function MenuScreen() {
   const [uploadingBeverageId, setUploadingBeverageId] = useState<string | null>(null);
   const [subscriptionGateVisible, setSubscriptionGateVisible] = useState(false);
   const [subscriptionGateShown, setSubscriptionGateShown] = useState(false);
+  const [subscriptionGateReady, setSubscriptionGateReady] = useState(false);
   const [subscriptionPackages, setSubscriptionPackages] = useState<SubscriptionPackage[]>([]);
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -204,7 +300,7 @@ export default function MenuScreen() {
   const [subscribeSubmitting, setSubscribeSubmitting] = useState(false);
   const [payosUrl, setPayosUrl] = useState<string | null>(null);
   const [showPayosModal, setShowPayosModal] = useState(false);
-  const [checkingRecipeGate, setCheckingRecipeGate] = useState(false);
+  const [checkingRecipeGate, setCheckingRecipeGate] = useState<'/ai-create' | '/create-recipe' | null>(null);
   const [checkingMenuGate, setCheckingMenuGate] = useState(false);
   const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
   const [recipeGuardActiveSizeCount, setRecipeGuardActiveSizeCount] = useState(0);
@@ -230,7 +326,15 @@ export default function MenuScreen() {
       const payload = await response.json();
       const items: SubscriptionPackage[] = Array.isArray(payload)
         ? payload
-        : payload?.items ?? payload?.data ?? [];
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.data?.items)
+              ? payload.data.items
+              : Array.isArray(payload?.result)
+                ? payload.result
+                : [];
       const sorted = [...items].sort(
         (a, b) => Number(isTrialSubscription(b)) - Number(isTrialSubscription(a))
       );
@@ -438,19 +542,23 @@ export default function MenuScreen() {
       try {
         const onboardingDone = await AsyncStorage.getItem(ONBOARDING_COMPLETE_KEY);
         if (onboardingDone !== 'true') {
+          setSubscriptionGateReady(true);
           return;
         }
 
         const skipOnce = await AsyncStorage.getItem(SUBSCRIPTION_SKIP_ONCE_KEY);
         if (skipOnce === 'true') {
           await AsyncStorage.removeItem(SUBSCRIPTION_SKIP_ONCE_KEY);
+          setSubscriptionGateReady(true);
           return;
         }
 
         setSubscriptionGateVisible(true);
         setSubscriptionGateShown(true);
+        setSubscriptionGateReady(true);
       } catch {
         // Ignore storage errors.
+        setSubscriptionGateReady(true);
       }
     };
 
@@ -458,16 +566,26 @@ export default function MenuScreen() {
   }, [authLoading, subscriptionGateShown]);
 
   useEffect(() => {
-    if (subscriptionGateVisible && subscriptionPackages.length === 0 && !subscriptionLoading) {
-      loadSubscriptionPackages();
+    if (authLoading) {
+      return;
     }
-  }, [loadSubscriptionPackages, subscriptionGateVisible, subscriptionLoading, subscriptionPackages.length]);
+
+    if (subscriptionGateShown) {
+      setSubscriptionGateReady(true);
+    }
+  }, [authLoading, subscriptionGateShown]);
 
   useEffect(() => {
-    if (subscriptionGateVisible && !subscriptionInfoLoading) {
+    if (subscriptionGateVisible) {
+      loadSubscriptionPackages();
+    }
+  }, [loadSubscriptionPackages, subscriptionGateVisible]);
+
+  useEffect(() => {
+    if (subscriptionGateVisible) {
       loadCurrentSubscription();
     }
-  }, [loadCurrentSubscription, subscriptionGateVisible, subscriptionInfoLoading]);
+  }, [loadCurrentSubscription, subscriptionGateVisible]);
 
   const fetchMenus = useCallback(async () => {
     if (authLoading) {
@@ -672,7 +790,7 @@ export default function MenuScreen() {
     }
 
     try {
-      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/count`, {
+      const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopBeverage/count?coffeeShopId=${coffeeShopId}`, {
         headers: {
           Accept: '*/*',
         },
@@ -689,9 +807,10 @@ export default function MenuScreen() {
           : result?.totalBeverages ?? result?.count ?? result?.total ?? result?.data ?? 0
       );
 
-      setTotalBeverages(Number.isFinite(countValue) ? countValue : 0);
+      // Temporarily disabled storing global count to avoid bypassing `totalBeverages === 0` check
+      // setTotalBeverages(Number.isFinite(countValue) ? countValue : 0);
     } catch (error) {
-      setTotalBeverages(0);
+      // do nothing
     }
   }, [authLoading, coffeeShopId]);
 
@@ -723,7 +842,9 @@ export default function MenuScreen() {
         : Array.isArray(result?.items)
           ? result.items
           : [];
-    const totalCount = Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? 0);
+    const totalCount = Array.isArray(result) 
+      ? result.length 
+      : Number(result?.totalCount ?? result?.total ?? result?.totalItems ?? rawList.length);
     return { rawList, totalCount };
   };
 
@@ -756,6 +877,10 @@ export default function MenuScreen() {
       }
       const result = await response.json();
       const { rawList, totalCount } = parseBeverageResponse(result);
+
+      if (!searchQuery) {
+        setTotalBeverages(totalCount);
+      }
 
       const mapped = mapBeverageItems(rawList);
 
@@ -982,23 +1107,24 @@ export default function MenuScreen() {
 
   const handleCreateRecipeEntry = useCallback(
     async (target: '/ai-create' | '/create-recipe') => {
-      if (checkingRecipeGate) {
+      if (checkingRecipeGate !== null) {
         return;
       }
 
       if (!coffeeShopId) {
         setRecipeGuardActiveSizeCount(0);
-        setRecipeGuardNeedBeverages(beverages.length < 1);
+        setRecipeGuardNeedBeverages(totalBeverages <= 0 && beverages.length < 1);
         setShowBeverageSizeGuideModal(true);
         return;
       }
 
       try {
-        setCheckingRecipeGate(true);
+        setCheckingRecipeGate(target);
         const sizes = await beverageSizeService.getByShop(coffeeShopId);
         const activeSizeCount = sizes.filter(isBeverageSizeActive).length;
-        const needBeverages = beverages.length < 1;
-        const needSizes = activeSizeCount < 3;
+        const hasAnyBeverage = totalBeverages > 0 || beverages.length > 0;
+        const needBeverages = !hasAnyBeverage;
+        const needSizes = activeSizeCount < 1;
 
         if (needBeverages || needSizes) {
           setRecipeGuardNeedBeverages(needBeverages);
@@ -1015,10 +1141,10 @@ export default function MenuScreen() {
           text2: 'Please try again in a moment.',
         });
       } finally {
-        setCheckingRecipeGate(false);
+        setCheckingRecipeGate(null);
       }
     },
-    [checkingRecipeGate, coffeeShopId, router, beverages.length]
+    [checkingRecipeGate, coffeeShopId, beverages.length, totalBeverages, router]
   );
 
   const handleSelectCategory = (category: BeverageCategory) => {
@@ -1051,6 +1177,36 @@ export default function MenuScreen() {
     return { fileName, mimeType };
   };
 
+  const ensureMediaLibraryPermission = useCallback(async () => {
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (current.granted) {
+      return true;
+    }
+
+    const requested = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (requested.granted) {
+      return true;
+    }
+
+    if (requested.canAskAgain === false) {
+      Alert.alert(
+        'Permission required',
+        'Please allow photo library access in Settings to upload images.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Open Settings',
+            onPress: () => {
+              Linking.openSettings();
+            },
+          },
+        ]
+      );
+    }
+
+    return false;
+  }, []);
+
   const handlePickAndUploadImage = async () => {
     if (createImageUploading) {
       return;
@@ -1060,8 +1216,8 @@ export default function MenuScreen() {
       setCreateImageUploading(true);
       setCreateError(null);
 
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
+      const granted = await ensureMediaLibraryPermission();
+      if (!granted) {
         setCreateError('Please allow photo access to upload an image.');
         return;
       }
@@ -1103,8 +1259,8 @@ export default function MenuScreen() {
 
     try {
       setUploadingBeverageId(String(beverageId));
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
+      const granted = await ensureMediaLibraryPermission();
+      if (!granted) {
         Toast.show({
           type: 'info',
           text1: 'Permission required',
@@ -1304,6 +1460,16 @@ export default function MenuScreen() {
     }
   };
 
+  if (!subscriptionGateReady) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.subscriptionGateBooting}>
+          <ActivityIndicator size="large" color={stylesVars.espresso} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <Modal
@@ -1336,97 +1502,134 @@ export default function MenuScreen() {
                 </TouchableOpacity>
               </View>
 
-              {subscriptionLoading ? (
-                <ActivityIndicator size="small" color={stylesVars.espresso} />
-              ) : subscriptionError ? (
-                <Text style={styles.subscriptionError}>{subscriptionError}</Text>
-              ) : (
-                <ScrollView
-                  style={styles.subscriptionList}
-                  contentContainerStyle={styles.subscriptionListContent}
-                  showsVerticalScrollIndicator={false}
-                >
-                  {subscriptionPackages.map((item) => {
-                    const price = formatSubscriptionPrice(item.price);
-                    const isTrial = isTrialSubscription(item);
-                    const targetPrice = getNumericPrice(item.price) ?? 0;
-                    const resolvedCurrentPackageId =
-                      currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
-                    const currentPrice = resolvedCurrentPackageId
-                      ? getNumericPrice(
+            {subscriptionLoading ? (
+              <ActivityIndicator size="small" color={stylesVars.espresso} />
+            ) : subscriptionError ? (
+              <Text style={styles.subscriptionError}>{subscriptionError}</Text>
+            ) : (
+              <ScrollView
+                style={styles.subscriptionList}
+                contentContainerStyle={styles.subscriptionListContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {subscriptionPackages.map((item) => {
+                  const resolvedPrice = getSubscriptionPackagePrice(item) ?? item.price;
+                  const price = formatSubscriptionPrice(resolvedPrice);
+                  const isTrial = isTrialSubscription(item);
+                  const targetPrice = getNumericPrice(resolvedPrice) ?? 0;
+                  const description = getSubscriptionDescription(item);
+                  const descriptionLines = description
+                    .split(/\n|;|\r|\r\n/)
+                    .map((line) => line.trim())
+                    .filter(Boolean);
+                  const features = getSubscriptionFeatures(item);
+                  const durationText = getSubscriptionDuration(item);
+                  const resolvedCurrentPackageId =
+                    currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
+                  const currentPrice = resolvedCurrentPackageId
+                    ? getNumericPrice(
                         subscriptionPackages.find(
                           (pkg) => getSubscriptionPackageId(pkg) === resolvedCurrentPackageId
                         )?.price
                       )
-                      : null;
-                    const activeNameRaw =
-                      currentSubscription?.package?.name ??
-                      currentSubscription?.subscriptionPackage?.name ??
-                      currentSubscription?.packageName ??
-                      currentSubscription?.name ??
-                      null;
-                    const activeName = activeNameRaw
-                      ? String(activeNameRaw).toLowerCase().trim()
-                      : null;
-                    const itemName = String(item.name ?? item.tier ?? '').toLowerCase().trim();
-                    const isCurrentById =
-                      resolvedCurrentPackageId !== null &&
-                      resolvedCurrentPackageId === getSubscriptionPackageId(item);
-                    const isCurrentByName =
-                      Boolean(activeName && itemName) && activeName === itemName;
-                    const isCurrent = isCurrentById || isCurrentByName;
-                    const isLowerOrEqual =
-                      currentPrice !== null && targetPrice <= currentPrice;
-                    const disableSubscribe = isCurrent || isLowerOrEqual;
-                    return (
-                      <View
-                        key={String(getSubscriptionPackageId(item) ?? item.name)}
-                        style={styles.subscriptionPackageCard}
+                    : null;
+                  const activeNameRaw =
+                    currentSubscription?.package?.name ??
+                    currentSubscription?.subscriptionPackage?.name ??
+                    currentSubscription?.packageName ??
+                    currentSubscription?.name ??
+                    null;
+                  const activeName = activeNameRaw
+                    ? String(activeNameRaw).toLowerCase().trim()
+                    : null;
+                  const itemName = String(item.name ?? item.tier ?? '').toLowerCase().trim();
+                  const isCurrentById =
+                    resolvedCurrentPackageId !== null &&
+                    resolvedCurrentPackageId === getSubscriptionPackageId(item);
+                  const isCurrentByName =
+                    Boolean(activeName && itemName) && activeName === itemName;
+                  const isCurrent = isCurrentById || isCurrentByName;
+                  const isLowerOrEqual =
+                    currentPrice !== null && targetPrice <= currentPrice;
+                  const disableSubscribe = isCurrent || isLowerOrEqual;
+                  return (
+                    <View
+                      key={String(getSubscriptionPackageId(item) ?? item.name)}
+                      style={styles.subscriptionPackageCard}
+                    >
+                      {isCurrent ? (
+                        <View style={styles.subscriptionActiveBadge}>
+                          <Text style={styles.subscriptionActiveText}>Active</Text>
+                        </View>
+                      ) : null}
+                      <Text style={styles.subscriptionPackageName}>
+                        {item.name ?? 'Subscription'}
+                      </Text>
+                      {item.tier ? (
+                        <Text style={styles.subscriptionPackageTier}>{item.tier}</Text>
+                      ) : null}
+                      {price ? (
+                        <Text style={styles.subscriptionPackagePrice}>{price}</Text>
+                      ) : null}
+                      {descriptionLines.length > 0 ? (
+                        <View style={styles.subscriptionPackageDescList}>
+                          {descriptionLines.map((line, index) => (
+                            <Text
+                              key={`${getSubscriptionPackageId(item) ?? item.name}-desc-${index}`}
+                              style={styles.subscriptionPackageDesc}
+                            >
+                              - {line}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                      {features.length > 0 ? (
+                        <View style={styles.subscriptionFeatureList}>
+                          {features.map((feature, index) => (
+                            <Text
+                              key={`${getSubscriptionPackageId(item) ?? item.name}-feature-${index}`}
+                              style={styles.subscriptionFeatureText}
+                            >
+                              • {feature}
+                            </Text>
+                          ))}
+                        </View>
+                      ) : null}
+                      {durationText ? (
+                        <View style={styles.subscriptionMetaBadge}>
+                          <Text style={styles.subscriptionPackageMeta}>Duration: {durationText}</Text>
+                        </View>
+                      ) : null}
+                      <TouchableOpacity
+                        style={[
+                          styles.subscriptionPackageAction,
+                          disableSubscribe && styles.subscriptionPackageActionDisabled,
+                        ]}
+                        onPress={() => handleSubscribePackage(item)}
+                        disabled={subscribeSubmitting || disableSubscribe}
                       >
-                        {isCurrent ? (
-                          <View style={styles.subscriptionActiveBadge}>
-                            <Text style={styles.subscriptionActiveText}>Active</Text>
-                          </View>
-                        ) : null}
-                        <Text style={styles.subscriptionPackageName}>
-                          {item.name ?? 'Subscription'}
-                        </Text>
-                        {item.tier ? (
-                          <Text style={styles.subscriptionPackageTier}>{item.tier}</Text>
-                        ) : null}
-                        {price ? (
-                          <Text style={styles.subscriptionPackagePrice}>{price}</Text>
-                        ) : null}
-                        {item.description ? (
-                          <Text style={styles.subscriptionPackageDesc}>{item.description}</Text>
-                        ) : null}
-                        {item.duration ? (
-                          <Text style={styles.subscriptionPackageMeta}>
-                            Duration: {item.duration}
-                          </Text>
-                        ) : null}
-                        <TouchableOpacity
-                          style={styles.subscriptionPackageAction}
-                          onPress={() => handleSubscribePackage(item)}
-                          disabled={subscribeSubmitting || disableSubscribe}
+                        <Text
+                          style={[
+                            styles.subscriptionPackageActionText,
+                            disableSubscribe && styles.subscriptionPackageActionTextDisabled,
+                          ]}
                         >
-                          <Text style={styles.subscriptionPackageActionText}>
-                            {subscribeSubmitting
-                              ? 'Processing...'
-                              : isCurrent
-                                ? 'Activated'
-                                : disableSubscribe
-                                  ? 'Not available'
-                                  : isTrial
-                                    ? 'Start Trial'
-                                    : 'Subscribe'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-              )}
+                          {subscribeSubmitting
+                            ? 'Processing...'
+                            : isCurrent
+                              ? 'Activated'
+                              : disableSubscribe
+                                ? 'Not available'
+                            : isTrial
+                              ? 'Start Trial'
+                              : 'Subscribe'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            )}
             </View>
           </ImageBackground>
         </SafeAreaView>
@@ -1762,24 +1965,24 @@ export default function MenuScreen() {
               </View>
               <View style={styles.suggestionButtons}>
                 <TouchableOpacity
-                  style={[styles.aiButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  style={[styles.aiButton, checkingRecipeGate !== null && styles.suggestionActionDisabled]}
                   onPress={() => handleCreateRecipeEntry('/ai-create')}
-                  disabled={checkingRecipeGate}
+                  disabled={checkingRecipeGate !== null}
                 >
                   <Text style={styles.aiButtonText}>AI Suggestions</Text>
-                  {checkingRecipeGate ? (
+                  {checkingRecipeGate === '/ai-create' ? (
                     <ActivityIndicator size="small" color={stylesVars.espresso} />
                   ) : (
                     <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.manualButton, checkingRecipeGate && styles.suggestionActionDisabled]}
+                  style={[styles.manualButton, checkingRecipeGate !== null && styles.suggestionActionDisabled]}
                   onPress={() => handleCreateRecipeEntry('/create-recipe')}
-                  disabled={checkingRecipeGate}
+                  disabled={checkingRecipeGate !== null}
                 >
                   <Text style={styles.manualButtonText}>Manually</Text>
-                  {checkingRecipeGate ? (
+                  {checkingRecipeGate === '/create-recipe' ? (
                     <ActivityIndicator size="small" color={stylesVars.espresso} />
                   ) : (
                     <Ionicons name="chevron-forward" size={16} color={stylesVars.espresso} />
@@ -1796,6 +1999,7 @@ export default function MenuScreen() {
         visible={showBeverageSizeGuideModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowBeverageSizeGuideModal(false)}
       >
         <View style={styles.guardOverlay}>
@@ -1815,15 +2019,30 @@ export default function MenuScreen() {
               </View>
               <Text style={styles.guardTitle}>Oops!</Text>
               <Text style={styles.guardSubtitle}>
-                You need at least 1 beverage and 3 active beverage sizes to create recipe.
+                You need at least 1 beverage and 1 active size to create recipes.
               </Text>
-              {recipeGuardNeedBeverages ? (
-
-                <Text style={styles.guardHintText}>Current beverages: {beverages.length}/1</Text>
-              ) : null}
-              <Text style={styles.guardHintText}>
-                Active beverage sizes: {recipeGuardActiveSizeCount}/3
-              </Text>
+              <View style={styles.menuGuardMetricsRow}>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    recipeGuardNeedBeverages && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="cafe-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Beverages</Text>
+                  <Text style={styles.menuGuardMetricValue}>{beverages.length}/1</Text>
+                </View>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    recipeGuardActiveSizeCount < 1 && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="resize-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Active Sizes</Text>
+                  <Text style={styles.menuGuardMetricValue}>{recipeGuardActiveSizeCount}/1</Text>
+                </View>
+              </View>
             </View>
 
             <View style={styles.guardSteps}>
@@ -1844,37 +2063,55 @@ export default function MenuScreen() {
                   <Text style={styles.guardStepBadgeText}>2</Text>
                 </View>
                 <View style={styles.guardStepTextWrap}>
-                  <Text style={styles.guardStepTitle}>Activate beverage size</Text>
+                  <Text style={styles.guardStepTitle}>Activate sizes</Text>
                   <Text style={styles.guardStepText}>
-                    Open Profile and make sure at least 3 sizes are active.
+                    Open Profile and set at least 1 active size.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>3</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Unlock recipe</Text>
+                  <Text style={styles.guardStepText}>
+                    Meet the requirements to unlock recipe creation.
                   </Text>
                 </View>
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.guardPrimaryButton}
-              onPress={() => {
-                setShowBeverageSizeGuideModal(false);
-                resetCreateForm();
-                refreshCategories();
-                setShowCreateModal(true);
-              }}
-            >
-              <Ionicons name="add" size={16} color={stylesVars.espresso} />
-              <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
-            </TouchableOpacity>
+            <View style={styles.menuGuardActionsRow}>
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardPrimary]}
+                onPress={() => {
+                  setShowBeverageSizeGuideModal(false);
+                  resetCreateForm();
+                  refreshCategories();
+                  setShowCreateModal(true);
+                }}
+              >
+                <Ionicons name="cafe-outline" size={22} color={stylesVars.espresso} />
+                <Text style={styles.menuGuardActionTitle}>Add Beverage</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Create your first items</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.guardSecondaryButton}
-              onPress={() => {
-                setShowBeverageSizeGuideModal(false);
-                router.push('/(tabs)/profile');
-              }}
-            >
-              <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
-              <Text style={styles.guardSecondaryButtonText}>Add/Active Beverage Size</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardSecondary]}
+                onPress={() => {
+                  setShowBeverageSizeGuideModal(false);
+                  router.push('/(tabs)/profile');
+                }}
+              >
+                <View style={styles.menuGuardActionIconWrap}>
+                  <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+                </View>
+                <Text style={styles.menuGuardActionTitle}>Activate Size</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Set at least 1 size</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1883,6 +2120,7 @@ export default function MenuScreen() {
         visible={showMenuGuardModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowMenuGuardModal(false)}
       >
         <View style={styles.guardOverlay}>
@@ -1904,15 +2142,28 @@ export default function MenuScreen() {
               <Text style={styles.guardSubtitle}>
                 You need at least 5 beverages to start creating a menu.
               </Text>
-
-              {menuGuardContext.needBeverages ? (
-                <Text style={styles.guardHintText}>Current beverages: {beverages.length}/5</Text>
-              ) : null}
-              {menuGuardContext.needSizes ? (
-                <Text style={styles.guardHintText}>
-                  Active beverage sizes: {menuGuardContext.activeSizeCount}/3
-                </Text>
-              ) : null}
+              <View style={styles.menuGuardMetricsRow}>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    menuGuardContext.needBeverages && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="cafe-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Beverages</Text>
+                  <Text style={styles.menuGuardMetricValue}>{beverages.length}/5</Text>
+                </View>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    menuGuardContext.needSizes && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="resize-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Active Sizes</Text>
+                  <Text style={styles.menuGuardMetricValue}>{menuGuardContext.activeSizeCount}/3</Text>
+                </View>
+              </View>
             </View>
 
             <View style={styles.guardSteps}>
@@ -1933,6 +2184,18 @@ export default function MenuScreen() {
                   <Text style={styles.guardStepBadgeText}>2</Text>
                 </View>
                 <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Activate sizes</Text>
+                  <Text style={styles.guardStepText}>
+                    Open Profile and set at least 3 active sizes.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>3</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
                   <Text style={styles.guardStepTitle}>Create recipes</Text>
                   <Text style={styles.guardStepText}>
                     Use AI or build your own recipes quickly.
@@ -1942,7 +2205,7 @@ export default function MenuScreen() {
 
               <View style={styles.guardStepRow}>
                 <View style={styles.guardStepBadge}>
-                  <Text style={styles.guardStepBadgeText}>3</Text>
+                  <Text style={styles.guardStepBadgeText}>4</Text>
                 </View>
                 <View style={styles.guardStepTextWrap}>
                   <Text style={styles.guardStepTitle}>Unlock menu</Text>
@@ -1953,29 +2216,35 @@ export default function MenuScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.guardPrimaryButton}
-              onPress={() => {
-                setShowMenuGuardModal(false);
-                resetCreateForm();
-                refreshCategories();
-                setShowCreateModal(true);
-              }}
-            >
-              <Ionicons name="add" size={16} color={stylesVars.espresso} />
-              <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
-            </TouchableOpacity>
+            <View style={styles.menuGuardActionsRow}>
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardPrimary]}
+                onPress={() => {
+                  setShowMenuGuardModal(false);
+                  resetCreateForm();
+                  refreshCategories();
+                  setShowCreateModal(true);
+                }}
+              >
+                <Ionicons name="cafe-outline" size={22} color={stylesVars.espresso} />
+                <Text style={styles.menuGuardActionTitle}>Add Beverage</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Create your first items</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.guardSecondaryButton}
-              onPress={() => {
-                setShowMenuGuardModal(false);
-                router.push('/(tabs)/profile');
-              }}
-            >
-              <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
-              <Text style={styles.guardSecondaryButtonText}>Add/Active Beverage Size</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardSecondary]}
+                onPress={() => {
+                  setShowMenuGuardModal(false);
+                  router.push('/(tabs)/profile');
+                }}
+              >
+                <View style={styles.menuGuardActionIconWrap}>
+                  <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+                </View>
+                <Text style={styles.menuGuardActionTitle}>Activate Size</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Set at least 3 sizes</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2888,6 +3157,79 @@ const styles = StyleSheet.create({
     color: '#6B5E52',
     lineHeight: 16,
   },
+  menuGuardMetricsRow: {
+    marginTop: 10,
+    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  menuGuardMetricBadge: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E4D4BF',
+    backgroundColor: '#FFF3E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  menuGuardMetricBadgeAlert: {
+    borderColor: '#D9A05B',
+    backgroundColor: '#FCE9CD',
+  },
+  menuGuardMetricLabel: {
+    fontSize: 11,
+    color: '#6B5E52',
+    fontWeight: '600',
+  },
+  menuGuardMetricValue: {
+    fontSize: 14,
+    color: stylesVars.espresso,
+    fontWeight: '700',
+  },
+  menuGuardActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  menuGuardActionCard: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  menuGuardActionCardPrimary: {
+    backgroundColor: '#EBC182',
+    borderColor: '#D9A05B',
+  },
+  menuGuardActionCardSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3D8CC',
+  },
+  menuGuardActionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuGuardActionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  menuGuardActionSubtitle: {
+    fontSize: 11,
+    color: '#6B5E52',
+    textAlign: 'center',
+  },
   guardPrimaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3115,14 +3457,15 @@ const styles = StyleSheet.create({
   },
   subscriptionCard: {
     backgroundColor: 'rgba(255,255,255,0.95)',
-    borderRadius: 26,
-    padding: 20,
+    borderRadius: 28,
+    padding: 22,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 6,
-    minHeight: 520,
+    minHeight: 620,
+    maxHeight: '86%',
   },
   subscriptionLogo: {
     width: 90,
@@ -3133,7 +3476,7 @@ const styles = StyleSheet.create({
   subscriptionHeader: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
     position: 'relative',
   },
   subscriptionHeaderText: {
@@ -3153,25 +3496,25 @@ const styles = StyleSheet.create({
   },
   subscriptionClose: {
     position: 'absolute',
-    top: -100,
-    right: -6,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    top: -4,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#F1E7D8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   subscriptionList: {
-    maxHeight: 260,
+    flex: 1,
   },
   subscriptionListContent: {
     gap: 12,
-    paddingBottom: 8,
+    paddingBottom: 14,
   },
   subscriptionPackageCard: {
-    padding: 14,
-    borderRadius: 18,
+    padding: 16,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(62,39,35,0.15)',
     backgroundColor: '#FFF',
@@ -3190,7 +3533,7 @@ const styles = StyleSheet.create({
     color: stylesVars.espresso,
   },
   subscriptionPackageName: {
-    fontSize: 14,
+    fontSize: 20,
     fontWeight: '700',
     color: stylesVars.espresso,
   },
@@ -3200,37 +3543,69 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   subscriptionPackagePrice: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: stylesVars.primary,
     marginTop: 6,
   },
+  subscriptionPackageDescList: {
+    marginTop: 8,
+    gap: 2,
+  },
   subscriptionPackageDesc: {
-    fontSize: 12,
+    fontSize: 15,
     color: stylesVars.espresso,
-    marginTop: 6,
+    lineHeight: 24,
+  },
+  subscriptionFeatureList: {
+    marginTop: 8,
+    gap: 2,
+  },
+  subscriptionFeatureText: {
+    fontSize: 13,
+    color: '#6B5E52',
+    lineHeight: 20,
+  },
+  subscriptionMetaBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#F5EBDD',
   },
   subscriptionPackageMeta: {
-    fontSize: 11,
-    color: stylesVars.muted,
-    marginTop: 6,
+    fontSize: 12,
+    color: '#6B5E52',
   },
   subscriptionPackageAction: {
-    marginTop: 10,
+    marginTop: 12,
     backgroundColor: stylesVars.espresso,
     borderRadius: 18,
-    paddingVertical: 10,
+    paddingVertical: 12,
     alignItems: 'center',
   },
+  subscriptionPackageActionDisabled: {
+    backgroundColor: '#EDE4D8',
+  },
   subscriptionPackageActionText: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#FFF',
+  },
+  subscriptionPackageActionTextDisabled: {
+    color: '#6B5E52',
   },
   subscriptionError: {
     fontSize: 12,
     color: '#B22222',
     textAlign: 'center',
+  },
+  subscriptionGateBooting: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: stylesVars.background,
   },
   payosContainer: {
     flex: 1,

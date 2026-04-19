@@ -27,11 +27,10 @@ const COLORS = {
   danger: '#B23B3B',
 };
 
-const headerImage =
-  'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1200&q=80';
-
-const fallbackItemImage =
-  'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
+const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
+const recommendationBgUri = Image.resolveAssetSource(recommendationBgImage).uri;
+const headerImage = recommendationBgUri;
+const fallbackItemImage = recommendationBgUri;
 
 type StockCheckResponseItem = {
   productId: number;

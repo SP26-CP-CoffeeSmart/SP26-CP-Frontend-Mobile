@@ -44,7 +44,7 @@ const COLORS = {
 };
 
 const FALLBACK_PRODUCT_IMAGE =
-    'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
+    Image.resolveAssetSource(require('../assets/AI_RecommendationBackground.jpg')).uri;
 type ShippingOption = {
     id: string;
     label: string;

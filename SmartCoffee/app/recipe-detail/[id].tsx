@@ -8,6 +8,8 @@ import {
     ActivityIndicator,
     RefreshControl,
     BackHandler,
+    Alert,
+    Linking,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -106,7 +108,7 @@ interface SupplierProductApiItem {
 }
 
 const fallbackIngredientImage =
-    'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=600&q=80';
+    Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 
 const resolveRemoteImageUrl = (raw?: string | null) => {
     if (!raw || raw === 'null' || raw === 'undefined') return null;
@@ -705,7 +707,7 @@ export default function RecipeDetailScreen() {
         return [] as string[];
     };
 
-    const getFallbackImage = () => require('../../assets/1.jpg');
+    const getFallbackImage = () => require('../../assets/AI_RecommendationBackground.jpg');
 
     const getRecipeImageSource = () => {
         const normalizedImageUrl = normalizeImageUrl(recipeData?.image);
@@ -718,7 +720,7 @@ export default function RecipeDetailScreen() {
 
     const getRecipeImage = () => {
         if (!recipeData?.image) {
-            return 'https://lh3.googleusercontent.com/aida-public/AB6AXuDl87arBmNghjOioarMuDcsgcswz2hHA3F2yNZ8NePUKywSLDcrQEW0dtF4rv3_qdJ2Q_UYP57nWMWho_KZIKZgX2Bcpf5IYXA6YaWoa1e-WzZHj1QVtev7hcIPqo2lws-rrsBVrCtaWTk9PdnKySgNsVxF26RwQ9HQ99gWzikR8L_0WdHKWLOWEh3v-FObZD41CuhVwyUJsvJQfOe4mr1c00xlUYhbHTwENoSkh0v4p-B1jR7ro_N6HqFvYH2L7pltH0bHCLX9i0ve';
+            return fallbackIngredientImage;
         }
 
         if (recipeData.image.startsWith('http')) {
@@ -757,6 +759,36 @@ export default function RecipeDetailScreen() {
         return { fileName, mimeType };
     };
 
+    const ensureMediaLibraryPermission = useCallback(async () => {
+        const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (current.granted) {
+            return true;
+        }
+
+        const requested = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (requested.granted) {
+            return true;
+        }
+
+        if (requested.canAskAgain === false) {
+            Alert.alert(
+                'Permission required',
+                'Please allow photo library access in Settings to upload recipe image.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Open Settings',
+                        onPress: () => {
+                            Linking.openSettings();
+                        },
+                    },
+                ]
+            );
+        }
+
+        return false;
+    }, []);
+
     const handleUploadRecipeImage = async () => {
         if (isRecommendationMenuItem) {
             Toast.show({
@@ -773,8 +805,8 @@ export default function RecipeDetailScreen() {
         try {
             setUploadingRecipeImage(true);
 
-            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (!permission.granted) {
+            const granted = await ensureMediaLibraryPermission();
+            if (!granted) {
                 Toast.show({
                     type: 'info',
                     text1: 'Permission required',

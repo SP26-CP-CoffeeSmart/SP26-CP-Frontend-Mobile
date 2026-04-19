@@ -13,6 +13,8 @@ import {
   BackHandler,
   Dimensions,
   RefreshControl,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +23,8 @@ import { useNavigationState } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
@@ -174,7 +178,7 @@ interface MenuData {
 }
 
 const fallbackMenuImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+  Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 
 const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
@@ -364,6 +368,7 @@ export default function MenuInsightsScreen() {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [warningModalTitle, setWarningModalTitle] = useState('Warning');
   const [warningModalMessage, setWarningModalMessage] = useState('');
+  const [downloadingViewerImage, setDownloadingViewerImage] = useState(false);
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -377,6 +382,8 @@ export default function MenuInsightsScreen() {
   const { categories } = useBeverageCategories();
   const { coffeeShopId } = useAuth();
   const menuImageUri = menuImageUris[0] ?? null;
+  const selectedViewerImageUri =
+    menuImageUris[currentViewerImageIndex] ?? menuImageUri ?? fallbackMenuImage;
   const hasEditedMenuItemsForVersion =
     editedMenuItemIds.length > 0 ||
     lastSavedEditedMenuItemIds.length > 0 ||
@@ -434,6 +441,60 @@ export default function MenuInsightsScreen() {
     savedTranslateX.value = 0;
     savedTranslateY.value = 0;
   };
+
+  const handleDownloadViewerImage = useCallback(async () => {
+    const targetUrl = selectedViewerImageUri;
+    if (!targetUrl) {
+      openWarningModal('Download unavailable', 'No menu image available to download.');
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      Linking.openURL(targetUrl);
+      return;
+    }
+
+    if (typeof MediaLibrary.requestPermissionsAsync !== 'function') {
+      openWarningModal(
+        'Download unavailable',
+        'Please rebuild the app to enable photo saving.'
+      );
+      return;
+    }
+
+    try {
+      setDownloadingViewerImage(true);
+
+      const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
+      if (!permission.granted) {
+        openWarningModal('Permission denied', 'Allow photo access to save this image.');
+        return;
+      }
+
+      const safeExtension = (() => {
+        const cleanUrl = targetUrl.split('?')[0];
+        const parts = cleanUrl.split('.');
+        const last = parts[parts.length - 1];
+        return last && last.length <= 4 ? last : 'jpg';
+      })();
+
+      const targetUri = `${FileSystem.cacheDirectory}menu-insights-${Date.now()}.${safeExtension}`;
+      const downloadResult = await FileSystem.downloadAsync(targetUrl, targetUri);
+      const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+      await MediaLibrary.createAlbumAsync('SmartCoffee', asset, false);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Saved to Photos',
+        text2: 'Menu image downloaded successfully.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to download image.';
+      openWarningModal('Download failed', message);
+    } finally {
+      setDownloadingViewerImage(false);
+    }
+  }, [selectedViewerImageUri, openWarningModal]);
 
   const parseNumberInput = (value: string, fallback: number) => {
     const normalized = value.trim();
@@ -3538,6 +3599,17 @@ export default function MenuInsightsScreen() {
               <Ionicons name="close" size={22} color="#FFFFFF" />
             </TouchableOpacity>
 
+            <TouchableOpacity
+              style={[
+                styles.imageViewerDownloadButton,
+                downloadingViewerImage && styles.imageViewerDownloadButtonDisabled,
+              ]}
+              onPress={handleDownloadViewerImage}
+              disabled={downloadingViewerImage}
+            >
+              <Ionicons name="download-outline" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
+
             <View style={styles.imageViewerGestureArea}>
               {menuImageUris.length > 1 ? (
                 <>
@@ -3921,6 +3993,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 2,
+  },
+  imageViewerDownloadButton: {
+    position: 'absolute',
+    top: 52,
+    right: 70,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  imageViewerDownloadButtonDisabled: {
+    opacity: 0.6,
   },
   imageViewerImage: {
     width: '95%',
