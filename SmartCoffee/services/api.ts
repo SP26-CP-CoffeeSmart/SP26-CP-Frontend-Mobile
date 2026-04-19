@@ -108,6 +108,7 @@ export const API_ENDPOINTS = {
     createMenuRender: () => `${AUTH_BASE_URL}/AI/create-menu-p3-render`,
     generateRecipeImages: () => `${AUTH_BASE_URL}/AI/generate-recipe-images-and-save`,
     analyzeMenuFeedback: (menuId: number) => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/${menuId}`,
+    analyzeMenuFeedbackRenderImage: () => `${AUTH_BASE_URL}/AI/analyze-menu-feedback/render-image`,
     updateAi: (menuId: number | string) => `${AUTH_BASE_URL}/AI/update-ai/${menuId}`,
     predictInventory: () => `${AUTH_BASE_URL}/AI/predict-inventory`,
   },

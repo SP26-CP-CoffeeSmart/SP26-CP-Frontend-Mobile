@@ -84,6 +84,17 @@ const formatMeasurement = (measurement?: string) => {
   return measurement;
 };
 
+const parseMinStockInput = (input: string): number | null => {
+  const normalized = input.trim().replace(',', '.');
+  if (!normalized) return null;
+  if (!/^(?:\d+|\d+\.\d+|\.\d+)$/.test(normalized)) return null;
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+
+  return parsed;
+};
+
 const formatDate = (value?: string | null) => {
   if (!value) return '--';
   const date = new Date(value);
@@ -116,6 +127,8 @@ export default function IngredientDetailScreen() {
 
   const normalizedRole = (role ?? '').trim().toLowerCase();
   const canSetThreshold = normalizedRole === 'shopowner' || normalizedRole === 'owner';
+  const parsedThresholdValue = useMemo(() => parseMinStockInput(manualThresholdText), [manualThresholdText]);
+  const isThresholdInvalid = manualThresholdText.trim().length > 0 && parsedThresholdValue === null;
 
   useEffect(() => {
     fetchIngredientDetail();
@@ -218,12 +231,12 @@ export default function IngredientDetailScreen() {
 
     if (!inventoryDetail || isUpdating) return;
 
-    const parsedManual = Number.parseFloat(manualThresholdText.replace(',', '.'));
-    if (!Number.isFinite(parsedManual)) {
+    const parsedManual = parseMinStockInput(manualThresholdText);
+    if (parsedManual === null) {
       Toast.show({
         type: 'error',
         text1: 'Invalid threshold',
-        text2: 'Please enter a valid number for the threshold.',
+        text2: 'Minimum stock must be a numeric and non-empty value.',
       });
       return;
     }
@@ -420,20 +433,26 @@ export default function IngredientDetailScreen() {
                 value={manualThresholdText}
                 onChangeText={(value) => setManualThresholdText(value.replace(',', '.'))}
                 onBlur={() => {
-                  const next = Number.parseFloat(manualThresholdText.replace(',', '.'));
-                  if (Number.isFinite(next)) setManualThresholdText(next.toFixed(1));
+                  const next = parseMinStockInput(manualThresholdText);
+                  if (next !== null) setManualThresholdText(next.toFixed(1));
                 }}
                 keyboardType="decimal-pad"
-                style={styles.thresholdInput}
+                style={[styles.thresholdInput, isThresholdInvalid && styles.thresholdInputInvalid]}
               />
               <TouchableOpacity
                 onPress={handleApplyChanges}
-                disabled={isUpdating}
-                style={[styles.updateBtn, isUpdating && styles.updateBtnDisabled]}
+                disabled={isUpdating || parsedThresholdValue === null}
+                style={[
+                  styles.updateBtn,
+                  (isUpdating || parsedThresholdValue === null) && styles.updateBtnDisabled,
+                ]}
               >
                 <Text style={styles.updateBtnText}>{isUpdating ? 'Updating...' : 'Update'}</Text>
               </TouchableOpacity>
             </View>
+            {isThresholdInvalid ? (
+              <Text style={styles.validationText}>Please enter a valid number (e.g. 5 or 5.5).</Text>
+            ) : null}
           </View>
         ) : (
           <View style={styles.card}>
@@ -691,6 +710,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.text,
     backgroundColor: '#FFFDFC',
+  },
+  thresholdInputInvalid: {
+    borderColor: COLORS.dangerText,
+  },
+  validationText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: COLORS.dangerText,
   },
   updateBtn: {
     backgroundColor: COLORS.accent,

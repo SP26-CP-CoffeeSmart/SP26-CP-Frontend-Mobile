@@ -160,6 +160,66 @@ const normalizeMenuImageUrl = (menu: any): string | null => {
   return variants[0] ?? rawUrl;
 };
 
+type RenderedMenuImagePatch = {
+  imageUrl: string | null;
+  imageUrls: string[];
+};
+
+const normalizeImageCandidate = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return null;
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return null;
+  const variants = getFirebaseImageVariants(trimmed);
+  return variants[0] ?? trimmed;
+};
+
+const collectRenderedImageUrls = (payload: any): string[] => {
+  if (typeof payload === 'string') {
+    const singleUrl = normalizeImageCandidate(payload);
+    return singleUrl ? [singleUrl] : [];
+  }
+
+  const candidates: unknown[] = [
+    payload?.ImageUrl,
+    payload?.imageUrl,
+    payload?.menu?.ImageUrl,
+    payload?.menu?.imageUrl,
+    payload?.result?.ImageUrl,
+    payload?.result?.imageUrl,
+  ];
+
+  if (Array.isArray(payload?.ImageUrls)) {
+    candidates.push(...payload.ImageUrls);
+  }
+  if (Array.isArray(payload?.imageUrls)) {
+    candidates.push(...payload.imageUrls);
+  }
+  if (Array.isArray(payload?.menu?.ImageUrls)) {
+    candidates.push(...payload.menu.ImageUrls);
+  }
+  if (Array.isArray(payload?.menu?.imageUrls)) {
+    candidates.push(...payload.menu.imageUrls);
+  }
+
+  return Array.from(
+    new Set(candidates.map(normalizeImageCandidate).filter((value): value is string => Boolean(value)))
+  );
+};
+
+const getNormalizedMenuId = (menu: any): number => {
+  const value = Number(menu?.menuId ?? menu?.id ?? 0);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+};
+
+const getMenuImagePatchKey = (menu: any, index: number): string => {
+  const menuId = getNormalizedMenuId(menu);
+  if (menuId > 0) {
+    return `menu:${menuId}`;
+  }
+  return `menu-index:${index}`;
+};
+
 const CARD_IMAGE_ASPECT_RATIO = 16 / 9;
 
 function ResilientMenuImage({
@@ -274,6 +334,10 @@ export default function MenuResultsScreen() {
   const [detailPayloadCacheKey, setDetailPayloadCacheKey] = useState<string>('');
   const [fullP1Payload, setFullP1Payload] = useState<any>(null);
   const [savingMenuKey, setSavingMenuKey] = useState<string | null>(null);
+  const [renderingImageMenuKey, setRenderingImageMenuKey] = useState<string | null>(null);
+  const [renderedImagePatchMap, setRenderedImagePatchMap] = useState<Record<string, RenderedMenuImagePatch>>(
+    {}
+  );
   const navigatingRef = useRef(false);
   const lastPressAtRef = useRef(0);
   const generatedPayloadCacheRef = useRef<{ source: string; key: string } | null>(null);
@@ -361,6 +425,11 @@ export default function MenuResultsScreen() {
     setFullP1Payload(parsedPayload);
   }, [parsedPayload]);
 
+  useEffect(() => {
+    setRenderedImagePatchMap({});
+    setRenderingImageMenuKey(null);
+  }, [payloadSource]);
+
   const menus = useMemo(() => pickMenus(parsedPayload), [parsedPayload]);
   const baseConfig =
     parsedPayload?.config ??
@@ -375,6 +444,91 @@ export default function MenuResultsScreen() {
     }
     return parsedPayload;
   }, [fullP1Payload, parsedPayload]);
+
+  const applyRenderedImagePatch = (menu: any, index: number) => {
+    const patchKey = getMenuImagePatchKey(menu, index);
+    const patch = renderedImagePatchMap[patchKey];
+    if (!patch) return menu;
+
+    return {
+      ...menu,
+      imageUrl: patch.imageUrl,
+      imageUrls: patch.imageUrls,
+    };
+  };
+
+  const handleGenerateFeedbackImage = async (menu: any, index: number) => {
+    const menuId = getNormalizedMenuId(menu);
+    if (!menuId) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing menu ID',
+        text2: 'Cannot render image for this menu.',
+      });
+      return;
+    }
+
+    const menuImagePatchKey = getMenuImagePatchKey(menu, index);
+
+    try {
+      setRenderingImageMenuKey(menuImagePatchKey);
+
+      const response = await authorizedFetch(API_ENDPOINTS.ai.analyzeMenuFeedbackRenderImage(), {
+        method: 'POST',
+        headers: {
+          Accept: '*/*',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          menuId,
+          menu,
+        }),
+      });
+
+      const responseText = await response.text();
+      let responsePayload: any = null;
+      if (responseText) {
+        try {
+          responsePayload = JSON.parse(responseText);
+        } catch {
+          responsePayload = responseText;
+        }
+      }
+
+      if (!response.ok) {
+        const backendError = responsePayload?.error ?? responsePayload?.message ?? responseText;
+        throw new Error(backendError || `Request failed (${response.status})`);
+      }
+
+      const resolvedImageUrls = collectRenderedImageUrls(responsePayload);
+      if (resolvedImageUrls.length === 0) {
+        throw new Error('No image URL returned by render-image API.');
+      }
+
+      setRenderedImagePatchMap((prev) => ({
+        ...prev,
+        [menuImagePatchKey]: {
+          imageUrl: resolvedImageUrls[0] ?? null,
+          imageUrls: resolvedImageUrls,
+        },
+      }));
+
+      Toast.show({
+        type: 'success',
+        text1: 'Image generated',
+        text2: 'AI menu image was updated successfully.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to generate menu image.';
+      Toast.show({
+        type: 'error',
+        text1: 'Generate image failed',
+        text2: message,
+      });
+    } finally {
+      setRenderingImageMenuKey((current) => (current === menuImagePatchKey ? null : current));
+    }
+  };
 
   const handleSaveAiMenu = async (menu: any, menuKey: string) => {
     const menuId = Number(menu?.menuId ?? menu?.id ?? 0);
@@ -493,27 +647,32 @@ export default function MenuResultsScreen() {
           <Text style={styles.emptyText}>No menu data returned from the API.</Text>
         ) : (
           menus.map((menu, index) => {
-            const title = getMenuTitle(menu, index);
-            const subtitle = getMenuSubtitle(menu, flow);
-            const groups = getGroupNames(menu);
-            const averagePrice = getAveragePrice(menu);
-            const visualTheme = getVisualTheme(menu);
-            const menuId = String(menu?.menuId ?? menu?.id ?? index);
+            const hydratedMenu = applyRenderedImagePatch(menu, index);
+            const title = getMenuTitle(hydratedMenu, index);
+            const subtitle = getMenuSubtitle(hydratedMenu, flow);
+            const groups = getGroupNames(hydratedMenu);
+            const averagePrice = getAveragePrice(hydratedMenu);
+            const visualTheme = getVisualTheme(hydratedMenu);
+            const menuId = String(hydratedMenu?.menuId ?? hydratedMenu?.id ?? index);
             const menuKey = `${menuId}-${index}`;
-            const modifiedMenuItemIds = normalizeModifiedMenuItemIds(menu);
+            const modifiedMenuItemIds = normalizeModifiedMenuItemIds(hydratedMenu);
             const canSaveVersion =
-              Number.isFinite(Number(menu?.menuId ?? menu?.id ?? 0)) &&
-              Number(menu?.menuId ?? menu?.id ?? 0) > 0 &&
+              Number.isFinite(Number(hydratedMenu?.menuId ?? hydratedMenu?.id ?? 0)) &&
+              Number(hydratedMenu?.menuId ?? hydratedMenu?.id ?? 0) > 0 &&
               modifiedMenuItemIds.length > 0 &&
               !isCreateMenuFlow;
+            const canRenderFeedbackImage = flow === 'menu-version-feedback' && getNormalizedMenuId(hydratedMenu) > 0;
+            const imagePatchKey = getMenuImagePatchKey(hydratedMenu, index);
+            const isRenderingImage = renderingImageMenuKey === imagePatchKey;
+            const hasMenuImage = Boolean(normalizeMenuImageUrl(hydratedMenu));
 
             const menuWithConfig = {
-              ...menu,
+              ...hydratedMenu,
               config:
-                menu?.config ??
-                menu?.request?.config ??
-                menu?.requestConfig ??
-                menu?.menuConfig ??
+                hydratedMenu?.config ??
+                hydratedMenu?.request?.config ??
+                hydratedMenu?.requestConfig ??
+                hydratedMenu?.menuConfig ??
                 baseConfig,
             };
             const itemParam = safeStringify(menuWithConfig);
@@ -559,7 +718,7 @@ export default function MenuResultsScreen() {
                     </Text>
                     <View style={styles.cardBody}>
                       <ResilientMenuImage
-                        menu={menu}
+                        menu={hydratedMenu}
                         menuKey={menuKey}
                         onPreview={(uri) => {
                           setViewerImageUri(uri);
@@ -618,13 +777,33 @@ export default function MenuResultsScreen() {
                       </View>
                     )}
 
+                    {canRenderFeedbackImage ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.renderImageButton,
+                          isRenderingImage && styles.renderImageButtonDisabled,
+                        ]}
+                        onPress={() => handleGenerateFeedbackImage(hydratedMenu, index)}
+                        disabled={isRenderingImage}
+                      >
+                        <Text style={styles.renderImageButtonText}>
+                          {isRenderingImage
+                            ? 'Generating image...'
+                            : hasMenuImage
+                              ? 'Generate image again'
+                              : 'Generate image'}
+                        </Text>
+                        <Ionicons name="image-outline" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    ) : null}
+
                     {canSaveVersion ? (
                       <TouchableOpacity
                         style={[
                           styles.saveVersionButton,
                           savingMenuKey === menuKey && styles.saveVersionButtonDisabled,
                         ]}
-                        onPress={() => handleSaveAiMenu(menu, menuKey)}
+                        onPress={() => handleSaveAiMenu(hydratedMenu, menuKey)}
                         disabled={savingMenuKey === menuKey}
                       >
                         <Text style={styles.saveVersionButtonText}>
@@ -768,6 +947,24 @@ const styles = StyleSheet.create({
     color: '#7B6454',
     marginBottom: 12,
     lineHeight: 18,
+  },
+  renderImageButton: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#8B5E3C',
+  },
+  renderImageButtonDisabled: {
+    opacity: 0.6,
+  },
+  renderImageButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   saveVersionButton: {
     marginTop: 12,
