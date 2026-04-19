@@ -176,7 +176,7 @@ export default function AiLoadingScreen() {
       }
 
       try {
-        const url = `${AUTH_BASE_URL}/SupplierProduct/recommendations/shop/${coffeeShopId}?threshold=10`;
+        const url = `${AUTH_BASE_URL}/SupplierProduct/recommendations/shop/${coffeeShopId}?threshold=100`;
         const response = await authorizedFetch(url, {
           headers: {
             Accept: '*/*',

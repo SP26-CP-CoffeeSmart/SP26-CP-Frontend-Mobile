@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS } from '@/services/api';
@@ -132,6 +132,7 @@ const getStatusStyles = (status?: string) => {
 
 export default function StaffOrdersScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ status?: string | string[] }>();
   const { ownerId, coffeeShopId } = useAuth();
   const resolvedOwnerId = useMemo(() => ownerId ?? coffeeShopId ?? null, [ownerId, coffeeShopId]);
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -147,6 +148,21 @@ export default function StaffOrdersScreen() {
   const selectedStatusLabel = useMemo(() => {
     return ORDER_STATUSES.find((item) => item.key === selectedStatus)?.label ?? 'All';
   }, [selectedStatus]);
+
+  const mappedStatusFromParam = useMemo(() => {
+    const rawStatus = Array.isArray(params.status) ? params.status[0] : params.status;
+    if (!rawStatus) return null;
+
+    const normalized = rawStatus.trim().toLowerCase();
+    const matched = ORDER_STATUSES.find(
+      (item) =>
+        item.key.toLowerCase() === normalized ||
+        item.label.toLowerCase() === normalized ||
+        item.apiLabel.toLowerCase() === normalized
+    );
+
+    return matched?.key ?? null;
+  }, [params.status]);
 
   const normalizedSearchQuery = useMemo(() => searchQuery.trim().toLowerCase(), [searchQuery]);
 
@@ -241,6 +257,12 @@ export default function StaffOrdersScreen() {
     setOrders([]);
   }, []);
 
+  useEffect(() => {
+    if (!mappedStatusFromParam) return;
+    if (mappedStatusFromParam === selectedStatus) return;
+    onChangeStatus(mappedStatusFromParam);
+  }, [mappedStatusFromParam, onChangeStatus, selectedStatus]);
+
   const onLoadMore = useCallback(() => {
     if (loadingMore || loading || currentPage >= totalPages) return;
     loadOrders({ page: currentPage + 1, append: true, statusKey: selectedStatus });
@@ -261,7 +283,7 @@ export default function StaffOrdersScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.screenHeader}>
         <Text style={styles.title}>Orders</Text>
         <Text style={styles.subtitle}>Tap an order card to view full details.</Text>

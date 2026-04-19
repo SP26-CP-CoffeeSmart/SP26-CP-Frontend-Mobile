@@ -148,6 +148,14 @@ export default function DailySalesScreen() {
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
 
+    const getTodayEnd = () => {
+        const today = new Date();
+        today.setHours(23, 59, 59, 999);
+        return today;
+    };
+
+    const isFutureDate = (date: Date) => date.getTime() > getTodayEnd().getTime();
+
     const normalizeSizeName = (value?: string) => (value || '').trim().toUpperCase();
 
     const formatPrice = (value?: number) => {
@@ -470,10 +478,16 @@ export default function DailySalesScreen() {
     };
 
     const handleDatePickerChange = (event: any, date?: Date) => {
-        if (Platform.OS === 'android') {
-            setShowDatePicker(false);
-        }
         if (date) {
+            if (isFutureDate(date)) {
+                Toast.show({
+                    type: 'error',
+                    text1: 'Invalid date',
+                    text2: 'Cannot select a date later than today',
+                });
+                setSelectedDate(getTodayEnd());
+                return;
+            }
             setSelectedDate(date);
         }
     };
@@ -484,6 +498,15 @@ export default function DailySalesScreen() {
                 type: 'error',
                 text1: 'No sales records',
                 text2: 'Please enter at least one item',
+            });
+            return;
+        }
+
+        if (isFutureDate(selectedDate)) {
+            Toast.show({
+                type: 'error',
+                text1: 'Invalid date',
+                text2: 'Daily sales date cannot be in the future',
             });
             return;
         }
@@ -764,6 +787,7 @@ export default function DailySalesScreen() {
                                     mode="date"
                                     display="spinner"
                                     onChange={handleDatePickerChange}
+                                    maximumDate={getTodayEnd()}
                                     textColor={COLORS.text}
                                 />
                             </View>

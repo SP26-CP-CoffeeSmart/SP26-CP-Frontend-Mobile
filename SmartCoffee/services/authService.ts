@@ -257,6 +257,29 @@ export const changePassword = async (oldPassword: string, newPassword: string): 
   }
 };
 
+export const updateStaffProfile = async (
+  email: string,
+  fullName: string,
+  phone: string
+): Promise<void> => {
+  const response = await authorizedFetch(API_ENDPOINTS.auth.updateStaff(), {
+    method: 'PUT',
+    headers: {
+      Accept: '*/*',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      email,
+      fullName,
+      phone,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+};
+
 export const updateCoffeeShop = async (
   coffeeShopId: number,
   shopName: string,
