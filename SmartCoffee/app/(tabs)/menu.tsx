@@ -175,6 +175,15 @@ export default function MenuScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [totalBeverages, setTotalBeverages] = useState(0);
   const [showMenuGuardModal, setShowMenuGuardModal] = useState(false);
+  const [menuGuardContext, setMenuGuardContext] = useState<{
+    needBeverages: boolean;
+    needSizes: boolean;
+    activeSizeCount: number;
+  }>({
+    needBeverages: false,
+    needSizes: false,
+    activeSizeCount: 0,
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createImageUrl, setCreateImageUrl] = useState('');
@@ -198,6 +207,8 @@ export default function MenuScreen() {
   const [checkingRecipeGate, setCheckingRecipeGate] = useState(false);
   const [checkingMenuGate, setCheckingMenuGate] = useState(false);
   const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
+  const [recipeGuardActiveSizeCount, setRecipeGuardActiveSizeCount] = useState(0);
+  const [recipeGuardNeedBeverages, setRecipeGuardNeedBeverages] = useState(false);
   const subscriptionSuccessRef = useRef(false);
   const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
   const [beveragePage, setBeveragePage] = useState(1);
@@ -383,7 +394,7 @@ export default function MenuScreen() {
         setSubscribeSubmitting(false);
       }
     },
-      [accountId, loadCurrentSubscription, subscribeSubmitting]
+    [accountId, loadCurrentSubscription, subscribeSubmitting]
   );
 
   const handlePayosShouldStart = useCallback((event: { url?: string }) => {
@@ -924,19 +935,31 @@ export default function MenuScreen() {
       return;
     }
 
-    // Use loaded beverage list as the source of truth for guard validation.
-    if (beverages.length < 5) {
-      setShowMenuGuardModal(true);
-      return;
-    }
-
-    if (!coffeeShopId) {
-      setShowBeverageSizeGuideModal(true);
-      return;
-    }
-
     try {
       setCheckingMenuGate(true);
+
+      const needBeverages = beverages.length < 5;
+
+      let activeSizeCount = 0;
+      if (coffeeShopId) {
+        const sizes = await beverageSizeService.getByShop(coffeeShopId);
+        activeSizeCount = sizes.filter(isBeverageSizeActive).length;
+      }
+
+      const needSizes = activeSizeCount < 3;
+
+      if (needBeverages || needSizes) {
+        setMenuGuardContext({ needBeverages, needSizes, activeSizeCount });
+        setShowMenuGuardModal(true);
+        return;
+      }
+
+      if (!coffeeShopId) {
+        setMenuGuardContext({ needBeverages, needSizes: true, activeSizeCount: 0 });
+        setShowMenuGuardModal(true);
+        return;
+      }
+
       const sizes = await beverageSizeService.getByShop(coffeeShopId);
       const hasActiveSize = sizes.some(isBeverageSizeActive);
 
@@ -964,6 +987,8 @@ export default function MenuScreen() {
       }
 
       if (!coffeeShopId) {
+        setRecipeGuardActiveSizeCount(0);
+        setRecipeGuardNeedBeverages(beverages.length < 1);
         setShowBeverageSizeGuideModal(true);
         return;
       }
@@ -971,9 +996,13 @@ export default function MenuScreen() {
       try {
         setCheckingRecipeGate(true);
         const sizes = await beverageSizeService.getByShop(coffeeShopId);
-        const hasActiveSize = sizes.some(isBeverageSizeActive);
+        const activeSizeCount = sizes.filter(isBeverageSizeActive).length;
+        const needBeverages = beverages.length < 1;
+        const needSizes = activeSizeCount < 3;
 
-        if (!hasActiveSize) {
+        if (needBeverages || needSizes) {
+          setRecipeGuardNeedBeverages(needBeverages);
+          setRecipeGuardActiveSizeCount(activeSizeCount);
           setShowBeverageSizeGuideModal(true);
           return;
         }
@@ -989,7 +1018,7 @@ export default function MenuScreen() {
         setCheckingRecipeGate(false);
       }
     },
-    [checkingRecipeGate, coffeeShopId, router]
+    [checkingRecipeGate, coffeeShopId, router, beverages.length]
   );
 
   const handleSelectCategory = (category: BeverageCategory) => {
@@ -1294,110 +1323,110 @@ export default function MenuScreen() {
                 style={styles.subscriptionLogo}
                 resizeMode="contain"
               />
-            <View style={styles.subscriptionHeader}>
-              <View style={styles.subscriptionHeaderText}>
-                <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
-                <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
+              <View style={styles.subscriptionHeader}>
+                <View style={styles.subscriptionHeaderText}>
+                  <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
+                  <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.subscriptionClose}
+                  onPress={() => setSubscriptionGateVisible(false)}
+                >
+                  <Ionicons name="close" size={18} color={stylesVars.espresso} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.subscriptionClose}
-                onPress={() => setSubscriptionGateVisible(false)}
-              >
-                <Ionicons name="close" size={18} color={stylesVars.espresso} />
-              </TouchableOpacity>
-            </View>
 
-            {subscriptionLoading ? (
-              <ActivityIndicator size="small" color={stylesVars.espresso} />
-            ) : subscriptionError ? (
-              <Text style={styles.subscriptionError}>{subscriptionError}</Text>
-            ) : (
-              <ScrollView
-                style={styles.subscriptionList}
-                contentContainerStyle={styles.subscriptionListContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {subscriptionPackages.map((item) => {
-                  const price = formatSubscriptionPrice(item.price);
-                  const isTrial = isTrialSubscription(item);
-                  const targetPrice = getNumericPrice(item.price) ?? 0;
-                  const resolvedCurrentPackageId =
-                    currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
-                  const currentPrice = resolvedCurrentPackageId
-                    ? getNumericPrice(
+              {subscriptionLoading ? (
+                <ActivityIndicator size="small" color={stylesVars.espresso} />
+              ) : subscriptionError ? (
+                <Text style={styles.subscriptionError}>{subscriptionError}</Text>
+              ) : (
+                <ScrollView
+                  style={styles.subscriptionList}
+                  contentContainerStyle={styles.subscriptionListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {subscriptionPackages.map((item) => {
+                    const price = formatSubscriptionPrice(item.price);
+                    const isTrial = isTrialSubscription(item);
+                    const targetPrice = getNumericPrice(item.price) ?? 0;
+                    const resolvedCurrentPackageId =
+                      currentPackageId ?? getSubscriptionPackageIdFromSubscription(currentSubscription);
+                    const currentPrice = resolvedCurrentPackageId
+                      ? getNumericPrice(
                         subscriptionPackages.find(
                           (pkg) => getSubscriptionPackageId(pkg) === resolvedCurrentPackageId
                         )?.price
                       )
-                    : null;
-                  const activeNameRaw =
-                    currentSubscription?.package?.name ??
-                    currentSubscription?.subscriptionPackage?.name ??
-                    currentSubscription?.packageName ??
-                    currentSubscription?.name ??
-                    null;
-                  const activeName = activeNameRaw
-                    ? String(activeNameRaw).toLowerCase().trim()
-                    : null;
-                  const itemName = String(item.name ?? item.tier ?? '').toLowerCase().trim();
-                  const isCurrentById =
-                    resolvedCurrentPackageId !== null &&
-                    resolvedCurrentPackageId === getSubscriptionPackageId(item);
-                  const isCurrentByName =
-                    Boolean(activeName && itemName) && activeName === itemName;
-                  const isCurrent = isCurrentById || isCurrentByName;
-                  const isLowerOrEqual =
-                    currentPrice !== null && targetPrice <= currentPrice;
-                  const disableSubscribe = isCurrent || isLowerOrEqual;
-                  return (
-                    <View
-                      key={String(getSubscriptionPackageId(item) ?? item.name)}
-                      style={styles.subscriptionPackageCard}
-                    >
-                      {isCurrent ? (
-                        <View style={styles.subscriptionActiveBadge}>
-                          <Text style={styles.subscriptionActiveText}>Active</Text>
-                        </View>
-                      ) : null}
-                      <Text style={styles.subscriptionPackageName}>
-                        {item.name ?? 'Subscription'}
-                      </Text>
-                      {item.tier ? (
-                        <Text style={styles.subscriptionPackageTier}>{item.tier}</Text>
-                      ) : null}
-                      {price ? (
-                        <Text style={styles.subscriptionPackagePrice}>{price}</Text>
-                      ) : null}
-                      {item.description ? (
-                        <Text style={styles.subscriptionPackageDesc}>{item.description}</Text>
-                      ) : null}
-                      {item.duration ? (
-                        <Text style={styles.subscriptionPackageMeta}>
-                          Duration: {item.duration}
-                        </Text>
-                      ) : null}
-                      <TouchableOpacity
-                        style={styles.subscriptionPackageAction}
-                        onPress={() => handleSubscribePackage(item)}
-                        disabled={subscribeSubmitting || disableSubscribe}
+                      : null;
+                    const activeNameRaw =
+                      currentSubscription?.package?.name ??
+                      currentSubscription?.subscriptionPackage?.name ??
+                      currentSubscription?.packageName ??
+                      currentSubscription?.name ??
+                      null;
+                    const activeName = activeNameRaw
+                      ? String(activeNameRaw).toLowerCase().trim()
+                      : null;
+                    const itemName = String(item.name ?? item.tier ?? '').toLowerCase().trim();
+                    const isCurrentById =
+                      resolvedCurrentPackageId !== null &&
+                      resolvedCurrentPackageId === getSubscriptionPackageId(item);
+                    const isCurrentByName =
+                      Boolean(activeName && itemName) && activeName === itemName;
+                    const isCurrent = isCurrentById || isCurrentByName;
+                    const isLowerOrEqual =
+                      currentPrice !== null && targetPrice <= currentPrice;
+                    const disableSubscribe = isCurrent || isLowerOrEqual;
+                    return (
+                      <View
+                        key={String(getSubscriptionPackageId(item) ?? item.name)}
+                        style={styles.subscriptionPackageCard}
                       >
-                        <Text style={styles.subscriptionPackageActionText}>
-                          {subscribeSubmitting
-                            ? 'Processing...'
-                            : isCurrent
-                              ? 'Activated'
-                              : disableSubscribe
-                                ? 'Not available'
-                            : isTrial
-                              ? 'Start Trial'
-                              : 'Subscribe'}
+                        {isCurrent ? (
+                          <View style={styles.subscriptionActiveBadge}>
+                            <Text style={styles.subscriptionActiveText}>Active</Text>
+                          </View>
+                        ) : null}
+                        <Text style={styles.subscriptionPackageName}>
+                          {item.name ?? 'Subscription'}
                         </Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            )}
+                        {item.tier ? (
+                          <Text style={styles.subscriptionPackageTier}>{item.tier}</Text>
+                        ) : null}
+                        {price ? (
+                          <Text style={styles.subscriptionPackagePrice}>{price}</Text>
+                        ) : null}
+                        {item.description ? (
+                          <Text style={styles.subscriptionPackageDesc}>{item.description}</Text>
+                        ) : null}
+                        {item.duration ? (
+                          <Text style={styles.subscriptionPackageMeta}>
+                            Duration: {item.duration}
+                          </Text>
+                        ) : null}
+                        <TouchableOpacity
+                          style={styles.subscriptionPackageAction}
+                          onPress={() => handleSubscribePackage(item)}
+                          disabled={subscribeSubmitting || disableSubscribe}
+                        >
+                          <Text style={styles.subscriptionPackageActionText}>
+                            {subscribeSubmitting
+                              ? 'Processing...'
+                              : isCurrent
+                                ? 'Activated'
+                                : disableSubscribe
+                                  ? 'Not available'
+                                  : isTrial
+                                    ? 'Start Trial'
+                                    : 'Subscribe'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
             </View>
           </ImageBackground>
         </SafeAreaView>
@@ -1704,7 +1733,7 @@ export default function MenuScreen() {
                     </View>
                   </View>
                 )}
-                ListFooterComponent={() => 
+                ListFooterComponent={() =>
                   beverageLoadingMore ? (
                     <View style={[styles.beveragePage, { justifyContent: 'center', alignItems: 'center' }]}>
                       <ActivityIndicator size="small" color={stylesVars.primary} />
@@ -1769,36 +1798,83 @@ export default function MenuScreen() {
         animationType="fade"
         onRequestClose={() => setShowBeverageSizeGuideModal(false)}
       >
-        <View style={styles.sizeGuideOverlay}>
-          <View style={styles.sizeGuideCard}>
-            <View style={styles.sizeGuideIconWrap}>
-              <Ionicons name="resize-outline" size={28} color={stylesVars.primary} />
-            </View>
-            <Text style={styles.sizeGuideTitle}>Setup Beverage Size First</Text>
-            <Text style={styles.sizeGuideText}>
-              You need at least 1 active beverage size before creating recipes.
-            </Text>
-            <Text style={styles.sizeGuideText}>
-              Go to Profile tab to add or activate a beverage size.
-            </Text>
-
-            <View style={styles.sizeGuideActions}>
+        <View style={styles.guardOverlay}>
+          <View style={styles.guardCard}>
+            <View style={styles.guardHeaderRow}>
               <TouchableOpacity
-                style={styles.sizeGuideSecondaryButton}
+                style={styles.guardCloseButton}
                 onPress={() => setShowBeverageSizeGuideModal(false)}
               >
-                <Text style={styles.sizeGuideSecondaryText}>Close</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.sizeGuidePrimaryButton}
-                onPress={() => {
-                  setShowBeverageSizeGuideModal(false);
-                  router.push('/(tabs)/profile');
-                }}
-              >
-                <Text style={styles.sizeGuidePrimaryText}>Go to Profile</Text>
+                <Ionicons name="close" size={18} color={stylesVars.espresso} />
               </TouchableOpacity>
             </View>
+
+            <View style={styles.guardHeaderCenter}>
+              <View style={styles.guardIconWrap}>
+                <Ionicons name="alert-circle" size={36} color={stylesVars.primary} />
+              </View>
+              <Text style={styles.guardTitle}>Oops!</Text>
+              <Text style={styles.guardSubtitle}>
+                You need at least 1 beverage and 3 active beverage sizes to create recipe.
+              </Text>
+              {recipeGuardNeedBeverages ? (
+
+                <Text style={styles.guardHintText}>Current beverages: {beverages.length}/1</Text>
+              ) : null}
+              <Text style={styles.guardHintText}>
+                Active beverage sizes: {recipeGuardActiveSizeCount}/3
+              </Text>
+            </View>
+
+            <View style={styles.guardSteps}>
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>1</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Add beverages</Text>
+                  <Text style={styles.guardStepText}>
+                    Tap "Add" and fill in beverage details.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>2</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Activate beverage size</Text>
+                  <Text style={styles.guardStepText}>
+                    Open Profile and make sure at least 3 sizes are active.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.guardPrimaryButton}
+              onPress={() => {
+                setShowBeverageSizeGuideModal(false);
+                resetCreateForm();
+                refreshCategories();
+                setShowCreateModal(true);
+              }}
+            >
+              <Ionicons name="add" size={16} color={stylesVars.espresso} />
+              <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.guardSecondaryButton}
+              onPress={() => {
+                setShowBeverageSizeGuideModal(false);
+                router.push('/(tabs)/profile');
+              }}
+            >
+              <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+              <Text style={styles.guardSecondaryButtonText}>Add/Active Beverage Size</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1828,6 +1904,15 @@ export default function MenuScreen() {
               <Text style={styles.guardSubtitle}>
                 You need at least 5 beverages to start creating a menu.
               </Text>
+
+              {menuGuardContext.needBeverages ? (
+                <Text style={styles.guardHintText}>Current beverages: {beverages.length}/5</Text>
+              ) : null}
+              {menuGuardContext.needSizes ? (
+                <Text style={styles.guardHintText}>
+                  Active beverage sizes: {menuGuardContext.activeSizeCount}/3
+                </Text>
+              ) : null}
             </View>
 
             <View style={styles.guardSteps}>
@@ -1879,6 +1964,17 @@ export default function MenuScreen() {
             >
               <Ionicons name="add" size={16} color={stylesVars.espresso} />
               <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.guardSecondaryButton}
+              onPress={() => {
+                setShowMenuGuardModal(false);
+                router.push('/(tabs)/profile');
+              }}
+            >
+              <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+              <Text style={styles.guardSecondaryButtonText}>Add/Active Beverage Size</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2750,6 +2846,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
+  guardHintText: {
+    fontSize: 12,
+    color: '#6B5E52',
+    textAlign: 'center',
+    marginTop: 2,
+  },
   guardSteps: {
     gap: 12,
     marginBottom: 18,
@@ -2796,6 +2898,23 @@ const styles = StyleSheet.create({
     backgroundColor: stylesVars.primary,
   },
   guardPrimaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  guardSecondaryButton: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E3D8CC',
+    backgroundColor: '#FFFFFF',
+  },
+  guardSecondaryButtonText: {
     fontSize: 13,
     fontWeight: '700',
     color: stylesVars.espresso,
