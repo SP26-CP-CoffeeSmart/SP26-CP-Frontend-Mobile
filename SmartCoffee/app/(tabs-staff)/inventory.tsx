@@ -261,7 +261,7 @@ export default function InventoryScreen() {
 
     if (loading && !refreshing) {
         return (
-            <SafeAreaView style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer} edges={['top']}>
                 <ActivityIndicator size="large" color={COLORS.accent} />
             </SafeAreaView>
         );
@@ -269,7 +269,7 @@ export default function InventoryScreen() {
 
     if (error) {
         return (
-            <SafeAreaView style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer} edges={['top']}>
                 <Text style={styles.errorText}>{error}</Text>
                 <TouchableOpacity style={styles.retryButton} onPress={fetchIngredients}>
                     <Text style={styles.retryText}>Try Again</Text>
@@ -279,7 +279,7 @@ export default function InventoryScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <FlatList
                 data={filteredIngredients}
                 keyExtractor={(item) => item.inventoryDetailId.toString()}

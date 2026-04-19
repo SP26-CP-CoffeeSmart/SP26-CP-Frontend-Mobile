@@ -214,7 +214,7 @@ export default function ProductPage() {
     // Increase threshold significantly to trigger fetch before reaching the absolute bottom
     const paddingToBottom = 600;
     const isCloseToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - paddingToBottom;
-    
+
     if (isCloseToBottom && !loading && !loadingMore && hasMore) {
       const nextPage = page + 1;
       setPage(nextPage);
@@ -274,7 +274,7 @@ export default function ProductPage() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView 
+      <ScrollView
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
@@ -378,7 +378,7 @@ export default function ProductPage() {
           >
             <Ionicons name="sparkles" size={14} color={COLORS.text} />
             <Text style={styles.suggestionText}>
-              AI suggestion: Helping you make purchases quickly based on inventory analysis.
+              Product Suggestion: Helping you make purchases quickly based on inventory analysis.
             </Text>
           </TouchableOpacity>
         </View>
@@ -467,7 +467,7 @@ export default function ProductPage() {
             })
           )}
         </View>
-        
+
         {loadingMore ? (
           <View style={styles.loadingMoreContainer}>
             <ActivityIndicator size="small" color={COLORS.accent} />

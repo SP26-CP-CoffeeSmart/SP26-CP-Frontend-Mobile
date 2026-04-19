@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
-import { API_ENDPOINTS } from '@/services/api';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
 const COLORS = {
@@ -57,24 +57,35 @@ const FALLBACK_IMAGE =
     Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 const { height: WINDOW_HEIGHT } = Dimensions.get('window');
 
+const encodeFirebaseObjectPath = (path: string) => {
+    try {
+        return encodeURIComponent(decodeURIComponent(path));
+    } catch {
+        return encodeURIComponent(path);
+    }
+};
+
 const normalizeImageUrl = (url: unknown): string => {
     if (!url || typeof url !== 'string') return FALLBACK_IMAGE;
     const trimmed = url.trim();
     if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return FALLBACK_IMAGE;
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) return FALLBACK_IMAGE;
+    const resolved =
+        trimmed.startsWith('http://') || trimmed.startsWith('https://')
+            ? trimmed
+            : `${AUTH_BASE_URL}${trimmed.startsWith('/') ? trimmed : `/images/${trimmed}`}`;
 
-    if (trimmed.includes('firebasestorage.googleapis.com')) {
-        const oIndex = trimmed.indexOf('/o/');
+    if (resolved.includes('firebasestorage.googleapis.com')) {
+        const oIndex = resolved.indexOf('/o/');
         if (oIndex !== -1) {
-            const baseUrl = trimmed.substring(0, oIndex + 3);
-            const pathWithQuery = trimmed.substring(oIndex + 3);
+            const baseUrl = resolved.substring(0, oIndex + 3);
+            const pathWithQuery = resolved.substring(oIndex + 3);
             const [pathOnly, query = ''] = pathWithQuery.split('?');
-            const encodedPath = pathOnly.replace(/\//g, '%2F');
+            const encodedPath = encodeFirebaseObjectPath(pathOnly);
             return query ? `${baseUrl}${encodedPath}?${query}` : `${baseUrl}${encodedPath}`;
         }
     }
 
-    return trimmed;
+    return resolved;
 };
 
 const normalizeSizeName = (value?: string | null) => (value || '').trim().toUpperCase();
@@ -158,6 +169,7 @@ export default function DailySaleItemScreen() {
     const menuItemIdParam = params.menuItemId as string | undefined;
     const recipeName = params.recipeName as string | undefined;
     const beverageName = params.beverageName as string | undefined;
+    console.log('Received params:', params.itemImage);
     const itemImageRaw = (params.itemImage as string | undefined) || FALLBACK_IMAGE;
     const itemImage = normalizeImageUrl(itemImageRaw);
     const hasHeroImage = itemImage !== FALLBACK_IMAGE;
@@ -350,7 +362,7 @@ export default function DailySaleItemScreen() {
 
             <View style={styles.header}>
                 <TouchableBack routerBack={router.back} />
-                <Text style={styles.headerTitle}>Menu Item Stats</Text>
+                <Text style={styles.headerTitle}>{title}</Text>
                 <View style={{ width: 28 }} />
             </View>
 
@@ -373,6 +385,29 @@ export default function DailySaleItemScreen() {
                     </View>
                 )}
 
+                <View style={styles.heroCard}>
+                    {hasHeroImage ? (
+                        <Image source={{ uri: itemImage }} style={styles.heroImage} />
+                    ) : (
+                        <View style={styles.heroImageFallback}>
+                            <Ionicons name="cafe" size={48} color="#847362" />
+                        </View>
+                    )}
+                    <View style={[styles.heroOverlay, !hasHeroImage && styles.heroOverlayFallback]}>
+                        {/* <Text style={styles.heroTitle} numberOfLines={2}>{title}</Text> */}
+                        <View style={styles.heroSizeRow}>
+                            {menuSizesSorted.map((size) => (
+                                <View key={`${size.sizeName}-${size.sellingPrice}`} style={styles.heroSizeChip}>
+                                    <Text style={styles.heroSizeName}>{size.sizeName || '-'}</Text>
+                                    <Text style={styles.heroSizePrice}>
+                                        {(size.sellingPrice / 1000).toFixed(0)}k
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                </View>
+
                 {records.length === 0 ? (
                     <View style={styles.emptyContent}>
                         <Ionicons name="document-text" size={40} color={COLORS.textSecondary} />
@@ -381,29 +416,6 @@ export default function DailySaleItemScreen() {
                     </View>
                 ) : (
                     <View style={styles.listContent}>
-                        <View style={styles.heroCard}>
-                            {hasHeroImage ? (
-                                <Image source={{ uri: itemImage }} style={styles.heroImage} />
-                            ) : (
-                                <View style={styles.heroImageFallback}>
-                                    <Ionicons name="cafe" size={48} color="#847362" />
-                                </View>
-                            )}
-                            <View style={[styles.heroOverlay, !hasHeroImage && styles.heroOverlayFallback]}>
-                                <Text style={styles.heroTitle} numberOfLines={2}>{title}</Text>
-                                <View style={styles.heroSizeRow}>
-                                    {menuSizesSorted.map((size) => (
-                                        <View key={`${size.sizeName}-${size.sellingPrice}`} style={styles.heroSizeChip}>
-                                            <Text style={styles.heroSizeName}>{size.sizeName || '-'}</Text>
-                                            <Text style={styles.heroSizePrice}>
-                                                {(size.sellingPrice / 1000).toFixed(0)}k
-                                            </Text>
-                                        </View>
-                                    ))}
-                                </View>
-                            </View>
-                        </View>
-
                         <View style={styles.statsRow}>
                             <View style={styles.statCard}>
                                 <View style={styles.statIconWrap}>
@@ -632,7 +644,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingBottom: 16,
         paddingTop: 24,
-        backgroundColor: 'rgba(0,0,0,0.25)',
     },
     heroOverlayFallback: {
         backgroundColor: 'rgba(58, 47, 35, 0.18)',
