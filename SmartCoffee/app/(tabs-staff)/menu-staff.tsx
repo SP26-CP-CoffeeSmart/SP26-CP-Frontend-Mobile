@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Toast from 'react-native-toast-message';
 import { useRouter } from 'expo-router';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
@@ -45,6 +44,20 @@ interface MenuItem {
         beverageSizeId: number;
         menuItemId: number;
         sellingPrice: number;
+        scaledTotalCost?: number;
+        scaledIngredients?: Array<{
+            id?: number;
+            quantity?: number;
+            cost?: number;
+            measurement?: string | null;
+            ingredient_id?: number;
+            ingredient?: {
+                ingredientId?: number;
+                name?: string;
+                category?: string;
+                image?: string | null;
+            } | null;
+        }>;
         beverageSize?: {
             beverageSizeId: number;
             sizeName?: string;
@@ -219,6 +232,20 @@ export default function MenuStaffScreen() {
         return `${value.toLocaleString('vi-VN')} VND`;
     };
 
+    const getMenuItemSizeLabel = (
+        size: { beverageSize?: { sizeName?: string; volume?: number } },
+        index: number
+    ) => {
+        const sizeName = String(size?.beverageSize?.sizeName ?? '').trim();
+        const volume = Number(size?.beverageSize?.volume ?? 0);
+        if (sizeName && Number.isFinite(volume) && volume > 0) {
+            return `${sizeName} (${volume}ml)`;
+        }
+        if (sizeName) return sizeName;
+        if (Number.isFinite(volume) && volume > 0) return `${volume}ml`;
+        return `Size ${index + 1}`;
+    };
+
     const menuImages = getMenuImages();
 
     useEffect(() => {
@@ -240,23 +267,44 @@ export default function MenuStaffScreen() {
         });
     }, [menuImages]);
 
-    const getStatusColor = (status: string) => {
-        switch (status?.toLowerCase()) {
-            case 'active':
-                return '#27AE60';
-            case 'out of stock':
-            case 'outofstock':
-                return '#E74C3C';
-            default:
-                return COLORS.textSecondary;
-        }
-    };
+    const handleViewRecipe = (
+        item: MenuItem,
+        selectedSize?: {
+            itemSizeId: number;
+        } | null
+    ) => {
+        let shopRecipe: any = item?.shopRecipe || null;
+        const shopRecipes =
+            item?.shopBeverage && Array.isArray((item.shopBeverage as any).shopRecipes)
+                ? (item.shopBeverage as any).shopRecipes
+                : [];
 
-    const handleViewRecipe = (item: MenuItem) => {
-        Toast.show({
-            type: 'info',
-            text1: 'Recipe: ' + (item.shopRecipe?.recipeName ?? 'Chưa có tên'),
-            text2: item.shopBeverage.name,
+        if (!shopRecipe && shopRecipes.length > 0) {
+            shopRecipe = shopRecipes[0];
+        }
+
+        const shopRecipeIngredients = Array.isArray(
+            shopRecipe?.ingredients ?? shopRecipe?.shopRecipeIngredients
+        )
+            ? shopRecipe.ingredients ?? shopRecipe.shopRecipeIngredients
+            : [];
+
+        router.push({
+            pathname: '/recipe-detail/[id]',
+            params: {
+                id: String(item.menuItemId || 0),
+                menuItemId: String(item.menuItemId || 0),
+                recipeId: String(item.shopRecipe?.recipeId || 0),
+                beverageName: item.shopBeverage?.name ?? '',
+                recipe: shopRecipe ? JSON.stringify(shopRecipe) : '',
+                recipes: shopRecipes.length > 0 ? JSON.stringify(shopRecipes) : '',
+                ingredients: JSON.stringify(shopRecipeIngredients),
+                itemSizes:
+                    Array.isArray(item.itemSizeViewModels) && item.itemSizeViewModels.length > 0
+                        ? JSON.stringify(item.itemSizeViewModels)
+                        : '',
+                selectedItemSizeId: String(selectedSize?.itemSizeId ?? ''),
+            },
         });
     };
 
@@ -302,85 +350,123 @@ export default function MenuStaffScreen() {
             AUTH_BASE_URL,
             item.shopRecipe?.image ?? item.shopBeverage.imageUrl
         );
-        const hasImage = !!imageUrl;
-        const statusColor = getStatusColor(item.shopBeverage.status);
         const itemSizes = [...(item.itemSizeViewModels || [])].sort((a, b) => {
             const volumeA = a.beverageSize?.volume ?? 0;
             const volumeB = b.beverageSize?.volume ?? 0;
             return volumeA - volumeB;
         });
+        const menuItemVariants = itemSizes.length > 0 ? itemSizes : [null];
 
         return (
-            <View style={styles.menuItemCard}>
-                <View style={styles.menuItemContent}>
-                    {/* Left: Image */}
-                    {hasImage ? (
-                        <Image
-                            source={{ uri: imageUrl }}
-                            style={styles.menuItemImage}
-                        />
-                    ) : (
-                        <View style={styles.menuItemImageFallback}>
-                            <Ionicons name="cafe" size={32} color="#847362" />
-                        </View>
-                    )}
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.menuItemCarousel}
+                contentContainerStyle={styles.menuItemCarouselContent}
+            >
+                {menuItemVariants.map((sizeVariant, variantIndex) => {
+                    const variantPrice = Number(sizeVariant?.sellingPrice ?? item.sellingPrice ?? 0);
+                    const variantLabel = getMenuItemSizeLabel(sizeVariant ?? {}, variantIndex);
+                    const variantCostPerCup = Number(sizeVariant?.scaledTotalCost ?? 0);
+                    const ingredients = Array.isArray(sizeVariant?.scaledIngredients)
+                        ? sizeVariant?.scaledIngredients
+                        : [];
+                    const isLastVariant = variantIndex === menuItemVariants.length - 1;
 
-                    {/* Center: Details */}
-                    <View style={styles.menuItemDetails}>
-                        <Text style={styles.beverageName}>{item.shopRecipe?.recipeName ?? 'Chưa có tên'}</Text>
-
-                        <View style={styles.priceRow}>
-                            {/* <Text style={styles.price}>
-                                {(item.sellingPrice / 1000).toFixed(0)}K VND
-                            </Text> */}
-                        </View>
-
-                        {itemSizes.length > 0 && (
-                            <View style={styles.sizePriceList}>
-                                {itemSizes.map((sizeItem) => (
-                                    <View key={sizeItem.itemSizeId} style={styles.sizePriceChip}>
-                                        <Text style={styles.sizePriceText}>
-                                            {(sizeItem.beverageSize?.sizeName || 'Size').trim()} • {formatPrice(sizeItem.sellingPrice)}
+                    return (
+                        <TouchableOpacity
+                            key={`${item.menuItemId}-${sizeVariant?.itemSizeId ?? 'base'}-${variantIndex}`}
+                            style={[
+                                styles.menuItem,
+                                styles.menuItemVariantCard,
+                                !isLastVariant && styles.menuItemVariantSpacing,
+                            ]}
+                            activeOpacity={0.9}
+                            onPress={() => handleViewRecipe(item, sizeVariant)}
+                        >
+                            <View style={styles.menuItemMediaColumn}>
+                                <View style={styles.menuItemImageLarge}>
+                                    {imageUrl ? (
+                                        <Image
+                                            source={{ uri: imageUrl }}
+                                            style={styles.menuItemImageAsset}
+                                            resizeMode="cover"
+                                        />
+                                    ) : (
+                                        <View style={styles.menuItemImageFallbackLarge}>
+                                            <Ionicons name="cafe" size={32} color="#847362" />
+                                        </View>
+                                    )}
+                                </View>
+                                <View style={styles.menuItemLeftMeta}>
+                                    <View style={[styles.menuItemMetricBadge, styles.menuItemSizeBadge]}>
+                                        <Text style={[styles.menuItemMetricBadgeText, styles.menuItemSizeBadgeText]}>
+                                            Size: {variantLabel}
                                         </Text>
                                     </View>
-                                ))}
+                                    <View style={[styles.menuItemMetricBadge, styles.menuItemCostBadge]}>
+                                        <Text style={[styles.menuItemMetricBadgeText, styles.menuItemCostBadgeText]}>
+                                            Cost/cup: {formatPrice(variantCostPerCup)}
+                                        </Text>
+                                    </View>
+                                </View>
                             </View>
-                        )}
-                    </View>
 
-                    {/* Right: Status Badge */}
-                    {/* <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-                        <Text style={styles.statusText}>{item.shopBeverage.status}</Text>
-                    </View> */}
-                </View>
+                            <View style={styles.menuItemVariantContent}>
+                                <View style={styles.menuItemHeaderRow}>
+                                    <View style={styles.menuItemHeaderSpacer} />
+                                    <TouchableOpacity
+                                        style={styles.menuItemDailySaleButton}
+                                        onPress={(event) => {
+                                            event.stopPropagation();
+                                            handleDailySales(item);
+                                        }}
+                                    >
+                                        <Ionicons name="bar-chart" size={14} color={COLORS.white} />
+                                        <Text style={styles.menuItemDailySaleButtonText}>Daily</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={styles.menuItemQrButton}
+                                        onPress={(event) => {
+                                            event.stopPropagation();
+                                            handleGenerateQr(item);
+                                        }}
+                                    >
+                                        <Ionicons name="qr-code" size={18} color={COLORS.text} />
+                                    </TouchableOpacity>
+                                </View>
 
-                {/* Action Buttons */}
-                <View style={styles.actionButtons}>
-                    <TouchableOpacity
-                        style={styles.actionButton}
-                        onPress={() => handleViewRecipe(item)}
-                    >
-                        <Ionicons name="document-text" size={16} color={COLORS.text} />
-                        <Text style={styles.actionButtonText}>View Recipe</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={styles.actionButton}
-                        onPress={() => handleGenerateQr(item)}
-                    >
-                        <Ionicons name="qr-code" size={16} color={COLORS.text} />
-                        <Text style={styles.actionButtonText}>QR</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.actionButton, styles.actionButtonDark]}
-                        onPress={() => handleDailySales(item)}
-                    >
-                        <Ionicons name="bar-chart" size={16} color={COLORS.white} />
-                        <Text style={[styles.actionButtonText, styles.actionButtonTextDark]}>
-                            Daily Sales
-                        </Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
+                                <Text style={styles.menuItemTitle} numberOfLines={2}>
+                                    {item.shopRecipe?.recipeName || 'Unnamed Item'}
+                                </Text>
+                                {item.description && (
+                                    <Text style={styles.menuItemDescription} numberOfLines={2}>
+                                        {item.description}
+                                    </Text>
+                                )}
+
+                                <Text style={styles.menuItemPrice}>{formatPrice(variantPrice)}</Text>
+
+                                <View style={styles.ingredientsBox}>
+                                    <Text style={styles.ingredientsTitle}>Ingredients ({ingredients.length})</Text>
+                                    {ingredients.slice(0, 2).map((ingredient, index) => (
+                                        <Text
+                                            key={`${item.menuItemId}-${sizeVariant?.itemSizeId ?? 'base'}-ingredient-${ingredient.id ?? index}`}
+                                            style={styles.ingredientsText}
+                                            numberOfLines={1}
+                                        >
+                                            • {ingredient.ingredient?.name || 'Unknown'}: {Number(ingredient.quantity ?? 0)} {ingredient.measurement || ''}
+                                        </Text>
+                                    ))}
+                                    {ingredients.length > 2 && (
+                                        <Text style={styles.ingredientsMore}>+{ingredients.length - 2} more</Text>
+                                    )}
+                                </View>
+                            </View>
+                        </TouchableOpacity>
+                    );
+                })}
+            </ScrollView>
         );
     };
 
@@ -415,7 +501,7 @@ export default function MenuStaffScreen() {
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
-                {menuHeaderName && (<Text style={styles.headerTitle}>{menuHeaderName}</Text>)}
+                {menuHeaderName && (<Text style={styles.headerTitle}>{menuHeaderName} <Text style={styles.headerManagement}>{menuData?.versionNumber}</Text></Text>)}
                 <Text style={styles.headerManagement}>Menu List</Text>
 
             </View>
@@ -759,140 +845,157 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 60,
     },
-    menuItemCard: {
-        backgroundColor: COLORS.white,
-        borderRadius: 12,
+    menuItemCarousel: {
         marginBottom: 16,
+    },
+    menuItemCarouselContent: {
+        paddingRight: 4,
+    },
+    menuItem: {
+        width: 320,
+        backgroundColor: COLORS.white,
+        borderRadius: 16,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#E7DED4',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.08,
         shadowRadius: 4,
-        elevation: 3,
+        elevation: 2,
     },
-    menuItemContent: {
+    menuItemVariantCard: {
         flexDirection: 'row',
-        padding: 12,
-        alignItems: 'flex-start',
     },
-    menuItemImage: {
-        width: 80,
-        height: 80,
-        borderRadius: 10,
+    menuItemVariantSpacing: {
+        marginRight: 12,
+    },
+    menuItemMediaColumn: {
+        width: 112,
+        borderRightWidth: 1,
+        borderRightColor: '#EFE6DD',
+        backgroundColor: '#FBF8F4',
+    },
+    menuItemImageLarge: {
+        width: '100%',
+        height: 104,
         backgroundColor: '#E8CCBE',
     },
-    menuItemImageFallback: {
-        width: 80,
-        height: 80,
-        borderRadius: 10,
-        backgroundColor: '#EFE7DE',
+    menuItemImageAsset: {
+        width: '100%',
+        height: '100%',
+    },
+    menuItemImageFallbackLarge: {
+        flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    menuItemDetails: {
-        flex: 1,
-        marginHorizontal: 12,
-    },
-    beverageName: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: COLORS.text,
-        marginBottom: 4,
-    },
-    category: {
-        fontSize: 12,
-        color: COLORS.textSecondary,
-        marginBottom: 4,
-    },
-    priceRow: {
-        marginBottom: 8,
-    },
-    price: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: COLORS.accent,
-        marginBottom: 4,
-    },
-    sizePriceList: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
+    menuItemLeftMeta: {
+        padding: 8,
         gap: 6,
     },
-    sizePriceChip: {
-        paddingHorizontal: 8,
-        paddingVertical: 4,
+    menuItemMetricBadge: {
         borderRadius: 999,
-        backgroundColor: 'rgba(211, 139, 42, 0.12)',
-    },
-    sizePriceText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: COLORS.accentDark,
-    },
-    ratingBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#FFF4E6',
         paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-        alignSelf: 'flex-start',
+        paddingVertical: 5,
+        borderWidth: 1,
     },
-    rating: {
-        fontSize: 11,
-        color: COLORS.text,
-        marginLeft: 4,
-        fontWeight: '600',
+    menuItemMetricBadgeText: {
+        fontSize: 10,
+        fontWeight: '700',
     },
-    statusBadge: {
-        alignSelf: 'flex-start',
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderRadius: 4,
-        marginTop: 6,
+    menuItemSizeBadge: {
+        backgroundColor: '#EEF6FF',
+        borderColor: '#CFE4FB',
     },
-    statusText: {
-        fontSize: 11,
-        fontWeight: '600',
-        color: COLORS.white,
+    menuItemSizeBadgeText: {
+        color: '#2D5F8B',
     },
-    statusIndicator: {
-        marginLeft: 8,
+    menuItemCostBadge: {
+        backgroundColor: '#F6EFE5',
+        borderColor: '#E4D5C4',
     },
-    statusDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
+    menuItemCostBadgeText: {
+        color: '#6D4A2B',
     },
-    actionButtons: {
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
+    menuItemVariantContent: {
+        flex: 1,
         paddingHorizontal: 12,
-        paddingBottom: 12,
-        gap: 8,
-    },
-    actionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 14,
         paddingVertical: 10,
-        borderRadius: 6,
+    },
+    menuItemHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
+    },
+    menuItemHeaderSpacer: {
+        flex: 1,
+    },
+    menuItemQrButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: COLORS.border,
-        backgroundColor: COLORS.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFFDFB',
+        marginLeft: 8,
     },
-    actionButtonDark: {
+    menuItemDailySaleButton: {
+        height: 32,
+        borderRadius: 16,
+        paddingHorizontal: 10,
         backgroundColor: COLORS.accentDark,
-        borderColor: COLORS.accentDark,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    actionButtonText: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: COLORS.text,
-        marginLeft: 6,
-    },
-    actionButtonTextDark: {
+    menuItemDailySaleButtonText: {
+        marginLeft: 4,
         color: COLORS.white,
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    menuItemTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: COLORS.text,
+    },
+    menuItemDescription: {
+        marginTop: 4,
+        fontSize: 12,
+        color: COLORS.textSecondary,
+        lineHeight: 18,
+    },
+    menuItemPrice: {
+        marginTop: 8,
+        fontSize: 15,
+        fontWeight: '700',
+        color: COLORS.accentDark,
+    },
+    ingredientsBox: {
+        marginTop: 8,
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: '#EFE6DD',
+    },
+    ingredientsTitle: {
+        fontSize: 11,
+        color: COLORS.textSecondary,
+        fontWeight: '600',
+    },
+    ingredientsText: {
+        marginTop: 2,
+        fontSize: 11,
+        color: COLORS.text,
+    },
+    ingredientsMore: {
+        marginTop: 2,
+        fontSize: 11,
+        color: COLORS.accentDark,
+        fontWeight: '600',
     },
     loadingText: {
         fontSize: 16,

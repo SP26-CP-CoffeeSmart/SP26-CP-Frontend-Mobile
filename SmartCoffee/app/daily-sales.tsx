@@ -101,6 +101,40 @@ interface SizeInfo {
 
 const fallbackMenuImage = 'https://via.placeholder.com/60';
 
+const normalizeFirebaseUrl = (url?: string | null): string => {
+    if (!url) return fallbackMenuImage;
+
+    const trimmed = url.trim();
+    if (!trimmed || trimmed === 'null' || trimmed === 'undefined') {
+        return fallbackMenuImage;
+    }
+
+    if (!trimmed.includes('firebasestorage.googleapis.com')) {
+        return trimmed;
+    }
+
+    try {
+        const parsed = new URL(trimmed);
+        const marker = '/o/';
+        const markerIndex = parsed.pathname.indexOf(marker);
+
+        if (markerIndex === -1) return trimmed;
+
+        const objectPath = parsed.pathname.slice(markerIndex + marker.length);
+        const decodedObjectPath = decodeURIComponent(objectPath);
+        const normalizedObjectPath = decodedObjectPath
+            .split('/')
+            .filter(Boolean)
+            .map((segment) => encodeURIComponent(segment))
+            .join('%2F');
+
+        parsed.pathname = `${parsed.pathname.slice(0, markerIndex + marker.length)}${normalizedObjectPath}`;
+        return parsed.toString();
+    } catch {
+        return trimmed;
+    }
+};
+
 export default function DailySalesScreen() {
     const router = useRouter();
     const { coffeeShopId } = useAuth();
@@ -315,7 +349,9 @@ export default function DailySalesScreen() {
 
     const renderSalesItem = (item: MenuItem) => {
         const sale = salesData.get(item.menuItemId);
-        const imageUrl = item.shopBeverage.imageUrl || fallbackMenuImage;
+        const imageUrl = normalizeFirebaseUrl(
+            item.shopRecipe?.image || item.shopBeverage.imageUrl
+        );
         const sizeInfos = getSizeInfosForItem(item.menuItemId);
         const itemSubtotal = calculateItemSubtotal(sizeInfos, sale);
 
