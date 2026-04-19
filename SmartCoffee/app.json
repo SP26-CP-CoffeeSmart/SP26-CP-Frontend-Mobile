@@ -16,6 +16,12 @@
     },
     "android": {
       "package": "com.akaizz.smartcoffee",
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES"
+      ],
+      "blockedPermissions": [
+        "android.permission.READ_MEDIA_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -32,6 +38,13 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow SmartCoffee to access your photos.",
+          "savePhotosPermission": "Allow SmartCoffee to save rendered menus to your Photos."
+        }
+      ],
       [
         "expo-splash-screen",
         {

@@ -8,11 +8,37 @@ import "../global.css";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import Toast from 'react-native-toast-message';
+import { BaseToast, ErrorToast } from 'react-native-toast-message';
 import { AuthProvider, useAuth } from '@/context/auth-context';
 import { BeverageCategoryProvider } from '@/context/beverage-category-context';
 import { CartProvider } from '@/context/cart-context';
 import { SuggestionProvider } from '@/context/suggestion-context';
 import { AiSavedRecipeProvider } from '@/context/ai-saved-recipe-context';
+
+const toastConfig = {
+  success: (props: any) => (
+    <BaseToast
+      {...props}
+      text1NumberOfLines={2}
+      text2NumberOfLines={100}
+    />
+  ),
+  error: (props: any) => (
+    <ErrorToast
+      {...props}
+      text1NumberOfLines={2}
+      text2NumberOfLines={100}
+    />
+  ),
+  info: (props: any) => (
+    <BaseToast
+      {...props}
+      text1NumberOfLines={2}
+      text2NumberOfLines={100}
+      style={[props.style, { borderLeftColor: '#87CEFA' }]}
+    />
+  ),
+};
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -91,8 +117,21 @@ function RootLayoutNav() {
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
-        <Stack.Screen name="menu-results" options={{ headerShown: false }} />
-        <Stack.Screen name="menu-detail/[id]" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="menu-results"
+          options={{
+            headerShown: false,
+            contentStyle: { backgroundColor: '#F6F2EE' },
+          }}
+        />
+        <Stack.Screen
+          name="menu-detail/[id]"
+          options={{
+            headerShown: false,
+            animation: 'none',
+            contentStyle: { backgroundColor: '#F6F2EE' },
+          }}
+        />
         <Stack.Screen name="staff-management" options={{ headerShown: false }} />
         <Stack.Screen name="create-staff" options={{ headerShown: false }} />
         <Stack.Screen name="product-page" options={{ headerShown: false }} />
@@ -105,7 +144,7 @@ function RootLayoutNav() {
         <Stack.Screen name="staff-order-detail/[orderId]" options={{ headerShown: false }} />
         <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
       </Stack>
-      <Toast />
+      <Toast config={toastConfig} />
       <StatusBar style="auto" />
     </ThemeProvider>
   );

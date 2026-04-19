@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Image as RNImage, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
@@ -86,10 +86,14 @@ export default function AiResultScreen() {
       selectedBeverage = null;
     }
   }
-  const fallbackImage =
-    'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
+  const fallbackImage = RNImage.resolveAssetSource(require('../assets/AI_RecommendationBackground.jpg')).uri;
 
   const toBool = (value: unknown) => value === true || value === 'true' || value === 1;
+
+  const resolveValidRecipeId = (value: unknown): number | null => {
+    const id = Number(value);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  };
 
   const buildRecipeSaveToken = (targetRecipe: Recipe | null): string | null => {
     if (!targetRecipe) return null;
@@ -284,8 +288,8 @@ export default function AiResultScreen() {
   const recipeSaveToken = useMemo(() => buildRecipeSaveToken(recipe), [recipe]);
 
   useEffect(() => {
-    const recipeId = Number(recipe?.recipeId);
-    setIsSaved(isRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken));
+    const recipeId = resolveValidRecipeId(recipe?.recipeId);
+    setIsSaved(isRecipeSaved(recipeId, recipeSaveToken));
   }, [isRecipeSaved, recipe?.recipeId, recipeSaveToken]);
 
   useEffect(() => {
@@ -487,8 +491,8 @@ export default function AiResultScreen() {
       const result = JSON.parse(responseText);
       console.log('Recipe saved successfully:', result);
 
-      const recipeId = Number(recipe?.recipeId);
-      markRecipeSaved(Number.isFinite(recipeId) ? recipeId : null, recipeSaveToken);
+      const recipeId = resolveValidRecipeId(recipe?.recipeId);
+      markRecipeSaved(recipeId, recipeSaveToken);
 
       setIsSaved(true);
       showToast('Recipe saved successfully!');

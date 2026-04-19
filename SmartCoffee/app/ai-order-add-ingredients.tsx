@@ -24,6 +24,7 @@ interface IngredientItem {
 }
 
 const CATEGORY_FILTERS = ['All', 'Bean', 'Milk', 'Sugar', 'Syrup'];
+const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
 
 const MOCK_INGREDIENTS: IngredientItem[] = [
   {
@@ -116,7 +117,7 @@ export default function AIOrderAddIngredientsScreen() {
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        source={recommendationBgImage}
         style={styles.header}
         imageStyle={styles.headerImage}
       >
