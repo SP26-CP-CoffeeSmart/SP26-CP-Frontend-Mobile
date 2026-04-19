@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
   ActivityIndicator,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -63,6 +63,18 @@ type ExportNoteResponse = {
   exportNoteId?: number;
 };
 
+type ExportSubmitDraft = {
+  noteTitle: string;
+  details: ExportDetail[];
+};
+
+type AlertModalState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  tone: 'warning' | 'error';
+};
+
 const REASONS = ['Daily Sales', 'Internal Use', 'Expired', 'Damaged'];
 
 export default function ExportRequestScreen() {
@@ -76,6 +88,14 @@ export default function ExportRequestScreen() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [alertModal, setAlertModal] = useState<AlertModalState>({
+    visible: false,
+    title: '',
+    message: '',
+    tone: 'warning',
+  });
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [submitDraft, setSubmitDraft] = useState<ExportSubmitDraft | null>(null);
 
   const categoryOptions = useMemo(() => {
     const unique = Array.from(
@@ -87,12 +107,16 @@ export default function ExportRequestScreen() {
   const filteredIngredients = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return ingredients.filter((item) => {
+      if (item.currentQuantity <= 0) {
+        return false;
+      }
       const matchesCategory =
         selectedCategory === 'All' || item.category.toLowerCase() === selectedCategory.toLowerCase();
       const matchesQuery = !query || item.name.toLowerCase().includes(query);
       return matchesCategory && matchesQuery;
     });
   }, [ingredients, searchQuery, selectedCategory]);
+  const hasExportableIngredients = ingredients.some((item) => item.currentQuantity > 0);
 
   const loadInventory = useCallback(async () => {
     if (!coffeeShopId) {
@@ -144,6 +168,11 @@ export default function ExportRequestScreen() {
   }, [loadInventory]);
 
   const handleAddIngredient = (ingredient: Ingredient) => {
+    if (ingredient.currentQuantity <= 0) {
+      showAlertModal('Out of stock', `${ingredient.name} has no available quantity to export.`);
+      return;
+    }
+
     setDetails((prev) => {
       const existing = prev.find((detail) => detail.ingredientId === ingredient.ingredientId);
       if (existing) {
@@ -190,26 +219,44 @@ export default function ExportRequestScreen() {
     );
   };
 
+  const showAlertModal = (title: string, message: string, tone: AlertModalState['tone'] = 'warning') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      tone,
+    });
+  };
+
+  const closeAlertModal = () => {
+    setAlertModal((prev) => ({ ...prev, visible: false }));
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmVisible(false);
+    setSubmitDraft(null);
+  };
+
   const handleSubmit = async () => {
     if (isSubmitting) {
       return;
     }
     if (!coffeeShopId) {
-      Toast.show({
-        type: 'error',
-        text1: 'Missing shop',
-        text2: 'Please sign in again to continue.',
-      });
+      showAlertModal('Missing shop', 'Please sign in again to continue.', 'error');
+      return;
+    }
+    if (!hasExportableIngredients) {
+      showAlertModal('No exportable ingredients', 'There are no ingredients with available stock to export.');
+      return;
+    }
+    if (!details.length) {
+      showAlertModal('Missing items', 'Please add at least one ingredient to export.');
       return;
     }
 
     const titleToUse = noteTitle.trim();
     if (!titleToUse) {
-      Toast.show({
-        type: 'error',
-        text1: 'Missing title',
-        text2: 'Please enter an export note title.',
-      });
+      showAlertModal('Missing title', 'Please enter an export note title.');
       return;
     }
 
@@ -218,28 +265,70 @@ export default function ExportRequestScreen() {
     );
 
     if (invalidDetail) {
-      Toast.show({
-        type: 'error',
-        text1: 'Export failed',
-        text2: `${invalidDetail.ingredient.name} exceeds available stock.`,
-      });
+      showAlertModal('Export failed', `${invalidDetail.ingredient.name} exceeds available stock.`, 'error');
       return;
     }
 
-    const itemsToExport = details
-      .filter((detail) => detail.exportQuantity > 0)
-      .map((detail) => ({
-        ingredientId: detail.ingredientId,
-        quantityToSubtract: detail.exportQuantity,
-      }));
+    if (details.some((detail) => detail.exportQuantity <= 0)) {
+      showAlertModal(
+        'Invalid quantity',
+        'All selected ingredients must have export quantity greater than 0.'
+      );
+      return;
+    }
 
+    setSubmitDraft({
+      noteTitle: titleToUse,
+      details: details.map((detail) => ({
+        ...detail,
+        ingredient: { ...detail.ingredient },
+      })),
+    });
+    setConfirmVisible(true);
+  };
+
+  const confirmSubmit = async () => {
+    if (!coffeeShopId || !submitDraft) {
+      return;
+    }
+    if (!submitDraft.details.length) {
+      setConfirmVisible(false);
+      showAlertModal('Missing items', 'Please add at least one ingredient to export.');
+      return;
+    }
+
+    const invalidDetail = submitDraft.details.find(
+      (detail) => detail.exportQuantity > detail.ingredient.currentQuantity
+    );
+
+    if (invalidDetail) {
+      setConfirmVisible(false);
+      showAlertModal('Export failed', `${invalidDetail.ingredient.name} exceeds available stock.`, 'error');
+      return;
+    }
+
+    if (submitDraft.details.some((detail) => detail.exportQuantity <= 0)) {
+      setConfirmVisible(false);
+      showAlertModal(
+        'Invalid quantity',
+        'All selected ingredients must have export quantity greater than 0.'
+      );
+      return;
+    }
+
+    const itemsToExport = submitDraft.details.map((detail) => ({
+      ingredientId: detail.ingredientId,
+      quantityToSubtract: detail.exportQuantity,
+    }));
     if (!itemsToExport.length) {
-      Alert.alert('Missing items', 'Please add at least one ingredient.');
+      setConfirmVisible(false);
+      showAlertModal('Missing items', 'Please add at least one ingredient to export.');
       return;
     }
 
     try {
       setIsSubmitting(true);
+      setConfirmVisible(false);
       const noteResponse = await authorizedFetch(API_ENDPOINTS.exportNote.create(), {
         method: 'POST',
         headers: {
@@ -248,7 +337,7 @@ export default function ExportRequestScreen() {
         },
         body: JSON.stringify({
           coffeeShopId,
-          title: titleToUse,
+          title: submitDraft.noteTitle,
           createdAt: new Date().toISOString(),
         }),
       });
@@ -275,9 +364,7 @@ export default function ExportRequestScreen() {
         throw new Error(`Request failed: ${response.status}`);
       }
 
-      const detailPayloads = details
-        .filter((detail) => detail.exportQuantity > 0)
-        .map((detail) => ({
+      const detailPayloads = submitDraft.details.map((detail) => ({
           exportNoteId: noteData.exportNoteId,
           ingredientId: detail.ingredientId,
           currentQuantity: detail.ingredient.currentQuantity ?? 0,
@@ -320,6 +407,7 @@ export default function ExportRequestScreen() {
       });
     } finally {
       setIsSubmitting(false);
+      setSubmitDraft(null);
     }
   };
 
@@ -410,7 +498,11 @@ export default function ExportRequestScreen() {
               ))
             )}
             {!loading && !loadError && !filteredIngredients.length ? (
-              <Text style={styles.emptyText}>No ingredients found for this filter.</Text>
+              <Text style={styles.emptyText}>
+                {hasExportableIngredients
+                  ? 'No ingredients found for this filter.'
+                  : 'No ingredients available to export.'}
+              </Text>
             ) : null}
           </View>
         </View>
@@ -483,7 +575,7 @@ export default function ExportRequestScreen() {
         <TouchableOpacity
           style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
           onPress={handleSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !hasExportableIngredients}
         >
           <Ionicons name="log-out" size={18} color="#FFFFFF" />
           <Text style={styles.submitText}>
@@ -491,6 +583,66 @@ export default function ExportRequestScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={alertModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAlertModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.alertModalCard}>
+            <View
+              style={[
+                styles.modalIconWrap,
+                alertModal.tone === 'error' ? styles.modalIconError : styles.modalIconWarning,
+              ]}
+            >
+              <Ionicons
+                name={alertModal.tone === 'error' ? 'close-circle' : 'alert-circle'}
+                size={24}
+                color={alertModal.tone === 'error' ? '#B91C1C' : '#A16207'}
+              />
+            </View>
+            <Text style={styles.modalTitle}>{alertModal.title}</Text>
+            <Text style={styles.modalMessage}>{alertModal.message}</Text>
+            <TouchableOpacity style={styles.modalSingleButton} onPress={closeAlertModal}>
+              <Text style={styles.modalPrimaryText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeConfirmModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="log-out-outline" size={24} color={COLORS.accent} />
+            </View>
+            <Text style={styles.modalTitle}>Confirm export request</Text>
+            <Text style={styles.modalMessage}>
+              Submit export with {submitDraft?.details.length ?? 0} items and update inventory now?
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalSecondaryButton} onPress={closeConfirmModal}>
+                <Text style={styles.modalSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalPrimaryButton, isSubmitting && styles.submitButtonDisabled]}
+                onPress={confirmSubmit}
+                disabled={isSubmitting}
+              >
+                <Text style={styles.modalPrimaryText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -781,5 +933,105 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(30, 27, 22, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  alertModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    gap: 10,
+  },
+  modalIconWrap: {
+    alignSelf: 'center',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.accentSoft,
+  },
+  modalIconWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  modalIconError: {
+    backgroundColor: '#FEE2E2',
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: COLORS.ink,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.muted,
+    textAlign: 'center',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalPrimaryButton: {
+    flex: 1,
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalSingleButton: {
+    marginTop: 4,
+    width: '100%',
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalSecondaryText: {
+    color: COLORS.ink,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

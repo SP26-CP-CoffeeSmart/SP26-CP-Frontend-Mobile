@@ -1213,6 +1213,7 @@ export default function MenuInsightsScreen() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to save menu updates.';
       openWarningModal('Save failed', message);
+      console.log('[Save manual edits] error:', error);
     } finally {
       setSavingManualEdits(false);
       setSaveProgressText('');

@@ -3,6 +3,7 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -113,6 +114,20 @@ type OrderResponse = {
 
 type PagedOrderResponse = {
   items?: OrderResponse[];
+};
+
+type SubmitDraft = {
+  tab: 'order' | 'manual';
+  noteTitle: string;
+  details: ImportDetail[];
+  selectedOrder: OrderSummary | null;
+};
+
+type AlertModalState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  tone: 'warning' | 'error';
 };
 
 const MOCK_INGREDIENTS: Ingredient[] = [
@@ -243,6 +258,14 @@ export default function ImportRequestScreen() {
   const [ingredientLoading, setIngredientLoading] = useState(false);
   const [ingredientError, setIngredientError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [alertModal, setAlertModal] = useState<AlertModalState>({
+    visible: false,
+    title: '',
+    message: '',
+    tone: 'warning',
+  });
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [submitDraft, setSubmitDraft] = useState<SubmitDraft | null>(null);
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
@@ -510,29 +533,67 @@ export default function ImportRequestScreen() {
     );
   });
 
+  const showAlertModal = (title: string, message: string, tone: AlertModalState['tone'] = 'warning') => {
+    setAlertModal({
+      visible: true,
+      title,
+      message,
+      tone,
+    });
+  };
+
+  const closeAlertModal = () => {
+    setAlertModal((prev) => ({ ...prev, visible: false }));
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmVisible(false);
+    setSubmitDraft(null);
+  };
+
   const handleSubmit = async () => {
     if (isSubmitting) {
       return;
     }
     if (!coffeeShopId) {
-      Alert.alert('Missing shop', 'Please sign in again to continue.');
+      showAlertModal('Missing shop', 'Please sign in again to continue.', 'error');
       return;
     }
     if (activeTab === 'order' && (!orderLoaded || !selectedOrder)) {
-      Alert.alert('Load order first', 'Please select and load an order before submitting.');
+      showAlertModal('Load order first', 'Please select and load an order before submitting.');
       return;
     }
     if (!details.length) {
-      Alert.alert('Missing items', 'Please add at least one ingredient.');
+      showAlertModal('Missing items', 'Please add at least one ingredient.');
       return;
     }
 
-    if (activeTab === 'manual' && !details.some((detail) => detail.importQuantity > 0)) {
-      Alert.alert('Invalid quantity', 'Please set at least one import quantity greater than 0.');
+    if (activeTab === 'manual' && details.some((detail) => detail.importQuantity <= 0)) {
+      showAlertModal(
+        'Invalid quantity',
+        'All selected ingredients must have import quantity greater than 0.'
+      );
       return;
     }
 
-    const titleToUse = noteTitle.trim() || 'Import Note';
+    setSubmitDraft({
+      tab: activeTab,
+      noteTitle: noteTitle.trim(),
+      details: details.map((detail) => ({
+        ...detail,
+        ingredient: { ...detail.ingredient },
+      })),
+      selectedOrder: selectedOrder ? { ...selectedOrder } : null,
+    });
+    setConfirmVisible(true);
+  };
+
+  const confirmSubmit = async () => {
+    if (!submitDraft) {
+      return;
+    }
+
+    const titleToUse = submitDraft.noteTitle || 'Import Note';
 
     const createImportNote = async () => {
       const response = await authorizedFetch(API_ENDPOINTS.importNote.create(), {
@@ -589,11 +650,12 @@ export default function ImportRequestScreen() {
       );
     };
 
-    if (activeTab === 'order' && selectedOrder) {
+    if (submitDraft.tab === 'order' && submitDraft.selectedOrder) {
       try {
         setIsSubmitting(true);
+        setConfirmVisible(false);
         const response = await authorizedFetch(
-          API_ENDPOINTS.shopInventory.importFromOrder(selectedOrder.orderId),
+          API_ENDPOINTS.shopInventory.importFromOrder(submitDraft.selectedOrder.orderId),
           {
             method: 'POST',
             headers: {
@@ -607,7 +669,7 @@ export default function ImportRequestScreen() {
         }
 
         const importNoteId = await createImportNote();
-        await createImportDetails(importNoteId, details);
+        await createImportDetails(importNoteId, submitDraft.details);
         await loadOrders();
 
         Toast.show({
@@ -623,13 +685,23 @@ export default function ImportRequestScreen() {
         });
       } finally {
         setIsSubmitting(false);
+        setSubmitDraft(null);
       }
       return;
     }
 
-    if (activeTab === 'manual') {
+    if (submitDraft.tab === 'manual') {
       try {
-        const items = details
+        if (submitDraft.details.some((detail) => detail.importQuantity <= 0)) {
+          setConfirmVisible(false);
+          showAlertModal(
+            'Invalid quantity',
+            'All selected ingredients must have import quantity greater than 0.'
+          );
+          return;
+        }
+
+        const items = submitDraft.details
           .filter((detail) => detail.importQuantity > 0)
           .map((detail) => ({
             ingredientId: detail.ingredientId,
@@ -639,11 +711,13 @@ export default function ImportRequestScreen() {
           }));
 
         if (!items.length) {
-          Alert.alert('Invalid quantity', 'Please set at least one import quantity greater than 0.');
+          setConfirmVisible(false);
+          showAlertModal('Invalid quantity', 'Please set at least one import quantity greater than 0.');
           return;
         }
 
         setIsSubmitting(true);
+        setConfirmVisible(false);
 
         const response = await authorizedFetch(API_ENDPOINTS.shopInventory.manualImport(), {
           method: 'POST',
@@ -652,7 +726,7 @@ export default function ImportRequestScreen() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            title: noteTitle.trim() || 'Manual import',
+            title: submitDraft.noteTitle || 'Manual import',
             items,
           }),
         });
@@ -674,14 +748,16 @@ export default function ImportRequestScreen() {
         });
       } finally {
         setIsSubmitting(false);
+        setSubmitDraft(null);
       }
       return;
     }
 
     try {
       setIsSubmitting(true);
+      setConfirmVisible(false);
       const importNoteId = await createImportNote();
-      await createImportDetails(importNoteId, details);
+      await createImportDetails(importNoteId, submitDraft.details);
       Toast.show({
         type: 'success',
         text1: 'Import request submitted',
@@ -695,6 +771,7 @@ export default function ImportRequestScreen() {
       });
     } finally {
       setIsSubmitting(false);
+      setSubmitDraft(null);
     }
   };
 
@@ -991,6 +1068,72 @@ export default function ImportRequestScreen() {
           <Text style={styles.submitText}>Submit Import Request</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={alertModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAlertModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.alertModalCard}>
+            <View
+              style={[
+                styles.modalIconWrap,
+                alertModal.tone === 'error' ? styles.modalIconError : styles.modalIconWarning,
+              ]}
+            >
+              <Ionicons
+                name={alertModal.tone === 'error' ? 'close-circle' : 'alert-circle'}
+                size={24}
+                color={alertModal.tone === 'error' ? '#B91C1C' : '#A16207'}
+              />
+            </View>
+            <Text style={styles.modalTitle}>{alertModal.title}</Text>
+            <Text style={styles.modalMessage}>{alertModal.message}</Text>
+            <TouchableOpacity style={styles.modalSingleButton} onPress={closeAlertModal}>
+              <Text style={styles.modalPrimaryText}>Got it</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={confirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeConfirmModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModalCard}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="document-text-outline" size={24} color={COLORS.accent} />
+            </View>
+            <Text style={styles.modalTitle}>Confirm import request</Text>
+            <Text style={styles.modalMessage}>
+              {submitDraft?.tab === 'order'
+                ? `Submit import from order ${submitDraft.selectedOrder?.orderCode ?? ''} with ${
+                    submitDraft.details.filter((detail) => detail.importQuantity > 0).length
+                  } items?`
+                : `Submit manual import with ${
+                    submitDraft?.details.filter((detail) => detail.importQuantity > 0).length ?? 0
+                  } items?`}
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalSecondaryButton} onPress={closeConfirmModal}>
+                <Text style={styles.modalSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalPrimaryButton, isSubmitting && styles.submitButtonDisabled]}
+                onPress={confirmSubmit}
+                disabled={isSubmitting}
+              >
+                <Text style={styles.modalPrimaryText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1471,5 +1614,105 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(30, 27, 22, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  alertModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: 18,
+    gap: 10,
+  },
+  modalIconWrap: {
+    alignSelf: 'center',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.accentSoft,
+  },
+  modalIconWarning: {
+    backgroundColor: '#FEF3C7',
+  },
+  modalIconError: {
+    backgroundColor: '#FEE2E2',
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: COLORS.ink,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: COLORS.muted,
+    textAlign: 'center',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalPrimaryButton: {
+    flex: 1,
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalSingleButton: {
+    marginTop: 4,
+    width: '100%',
+    backgroundColor: COLORS.accent,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalPrimaryText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  modalSecondaryButton: {
+    flex: 1,
+    backgroundColor: COLORS.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingHorizontal: 12,
+  },
+  modalSecondaryText: {
+    color: COLORS.ink,
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
