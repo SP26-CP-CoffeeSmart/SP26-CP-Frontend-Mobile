@@ -42,6 +42,7 @@ export const API_ENDPOINTS = {
     logout: () => `${AUTH_BASE_URL}/Auth/logout`,
     refreshToken: () => `${AUTH_BASE_URL}/Auth/refresh-token`,
     changePassword: () => `${AUTH_BASE_URL}/Auth/change-password`,
+    updateStaff: () => `${AUTH_BASE_URL}/Auth/update-staff`,
     updateCoffeeShop: () => `${AUTH_BASE_URL}/Auth/update-coffeeshop`,
   },
   ghn: {

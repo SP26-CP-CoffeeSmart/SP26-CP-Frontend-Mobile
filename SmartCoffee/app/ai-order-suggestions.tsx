@@ -341,9 +341,9 @@ export default function AIOrderSuggestionsScreen() {
                     {formattedVnd(item.priceVnd)} VND /
                     {item.packageSize ? ` ${item.packageSize}${item.measurement}` : ''}
                   </Text>
-                  <Text style={styles.itemQty}>Qty needed: {getSafeQty(item.qtyNeeded)}</Text>
+                  <Text style={styles.itemQty}>Qty needed: {getSafeQty(item.qtyNeeded)}  {item.measurement ? item.measurement : "g/ml"}</Text>
                   {typeof getItemLimit(item) === 'number' && (
-                    <Text style={styles.itemQty}>Available: {getItemLimit(item)}</Text>
+                    <Text style={styles.itemQty}>Available quantity package: {getItemLimit(item)}</Text>
                   )}
                   <View style={styles.itemMetaRow}>
                     <View style={styles.itemMetaBadge}>

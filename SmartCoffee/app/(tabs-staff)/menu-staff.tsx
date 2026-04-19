@@ -472,7 +472,7 @@ export default function MenuStaffScreen() {
 
     if (loading && !refreshing) {
         return (
-            <SafeAreaView style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.centerContent}>
                     <ActivityIndicator size="large" color={COLORS.accent} />
                     <Text style={styles.loadingText}>Loading menu...</Text>
@@ -483,7 +483,7 @@ export default function MenuStaffScreen() {
 
     if (error) {
         return (
-            <SafeAreaView style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.centerContent}>
                     <Ionicons name="alert-circle" size={48} color={COLORS.accent} />
                     <Text style={styles.errorText}>{error}</Text>
@@ -499,7 +499,7 @@ export default function MenuStaffScreen() {
     }
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
                 {menuHeaderName && (<Text style={styles.headerTitle}>{menuHeaderName} <Text style={styles.headerManagement}>{menuData?.versionNumber}</Text></Text>)}
                 <Text style={styles.headerManagement}>Menu List</Text>

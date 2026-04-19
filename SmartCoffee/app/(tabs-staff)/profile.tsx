@@ -15,10 +15,10 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/auth-context';
 
 const purchaseStatuses = [
-    { label: 'Pending confirmation', icon: 'wallet-outline' },
-    { label: 'Awaiting pickup', icon: 'cube-outline' },
-    { label: 'Awaiting delivery', icon: 'car-outline' },
-    { label: 'Delivered', icon: 'checkmark-done-outline' },
+    { label: 'Pending confirmation', icon: 'wallet-outline', status: 'Pending' },
+    { label: 'Awaiting pickup', icon: 'cube-outline', status: 'Preparing' },
+    { label: 'Delivering', icon: 'car-outline', status: 'Delivering' },
+    { label: 'Delivered', icon: 'checkmark-done-outline', status: 'Delivered' },
 ];
 
 export default function StaffProfileScreen() {
@@ -51,7 +51,7 @@ export default function StaffProfileScreen() {
     };
 
     const profileName = getProfileField(
-        profile?.fullName ?? profile?.name ?? profile?.userName ?? profile?.username,
+        profile?.staffName ?? profile?.fullName ?? profile?.name ?? profile?.userName ?? profile?.username,
         'Unknown user'
     );
     const profileRole = getProfileField(profile?.role ?? profile?.position ?? profile?.title, 'Staff');
@@ -154,18 +154,28 @@ export default function StaffProfileScreen() {
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionHeading}>Purchase Order</Text>
                     <TouchableOpacity activeOpacity={0.7}>
-                        <Text style={styles.sectionAction}>View purchase history</Text>
+                        {/* <Text style={styles.sectionAction}>View purchase history</Text> */}
                     </TouchableOpacity>
                 </View>
 
                 <View style={styles.statusGrid}>
                     {purchaseStatuses.map((status) => (
-                        <View key={status.label} style={styles.statusItem}>
+                        <TouchableOpacity
+                            key={status.label}
+                            style={styles.statusItem}
+                            activeOpacity={0.8}
+                            onPress={() =>
+                                router.push({
+                                    pathname: '/(tabs-staff)/orders',
+                                    params: { status: status.status },
+                                })
+                            }
+                        >
                             <View style={styles.statusIconWrap}>
                                 <Ionicons name={status.icon as any} size={22} color="#8B5E3C" />
                             </View>
                             <Text style={styles.statusLabel}>{status.label}</Text>
-                        </View>
+                        </TouchableOpacity>
                     ))}
                 </View>
 
@@ -178,11 +188,11 @@ export default function StaffProfileScreen() {
                     <TouchableOpacity
                         style={styles.listRow}
                         activeOpacity={0.7}
-                        onPress={() => router.push('/notifications')}
+                        onPress={() => router.push('/staff-profile-form')}
                     >
                         <View style={styles.listLeft}>
-                            <Ionicons name="notifications" size={18} color="#8B5E3C" />
-                            <Text style={styles.listText}>Notifications</Text>
+                            <Ionicons name="person" size={18} color="#8B5E3C" />
+                            <Text style={styles.listText}>Update Profile</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color="#C2B6A8" />
                     </TouchableOpacity>
