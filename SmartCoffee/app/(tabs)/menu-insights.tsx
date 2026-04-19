@@ -2496,21 +2496,12 @@ export default function MenuInsightsScreen() {
         return payloadObject;
       };
 
-      const callAnalyze = async (method: 'GET' | 'POST') => {
+      const callAnalyze = async () => {
         const response = await authorizedFetch(API_ENDPOINTS.ai.analyzeMenuFeedback(id), {
-          method,
+          method: 'GET',
           headers: {
             Accept: '*/*',
-            ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
           },
-          ...(method === 'POST'
-            ? {
-                body: JSON.stringify({
-                  menuId: id,
-                  feedbackItems: unappliedFeedbackItems,
-                }),
-              }
-            : {}),
         });
 
         if (!response.ok) {
@@ -2527,20 +2518,7 @@ export default function MenuInsightsScreen() {
         }
       };
 
-      let responsePayload = await callAnalyze('GET');
-
-      const modifiedCountFromGet = getModifiedCount(responsePayload);
-      if (modifiedCountFromGet === 0 && unappliedFeedbackItems.length > 0) {
-        try {
-          const postPayload = await callAnalyze('POST');
-          const modifiedCountFromPost = getModifiedCount(postPayload);
-          if (modifiedCountFromPost > 0) {
-            responsePayload = postPayload;
-          }
-        } catch {
-          // Keep GET payload if POST path is unavailable on backend.
-        }
-      }
+      const responsePayload = await callAnalyze();
 
       console.log('[AI analyze-menu-feedback] raw payload:', responsePayload);
       if (responsePayload && typeof responsePayload === 'object') {
