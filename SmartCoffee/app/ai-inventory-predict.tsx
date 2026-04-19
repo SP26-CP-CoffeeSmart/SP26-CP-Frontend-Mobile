@@ -99,6 +99,7 @@ const getUrgencyStyle = (urgency: string) => {
 
 export default function AIInventoryPredictScreen() {
   const router = useRouter();
+  const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
 
   const [daysAnalyzeInput, setDaysAnalyzeInput] = useState(String(DEFAULT_DAYS_ANALYZE));
   const [daysPredictInput, setDaysPredictInput] = useState(String(DEFAULT_DAYS_PREDICT));
@@ -171,7 +172,7 @@ export default function AIInventoryPredictScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => runPredict(true)} />}
       >
         <ImageBackground
-          source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop' }}
+          source={recommendationBgImage}
           style={styles.header}
           imageStyle={styles.headerImage}
         >

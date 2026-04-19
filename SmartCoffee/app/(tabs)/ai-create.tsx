@@ -469,9 +469,7 @@ export default function AiCreateScreen() {
         <View style={styles.screenBody}>
           <View style={styles.hero}>
             <Image
-              source={{
-                uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop',
-              }}
+              source={require('../../assets/AI_RecommendationBackground.jpg')}
               style={styles.heroImage}
             />
             <View style={styles.heroOverlay} />

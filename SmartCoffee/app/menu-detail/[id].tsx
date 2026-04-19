@@ -45,6 +45,38 @@ const toArray = (value: unknown): any[] => {
   return [value];
 };
 
+const getErrorMessage = (value: unknown, fallback: string): string => {
+  if (!value) return fallback;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return fallback;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      const parsedMessage = parsed?.error ?? parsed?.message;
+      if (typeof parsedMessage === 'string' && parsedMessage.trim()) {
+        return parsedMessage.trim();
+      }
+    } catch {
+      // Keep original message when response is plain text.
+    }
+
+    return trimmed;
+  }
+
+  if (typeof value === 'object') {
+    const parsedMessage = (value as any)?.error ?? (value as any)?.message;
+    if (typeof parsedMessage === 'string' && parsedMessage.trim()) {
+      return parsedMessage.trim();
+    }
+  }
+
+  return fallback;
+};
+
+const MAX_MENU_ITEMS = 25;
+
 const normalizeModifiedMenuItemIds = (menu: any): number[] => {
   const raw =
     menu?.modifiedMenuItemIds ??
@@ -365,15 +397,45 @@ const groupMenuItemsByCategory = (menu: any): MenuItemGrouped[] => {
 
 export default function MenuDetailScreen() {
   const router = useRouter();
-  const { item, title, payload, menuIndex, flow } = useLocalSearchParams<{
+  const { item, title, payload, payloadCacheKey, menuIndex, flow } = useLocalSearchParams<{
     item?: string;
     title?: string;
     payload?: string;
+    payloadCacheKey?: string;
     menuIndex?: string;
     flow?: string;
   }>();
+  const [cachedPayloadText, setCachedPayloadText] = useState<string>('');
   const parsedItem = useMemo(() => safeParseJson(item), [item]);
-  const parsedPayload = useMemo(() => safeParseJson(payload), [payload]);
+  useEffect(() => {
+    let isActive = true;
+
+    const loadPayloadFromCache = async () => {
+      if (!payloadCacheKey || typeof payloadCacheKey !== 'string' || !payloadCacheKey.trim()) {
+        if (isActive) setCachedPayloadText('');
+        return;
+      }
+
+      try {
+        const stored = await AsyncStorage.getItem(payloadCacheKey);
+        if (isActive) {
+          setCachedPayloadText(stored ?? '');
+        }
+      } catch {
+        if (isActive) {
+          setCachedPayloadText('');
+        }
+      }
+    };
+
+    loadPayloadFromCache();
+    return () => {
+      isActive = false;
+    };
+  }, [payloadCacheKey]);
+
+  const resolvedPayloadText = payload || cachedPayloadText;
+  const parsedPayload = useMemo(() => safeParseJson(resolvedPayloadText), [resolvedPayloadText]);
   const resolvedMenuIndex = useMemo(() => {
     if (typeof menuIndex === 'string' && menuIndex.trim()) {
       const parsed = Number(menuIndex);
@@ -399,6 +461,9 @@ export default function MenuDetailScreen() {
   const [isImageZoomOpen, setIsImageZoomOpen] = useState(false);
   const [isRenderSuccessOpen, setIsRenderSuccessOpen] = useState(false);
   const [renderSuccessMessage, setRenderSuccessMessage] = useState('');
+  const [isRegenerateErrorOpen, setIsRegenerateErrorOpen] = useState(false);
+  const [regenerateErrorTitle, setRegenerateErrorTitle] = useState('Generate again failed');
+  const [regenerateErrorMessage, setRegenerateErrorMessage] = useState('');
   const [downloadingRender, setDownloadingRender] = useState(false);
   const windowHeight = Dimensions.get('window').height;
   const zoomScale = useSharedValue(1);
@@ -416,6 +481,7 @@ export default function MenuDetailScreen() {
   }));
   const isCreateMenuFlow = flow === 'create-menu';
   const hasRenderedResult = renderedMenuUrls.length > 0;
+  const isBottomActionsLocked = regeneratingMenu || detailsLoading || renderingMenu || savingMenuVersion;
 
   useEffect(() => {
     if (!isImageZoomOpen) {
@@ -606,6 +672,18 @@ export default function MenuDetailScreen() {
       return;
     }
 
+    const currentItemCount = storedMenuItems.length;
+    const projectedTotal = currentItemCount + quantity;
+    if (currentItemCount >= MAX_MENU_ITEMS || projectedTotal > MAX_MENU_ITEMS) {
+      const overflowCount = Math.max(0, projectedTotal - MAX_MENU_ITEMS);
+      setRegenerateErrorTitle('Menu item limit reached');
+      setRegenerateErrorMessage(
+        `This menu currently has ${currentItemCount} items. If you generate ${quantity} more, it will become ${projectedTotal} items, which exceeds the maximum of ${MAX_MENU_ITEMS}. Please reduce quantity by ${overflowCount} to continue using this feature.`
+      );
+      setIsRegenerateErrorOpen(true);
+      return;
+    }
+
     const menuFromState =
       menuDraft ??
       currentMenu ??
@@ -745,8 +823,13 @@ export default function MenuDetailScreen() {
         text2: 'New menu items have been updated on this page.',
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to regenerate menu options.';
-      Alert.alert('Generate again failed', message);
+      const message = getErrorMessage(
+        error instanceof Error ? error.message : error,
+        'Unable to regenerate menu options.'
+      );
+      setRegenerateErrorTitle('Generate again failed');
+      setRegenerateErrorMessage(message);
+      setIsRegenerateErrorOpen(true);
     } finally {
       setRegeneratingMenu(false);
     }
@@ -1111,7 +1194,10 @@ export default function MenuDetailScreen() {
 
     try {
       setDownloadingRender(true);
-      const permission = await MediaLibrary.requestPermissionsAsync();
+      const permission = await MediaLibrary.requestPermissionsAsync(
+        true,
+        ['photo']
+      );
       if (!permission.granted) {
         Toast.show({ type: 'error', text1: 'Permission denied', text2: 'Allow access to save the image.' });
         return;
@@ -1192,10 +1278,9 @@ export default function MenuDetailScreen() {
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        source={require('../../assets/AI_RecommendationBackground.jpg')}
         style={styles.header}
         imageStyle={styles.headerImage}
-        blurRadius={5}
       >
         <View style={styles.headerOverlay} />
         <View style={styles.headerContent}>
@@ -1312,39 +1397,52 @@ export default function MenuDetailScreen() {
       <View style={styles.bottomBar}>
         {isCreateMenuFlow ? (
           <>
-            <View style={styles.regenerateRow}>
-              <TextInput
-                style={styles.quantityInput}
-                value={regenerateQuantity}
-                onChangeText={(text) => setRegenerateQuantity(text.replace(/[^0-9]/g, ''))}
-                keyboardType="number-pad"
-                placeholder="Qty"
-                placeholderTextColor="#9E8C7E"
-                maxLength={2}
-              />
-              <TouchableOpacity
-                style={[styles.generateAgainButton, regeneratingMenu && styles.buttonDisabled]}
-                onPress={handleRegenerateMenu}
-                disabled={regeneratingMenu}
-              >
-                <Text style={styles.generateAgainButtonText}>
-                  {regeneratingMenu ? 'Generating...' : 'Generate again'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+            {!detailsReady && !detailsLoading ? (
+              <View style={styles.regenerateRow}>
+                <TextInput
+                  style={styles.quantityInput}
+                  value={regenerateQuantity}
+                  onChangeText={(text) => setRegenerateQuantity(text.replace(/[^0-9]/g, ''))}
+                  keyboardType="number-pad"
+                  placeholder="Qty"
+                  placeholderTextColor="#9E8C7E"
+                  maxLength={2}
+                  editable={!isBottomActionsLocked}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.generateAgainButton,
+                    (regeneratingMenu || detailsLoading || renderingMenu) && styles.buttonDisabled,
+                  ]}
+                  onPress={handleRegenerateMenu}
+                  disabled={regeneratingMenu || detailsLoading || renderingMenu}
+                >
+                  <Text style={styles.generateAgainButtonText}>
+                    {regeneratingMenu ? 'Generating...' : 'Generate again'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
 
             {!detailsReady ? (
               <View style={styles.bottomActionsRow}>
                 <TouchableOpacity
-                  style={[styles.detailButton, detailsLoading && styles.buttonDisabled]}
+                  style={[
+                    styles.detailButton,
+                    (detailsLoading || regeneratingMenu || renderingMenu) && styles.buttonDisabled,
+                  ]}
                   onPress={handleGenerateDetails}
-                  disabled={detailsLoading}
+                  disabled={detailsLoading || regeneratingMenu || renderingMenu}
                 >
                   <Text style={styles.detailButtonText}>
                     {detailsLoading ? 'Generating detail...' : 'Generate detail'}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.goBackButton} onPress={() => router.back()}>
+                <TouchableOpacity
+                  style={[styles.goBackButton, isBottomActionsLocked && styles.buttonDisabled]}
+                  onPress={() => router.back()}
+                  disabled={isBottomActionsLocked}
+                >
                   <Ionicons name="arrow-back" size={16} color="#3C2A21" />
                   <Text style={styles.goBackButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -1352,15 +1450,19 @@ export default function MenuDetailScreen() {
             ) : (
               <View style={styles.bottomActionsRow}>
                 <TouchableOpacity
-                  style={[styles.detailButton, renderingMenu && styles.buttonDisabled]}
+                  style={[styles.detailButton, (renderingMenu || regeneratingMenu) && styles.buttonDisabled]}
                   onPress={handleRenderMenu}
-                  disabled={renderingMenu}
+                  disabled={renderingMenu || regeneratingMenu}
                 >
                   <Text style={styles.detailButtonText}>
                     {renderingMenu ? 'Saving & rendering...' : 'Save & render'}
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.goBackButton} onPress={() => router.back()}>
+                <TouchableOpacity
+                  style={[styles.goBackButton, isBottomActionsLocked && styles.buttonDisabled]}
+                  onPress={() => router.back()}
+                  disabled={isBottomActionsLocked}
+                >
                   <Ionicons name="arrow-back" size={16} color="#3C2A21" />
                   <Text style={styles.goBackButtonText}>Cancel</Text>
                 </TouchableOpacity>
@@ -1480,6 +1582,34 @@ export default function MenuDetailScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isRegenerateErrorOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsRegenerateErrorOpen(false)}
+      >
+        <View style={styles.renderErrorOverlay}>
+          <TouchableOpacity
+            style={styles.renderErrorBackdrop}
+            activeOpacity={1}
+            onPress={() => setIsRegenerateErrorOpen(false)}
+          />
+          <View style={styles.renderErrorCard}>
+            <View style={styles.renderErrorIcon}>
+              <Ionicons name="alert" size={18} color="#FFFFFF" />
+            </View>
+            <Text style={styles.renderErrorTitle}>{regenerateErrorTitle}</Text>
+            <Text style={styles.renderErrorText}>{regenerateErrorMessage}</Text>
+            <TouchableOpacity
+              style={styles.renderErrorButton}
+              onPress={() => setIsRegenerateErrorOpen(false)}
+            >
+              <Text style={styles.renderErrorButtonText}>OK</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1879,6 +2009,59 @@ const styles = StyleSheet.create({
   renderSuccessButtonPrimaryText: {
     fontSize: 13,
     fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  renderErrorOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    paddingHorizontal: 24,
+  },
+  renderErrorBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  renderErrorCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 20,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    gap: 10,
+  },
+  renderErrorIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#B84032',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  renderErrorTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#3C2A21',
+  },
+  renderErrorText: {
+    fontSize: 13,
+    color: '#6B5B4D',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  renderErrorButton: {
+    marginTop: 8,
+    minWidth: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#3C2A21',
+  },
+  renderErrorButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
     color: '#FFFFFF',
   },
 });

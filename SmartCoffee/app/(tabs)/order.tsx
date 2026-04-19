@@ -34,8 +34,9 @@ const COLORS = {
   danger: '#B23B3B',
 };
 
-const headerImage =
-  'https://images.unsplash.com/photo-1509042239860-f550ce710b93?auto=format&fit=crop&w=1200&q=80';
+const fallbackAssetUri =
+  Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
+const headerImage = fallbackAssetUri;
 
 const statuses = [
   { key: 'pending', label: 'Pending', icon: 'hourglass-outline' },
@@ -48,8 +49,7 @@ const statuses = [
   { key: 'refunded', label: 'Refunded', icon: 'cash-outline' },
 ];
 
-const fallbackOrderImage =
-  'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
+const fallbackOrderImage = fallbackAssetUri;
 
 type OrderResponse = {
   orderId?: number;
@@ -887,7 +887,7 @@ export default function OrderScreen() {
   );
 }
 
-const MOCK_IMAGE_URL = 'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=400&q=80';
+const MOCK_IMAGE_URL = fallbackAssetUri;
 
 const styles = StyleSheet.create({
   container: {

@@ -27,7 +27,7 @@ const COLORS = {
 };
 
 const fallbackHeaderImage =
-  'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=1200&q=80';
+  Image.resolveAssetSource(require('../assets/AI_RecommendationBackground.jpg')).uri;
 
 interface SupplierProductApiItem {
   productId: number;

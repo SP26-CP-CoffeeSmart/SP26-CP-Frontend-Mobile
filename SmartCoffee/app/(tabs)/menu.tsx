@@ -76,10 +76,9 @@ const BEVERAGE_PAGE_WIDTH = width - 48;
 const BEVERAGE_PAGE_GUTTER = 16;
 const BEVERAGE_PAGE_ITEM_WIDTH = BEVERAGE_PAGE_WIDTH + BEVERAGE_PAGE_GUTTER;
 
-const fallbackMenuImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
-const fallbackBeverageImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuDi2pH2xhE5BLMCq_TuPpKBFANKhFyh48O4wiW8NGw1EuuneDDEeHWIY3vvcrA6MGIgTFsYioOnnwHafNX4-r8GvHt6HJnyhYFp6JK3ZQoKyrQyjkP7_jdqFpJcC9Xrq4qdYM-rxaNDRb1jdHLLmiP4uFrM2ULZDI5Ovf5ErxjaVQhQmi855Kzd1Tg1tjFgEd8hBPCPlLx2baLBWS9fNM-1TRGGLrsyD9duBhOqgR_KvuwjIdAQ-3RwRPXqm-8v-rl8_ivNkEzIp5s';
+const fallbackAssetUri = Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
+const fallbackMenuImage = fallbackAssetUri;
+const fallbackBeverageImage = fallbackAssetUri;
 
 const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 const BEVERAGE_REFRESH_FLAG_KEY = 'beverage:list:refresh:needed';
@@ -271,6 +270,15 @@ export default function MenuScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [totalBeverages, setTotalBeverages] = useState(0);
   const [showMenuGuardModal, setShowMenuGuardModal] = useState(false);
+  const [menuGuardContext, setMenuGuardContext] = useState<{
+    needBeverages: boolean;
+    needSizes: boolean;
+    activeSizeCount: number;
+  }>({
+    needBeverages: false,
+    needSizes: false,
+    activeSizeCount: 0,
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createImageUrl, setCreateImageUrl] = useState('');
@@ -295,6 +303,8 @@ export default function MenuScreen() {
   const [checkingRecipeGate, setCheckingRecipeGate] = useState<'/ai-create' | '/create-recipe' | null>(null);
   const [checkingMenuGate, setCheckingMenuGate] = useState(false);
   const [showBeverageSizeGuideModal, setShowBeverageSizeGuideModal] = useState(false);
+  const [recipeGuardActiveSizeCount, setRecipeGuardActiveSizeCount] = useState(0);
+  const [recipeGuardNeedBeverages, setRecipeGuardNeedBeverages] = useState(false);
   const subscriptionSuccessRef = useRef(false);
   const beveragePagerRef = useRef<FlatList<BeverageItem[]> | null>(null);
   const [beveragePage, setBeveragePage] = useState(1);
@@ -488,7 +498,7 @@ export default function MenuScreen() {
         setSubscribeSubmitting(false);
       }
     },
-      [accountId, loadCurrentSubscription, subscribeSubmitting]
+    [accountId, loadCurrentSubscription, subscribeSubmitting]
   );
 
   const handlePayosShouldStart = useCallback((event: { url?: string }) => {
@@ -1050,19 +1060,31 @@ export default function MenuScreen() {
       return;
     }
 
-    // Use loaded beverage list as the source of truth for guard validation.
-    if (beverages.length < 5) {
-      setShowMenuGuardModal(true);
-      return;
-    }
-
-    if (!coffeeShopId) {
-      setShowBeverageSizeGuideModal(true);
-      return;
-    }
-
     try {
       setCheckingMenuGate(true);
+
+      const needBeverages = beverages.length < 5;
+
+      let activeSizeCount = 0;
+      if (coffeeShopId) {
+        const sizes = await beverageSizeService.getByShop(coffeeShopId);
+        activeSizeCount = sizes.filter(isBeverageSizeActive).length;
+      }
+
+      const needSizes = activeSizeCount < 3;
+
+      if (needBeverages || needSizes) {
+        setMenuGuardContext({ needBeverages, needSizes, activeSizeCount });
+        setShowMenuGuardModal(true);
+        return;
+      }
+
+      if (!coffeeShopId) {
+        setMenuGuardContext({ needBeverages, needSizes: true, activeSizeCount: 0 });
+        setShowMenuGuardModal(true);
+        return;
+      }
+
       const sizes = await beverageSizeService.getByShop(coffeeShopId);
       const hasActiveSize = sizes.some(isBeverageSizeActive);
 
@@ -1090,25 +1112,23 @@ export default function MenuScreen() {
       }
 
       if (!coffeeShopId) {
+        setRecipeGuardActiveSizeCount(0);
+        setRecipeGuardNeedBeverages(totalBeverages <= 0 && beverages.length < 1);
         setShowBeverageSizeGuideModal(true);
-        return;
-      }
-
-      if (totalBeverages === 0) {
-        Toast.show({
-          type: 'error',
-          text1: 'Cannot create recipe',
-          text2: 'Shop must have at least 1 beverage. Please add a beverage first.',
-        });
         return;
       }
 
       try {
         setCheckingRecipeGate(target);
         const sizes = await beverageSizeService.getByShop(coffeeShopId);
-        const hasActiveSize = sizes.some(isBeverageSizeActive);
+        const activeSizeCount = sizes.filter(isBeverageSizeActive).length;
+        const hasAnyBeverage = totalBeverages > 0 || beverages.length > 0;
+        const needBeverages = !hasAnyBeverage;
+        const needSizes = activeSizeCount < 1;
 
-        if (!hasActiveSize) {
+        if (needBeverages || needSizes) {
+          setRecipeGuardNeedBeverages(needBeverages);
+          setRecipeGuardActiveSizeCount(activeSizeCount);
           setShowBeverageSizeGuideModal(true);
           return;
         }
@@ -1124,7 +1144,7 @@ export default function MenuScreen() {
         setCheckingRecipeGate(null);
       }
     },
-    [checkingRecipeGate, coffeeShopId, totalBeverages, router]
+    [checkingRecipeGate, coffeeShopId, beverages.length, totalBeverages, router]
   );
 
   const handleSelectCategory = (category: BeverageCategory) => {
@@ -1469,18 +1489,18 @@ export default function MenuScreen() {
                 style={styles.subscriptionLogo}
                 resizeMode="contain"
               />
-            <View style={styles.subscriptionHeader}>
-              <View style={styles.subscriptionHeaderText}>
-                <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
-                <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
+              <View style={styles.subscriptionHeader}>
+                <View style={styles.subscriptionHeaderText}>
+                  <Text style={styles.subscriptionTitle}>Choose your subscription</Text>
+                  <Text style={styles.subscriptionSubtitle}>Pick a plan to unlock features.</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.subscriptionClose}
+                  onPress={() => setSubscriptionGateVisible(false)}
+                >
+                  <Ionicons name="close" size={18} color={stylesVars.espresso} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.subscriptionClose}
-                onPress={() => setSubscriptionGateVisible(false)}
-              >
-                <Ionicons name="close" size={18} color={stylesVars.espresso} />
-              </TouchableOpacity>
-            </View>
 
             {subscriptionLoading ? (
               <ActivityIndicator size="small" color={stylesVars.espresso} />
@@ -1493,12 +1513,13 @@ export default function MenuScreen() {
                 showsVerticalScrollIndicator={false}
               >
                 {subscriptionPackages.map((item) => {
-                  const price = formatSubscriptionPrice(getSubscriptionPackagePrice(item) ?? item.price);
+                  const resolvedPrice = getSubscriptionPackagePrice(item) ?? item.price;
+                  const price = formatSubscriptionPrice(resolvedPrice);
                   const isTrial = isTrialSubscription(item);
-                  const targetPrice = getNumericPrice(getSubscriptionPackagePrice(item) ?? item.price) ?? 0;
+                  const targetPrice = getNumericPrice(resolvedPrice) ?? 0;
                   const description = getSubscriptionDescription(item);
                   const descriptionLines = description
-                    .split('\n')
+                    .split(/\n|;|\r|\r\n/)
                     .map((line) => line.trim())
                     .filter(Boolean);
                   const features = getSubscriptionFeatures(item);
@@ -1915,7 +1936,7 @@ export default function MenuScreen() {
                     </View>
                   </View>
                 )}
-                ListFooterComponent={() => 
+                ListFooterComponent={() =>
                   beverageLoadingMore ? (
                     <View style={[styles.beveragePage, { justifyContent: 'center', alignItems: 'center' }]}>
                       <ActivityIndicator size="small" color={stylesVars.primary} />
@@ -1978,36 +1999,117 @@ export default function MenuScreen() {
         visible={showBeverageSizeGuideModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowBeverageSizeGuideModal(false)}
       >
-        <View style={styles.sizeGuideOverlay}>
-          <View style={styles.sizeGuideCard}>
-            <View style={styles.sizeGuideIconWrap}>
-              <Ionicons name="resize-outline" size={28} color={stylesVars.primary} />
-            </View>
-            <Text style={styles.sizeGuideTitle}>Setup Beverage Size First</Text>
-            <Text style={styles.sizeGuideText}>
-              You need at least 1 active beverage size before creating recipes.
-            </Text>
-            <Text style={styles.sizeGuideText}>
-              Go to Profile tab to add or activate a beverage size.
-            </Text>
-
-            <View style={styles.sizeGuideActions}>
+        <View style={styles.guardOverlay}>
+          <View style={styles.guardCard}>
+            <View style={styles.guardHeaderRow}>
               <TouchableOpacity
-                style={styles.sizeGuideSecondaryButton}
+                style={styles.guardCloseButton}
                 onPress={() => setShowBeverageSizeGuideModal(false)}
               >
-                <Text style={styles.sizeGuideSecondaryText}>Close</Text>
+                <Ionicons name="close" size={18} color={stylesVars.espresso} />
               </TouchableOpacity>
+            </View>
+
+            <View style={styles.guardHeaderCenter}>
+              <View style={styles.guardIconWrap}>
+                <Ionicons name="alert-circle" size={36} color={stylesVars.primary} />
+              </View>
+              <Text style={styles.guardTitle}>Oops!</Text>
+              <Text style={styles.guardSubtitle}>
+                You need at least 1 beverage and 1 active size to create recipes.
+              </Text>
+              <View style={styles.menuGuardMetricsRow}>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    recipeGuardNeedBeverages && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="cafe-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Beverages</Text>
+                  <Text style={styles.menuGuardMetricValue}>{beverages.length}/1</Text>
+                </View>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    recipeGuardActiveSizeCount < 1 && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="resize-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Active Sizes</Text>
+                  <Text style={styles.menuGuardMetricValue}>{recipeGuardActiveSizeCount}/1</Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.guardSteps}>
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>1</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Add beverages</Text>
+                  <Text style={styles.guardStepText}>
+                    Tap "Add" and fill in beverage details.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>2</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Activate sizes</Text>
+                  <Text style={styles.guardStepText}>
+                    Open Profile and set at least 1 active size.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>3</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Unlock recipe</Text>
+                  <Text style={styles.guardStepText}>
+                    Meet the requirements to unlock recipe creation.
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.menuGuardActionsRow}>
               <TouchableOpacity
-                style={styles.sizeGuidePrimaryButton}
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardPrimary]}
+                onPress={() => {
+                  setShowBeverageSizeGuideModal(false);
+                  resetCreateForm();
+                  refreshCategories();
+                  setShowCreateModal(true);
+                }}
+              >
+                <Ionicons name="cafe-outline" size={22} color={stylesVars.espresso} />
+                <Text style={styles.menuGuardActionTitle}>Add Beverage</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Create your first items</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardSecondary]}
                 onPress={() => {
                   setShowBeverageSizeGuideModal(false);
                   router.push('/(tabs)/profile');
                 }}
               >
-                <Text style={styles.sizeGuidePrimaryText}>Go to Profile</Text>
+                <View style={styles.menuGuardActionIconWrap}>
+                  <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+                </View>
+                <Text style={styles.menuGuardActionTitle}>Activate Size</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Set at least 1 size</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -2018,6 +2120,7 @@ export default function MenuScreen() {
         visible={showMenuGuardModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowMenuGuardModal(false)}
       >
         <View style={styles.guardOverlay}>
@@ -2039,6 +2142,28 @@ export default function MenuScreen() {
               <Text style={styles.guardSubtitle}>
                 You need at least 5 beverages to start creating a menu.
               </Text>
+              <View style={styles.menuGuardMetricsRow}>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    menuGuardContext.needBeverages && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="cafe-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Beverages</Text>
+                  <Text style={styles.menuGuardMetricValue}>{beverages.length}/5</Text>
+                </View>
+                <View
+                  style={[
+                    styles.menuGuardMetricBadge,
+                    menuGuardContext.needSizes && styles.menuGuardMetricBadgeAlert,
+                  ]}
+                >
+                  <Ionicons name="resize-outline" size={14} color={stylesVars.espresso} />
+                  <Text style={styles.menuGuardMetricLabel}>Active Sizes</Text>
+                  <Text style={styles.menuGuardMetricValue}>{menuGuardContext.activeSizeCount}/3</Text>
+                </View>
+              </View>
             </View>
 
             <View style={styles.guardSteps}>
@@ -2059,6 +2184,18 @@ export default function MenuScreen() {
                   <Text style={styles.guardStepBadgeText}>2</Text>
                 </View>
                 <View style={styles.guardStepTextWrap}>
+                  <Text style={styles.guardStepTitle}>Activate sizes</Text>
+                  <Text style={styles.guardStepText}>
+                    Open Profile and set at least 3 active sizes.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.guardStepRow}>
+                <View style={styles.guardStepBadge}>
+                  <Text style={styles.guardStepBadgeText}>3</Text>
+                </View>
+                <View style={styles.guardStepTextWrap}>
                   <Text style={styles.guardStepTitle}>Create recipes</Text>
                   <Text style={styles.guardStepText}>
                     Use AI or build your own recipes quickly.
@@ -2068,7 +2205,7 @@ export default function MenuScreen() {
 
               <View style={styles.guardStepRow}>
                 <View style={styles.guardStepBadge}>
-                  <Text style={styles.guardStepBadgeText}>3</Text>
+                  <Text style={styles.guardStepBadgeText}>4</Text>
                 </View>
                 <View style={styles.guardStepTextWrap}>
                   <Text style={styles.guardStepTitle}>Unlock menu</Text>
@@ -2079,18 +2216,35 @@ export default function MenuScreen() {
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.guardPrimaryButton}
-              onPress={() => {
-                setShowMenuGuardModal(false);
-                resetCreateForm();
-                refreshCategories();
-                setShowCreateModal(true);
-              }}
-            >
-              <Ionicons name="add" size={16} color={stylesVars.espresso} />
-              <Text style={styles.guardPrimaryButtonText}>Add Beverage</Text>
-            </TouchableOpacity>
+            <View style={styles.menuGuardActionsRow}>
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardPrimary]}
+                onPress={() => {
+                  setShowMenuGuardModal(false);
+                  resetCreateForm();
+                  refreshCategories();
+                  setShowCreateModal(true);
+                }}
+              >
+                <Ionicons name="cafe-outline" size={22} color={stylesVars.espresso} />
+                <Text style={styles.menuGuardActionTitle}>Add Beverage</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Create your first items</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.menuGuardActionCard, styles.menuGuardActionCardSecondary]}
+                onPress={() => {
+                  setShowMenuGuardModal(false);
+                  router.push('/(tabs)/profile');
+                }}
+              >
+                <View style={styles.menuGuardActionIconWrap}>
+                  <Ionicons name="resize-outline" size={16} color={stylesVars.espresso} />
+                </View>
+                <Text style={styles.menuGuardActionTitle}>Activate Size</Text>
+                <Text style={styles.menuGuardActionSubtitle}>Set at least 3 sizes</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2961,6 +3115,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     textAlign: 'center',
   },
+  guardHintText: {
+    fontSize: 12,
+    color: '#6B5E52',
+    textAlign: 'center',
+    marginTop: 2,
+  },
   guardSteps: {
     gap: 12,
     marginBottom: 18,
@@ -2997,6 +3157,79 @@ const styles = StyleSheet.create({
     color: '#6B5E52',
     lineHeight: 16,
   },
+  menuGuardMetricsRow: {
+    marginTop: 10,
+    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  menuGuardMetricBadge: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E4D4BF',
+    backgroundColor: '#FFF3E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  menuGuardMetricBadgeAlert: {
+    borderColor: '#D9A05B',
+    backgroundColor: '#FCE9CD',
+  },
+  menuGuardMetricLabel: {
+    fontSize: 11,
+    color: '#6B5E52',
+    fontWeight: '600',
+  },
+  menuGuardMetricValue: {
+    fontSize: 14,
+    color: stylesVars.espresso,
+    fontWeight: '700',
+  },
+  menuGuardActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  menuGuardActionCard: {
+    flex: 1,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  menuGuardActionCardPrimary: {
+    backgroundColor: '#EBC182',
+    borderColor: '#D9A05B',
+  },
+  menuGuardActionCardSecondary: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E3D8CC',
+  },
+  menuGuardActionIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuGuardActionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  menuGuardActionSubtitle: {
+    fontSize: 11,
+    color: '#6B5E52',
+    textAlign: 'center',
+  },
   guardPrimaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3007,6 +3240,23 @@ const styles = StyleSheet.create({
     backgroundColor: stylesVars.primary,
   },
   guardPrimaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: stylesVars.espresso,
+  },
+  guardSecondaryButton: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E3D8CC',
+    backgroundColor: '#FFFFFF',
+  },
+  guardSecondaryButtonText: {
     fontSize: 13,
     fontWeight: '700',
     color: stylesVars.espresso,

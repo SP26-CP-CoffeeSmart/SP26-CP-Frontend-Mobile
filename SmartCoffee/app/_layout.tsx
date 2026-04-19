@@ -117,8 +117,21 @@ function RootLayoutNav() {
         <Stack.Screen name="notifications" options={{ headerShown: false }} />
         <Stack.Screen name="create-recipe" options={{ headerShown: false }} />
         <Stack.Screen name="menu-recommendations" options={{ headerShown: false }} />
-        <Stack.Screen name="menu-results" options={{ headerShown: false }} />
-        <Stack.Screen name="menu-detail/[id]" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="menu-results"
+          options={{
+            headerShown: false,
+            contentStyle: { backgroundColor: '#F6F2EE' },
+          }}
+        />
+        <Stack.Screen
+          name="menu-detail/[id]"
+          options={{
+            headerShown: false,
+            animation: 'none',
+            contentStyle: { backgroundColor: '#F6F2EE' },
+          }}
+        />
         <Stack.Screen name="staff-management" options={{ headerShown: false }} />
         <Stack.Screen name="create-staff" options={{ headerShown: false }} />
         <Stack.Screen name="product-page" options={{ headerShown: false }} />

@@ -12,8 +12,8 @@ export default function AIRecommendationsScreen() {
     beverageId?: string;
     beverage?: string;
   }>();
-  const fallbackImage =
-    'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
+  const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
+  const fallbackImage = Image.resolveAssetSource(recommendationBgImage).uri;
   const [recipeItems, setRecipeItems] = useState<any[]>([]);
   const [recipeLoading, setRecipeLoading] = useState<Record<number, boolean>>({});
   const [beverageName, setBeverageName] = useState('AI Recommendations');
@@ -206,7 +206,7 @@ export default function AIRecommendationsScreen() {
   return (
     <View style={styles.container}>
       <ImageBackground
-        source={{ uri: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1200' }}
+        source={recommendationBgImage}
         style={styles.header}
         imageStyle={styles.headerImage}
       >

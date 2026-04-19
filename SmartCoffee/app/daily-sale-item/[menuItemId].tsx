@@ -54,7 +54,7 @@ interface SizePerformance {
 }
 
 const FALLBACK_IMAGE =
-    'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+    Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 const { height: WINDOW_HEIGHT } = Dimensions.get('window');
 
 const normalizeImageUrl = (url: unknown): string => {

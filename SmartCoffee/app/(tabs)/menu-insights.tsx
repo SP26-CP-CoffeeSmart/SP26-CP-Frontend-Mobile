@@ -12,6 +12,9 @@ import {
   Image,
   BackHandler,
   Dimensions,
+  RefreshControl,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +23,8 @@ import { useNavigationState } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Toast from 'react-native-toast-message';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import menuPerformanceService, {
   MenuPerformanceSummary,
   ChartDataItem,
@@ -173,12 +178,13 @@ interface MenuData {
 }
 
 const fallbackMenuImage =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAFdyVWmZyLBb3sGqVwjvNvxlcOXbB0Jw3NruLr76o5AWV5DnSRs2lZk-_efuzou3kn_LrScey1Wvc8PZzMxgj5gd91FXT-OMRu-KDU7M2mvsL21c9xdgBEpTOcel8JY5_xr42Trfr5CVVXx2G4ecoWnPsSNhqwo_JLo4tvueDeNm_BkMBYA8IXw4hDhwHePqDa5WtgASS4Sl2zzdVGmfZ5g4yNA_l60wPl8CirNcN-4mo_uanAPD1ZScVsTTbrc2V3_Jm5twRLvfU';
+  Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 
 const MAX_ZOOM_SCALE = 3;
 const MENU_PAGE_SIZE = 10;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const MAX_S_SIZE_PRICE = 120000;
+const STRICT_PRICE_PATTERN = /^\d+(\.\d+)?$/;
 
 const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
   if (!Array.isArray(drafts) || drafts.length === 0) return null;
@@ -310,6 +316,7 @@ export default function MenuInsightsScreen() {
     menuName?: string;
   }>();
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState<MenuPerformanceSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedDateIndex, setSelectedDateIndex] = useState(0);
@@ -332,6 +339,7 @@ export default function MenuInsightsScreen() {
   const [currentViewerImageIndex, setCurrentViewerImageIndex] = useState(0);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  const [pendingNewItem, setPendingNewItem] = useState<MenuItem | null>(null);
   const [editDescription, setEditDescription] = useState('');
   const [editSellingPrice, setEditSellingPrice] = useState('');
   const [editSizePrices, setEditSizePrices] = useState<SizePriceDraft[]>([]);
@@ -360,6 +368,7 @@ export default function MenuInsightsScreen() {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [warningModalTitle, setWarningModalTitle] = useState('Warning');
   const [warningModalMessage, setWarningModalMessage] = useState('');
+  const [downloadingViewerImage, setDownloadingViewerImage] = useState(false);
 
   const originalMenuItemsRef = useRef<Map<number, MenuItemSnapshot>>(new Map());
 
@@ -373,6 +382,8 @@ export default function MenuInsightsScreen() {
   const { categories } = useBeverageCategories();
   const { coffeeShopId } = useAuth();
   const menuImageUri = menuImageUris[0] ?? null;
+  const selectedViewerImageUri =
+    menuImageUris[currentViewerImageIndex] ?? menuImageUri ?? fallbackMenuImage;
   const hasEditedMenuItemsForVersion =
     editedMenuItemIds.length > 0 ||
     lastSavedEditedMenuItemIds.length > 0 ||
@@ -431,16 +442,70 @@ export default function MenuInsightsScreen() {
     savedTranslateY.value = 0;
   };
 
+  const handleDownloadViewerImage = useCallback(async () => {
+    const targetUrl = selectedViewerImageUri;
+    if (!targetUrl) {
+      openWarningModal('Download unavailable', 'No menu image available to download.');
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      Linking.openURL(targetUrl);
+      return;
+    }
+
+    if (typeof MediaLibrary.requestPermissionsAsync !== 'function') {
+      openWarningModal(
+        'Download unavailable',
+        'Please rebuild the app to enable photo saving.'
+      );
+      return;
+    }
+
+    try {
+      setDownloadingViewerImage(true);
+
+      const permission = await MediaLibrary.requestPermissionsAsync(true, ['photo']);
+      if (!permission.granted) {
+        openWarningModal('Permission denied', 'Allow photo access to save this image.');
+        return;
+      }
+
+      const safeExtension = (() => {
+        const cleanUrl = targetUrl.split('?')[0];
+        const parts = cleanUrl.split('.');
+        const last = parts[parts.length - 1];
+        return last && last.length <= 4 ? last : 'jpg';
+      })();
+
+      const targetUri = `${FileSystem.cacheDirectory}menu-insights-${Date.now()}.${safeExtension}`;
+      const downloadResult = await FileSystem.downloadAsync(targetUrl, targetUri);
+      const asset = await MediaLibrary.createAssetAsync(downloadResult.uri);
+      await MediaLibrary.createAlbumAsync('SmartCoffee', asset, false);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Saved to Photos',
+        text2: 'Menu image downloaded successfully.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to download image.';
+      openWarningModal('Download failed', message);
+    } finally {
+      setDownloadingViewerImage(false);
+    }
+  }, [selectedViewerImageUri, openWarningModal]);
+
   const parseNumberInput = (value: string, fallback: number) => {
-    const normalized = value.replace(/[^0-9.]/g, '');
-    if (!normalized) return fallback;
+    const normalized = value.trim();
+    if (!normalized || !STRICT_PRICE_PATTERN.test(normalized)) return fallback;
     const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : fallback;
   };
 
   const parsePriceInputValue = (value: string): number | null => {
-    const normalized = value.replace(/[^0-9.]/g, '');
-    if (!normalized) return null;
+    const normalized = value.trim();
+    if (!normalized || !STRICT_PRICE_PATTERN.test(normalized)) return null;
     const parsed = Number(normalized);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
     return parsed;
@@ -638,11 +703,17 @@ export default function MenuInsightsScreen() {
     });
   }, [menuId, router]);
 
+  const closeEditModal = useCallback(() => {
+    setShowEditModal(false);
+    setIsEditModalReadOnly(false);
+    setEditingItem(null);
+    setPendingNewItem(null);
+  }, []);
+
   useEffect(() => {
     const onHardwareBackPress = () => {
       if (showEditModal) {
-        setShowEditModal(false);
-        setIsEditModalReadOnly(false);
+        closeEditModal();
         return true;
       }
 
@@ -675,6 +746,7 @@ export default function MenuInsightsScreen() {
     const subscription = BackHandler.addEventListener('hardwareBackPress', onHardwareBackPress);
     return () => subscription.remove();
   }, [
+    closeEditModal,
     handleBackPress,
     showBackConfirm,
     showDeleteConfirm,
@@ -763,9 +835,33 @@ export default function MenuInsightsScreen() {
     return Math.ceil(resolvedCost);
   };
 
+  const getMenuItemSizeCostFloors = (item?: MenuItem | null) => {
+    const perSize = new Map<number, number>();
+    if (!item) {
+      return {
+        perSize,
+        fallback: 0,
+      };
+    }
+
+    (item.itemSizeViewModels ?? []).forEach((size, index) => {
+      const sizeId = size.itemSizeId > 0 ? size.itemSizeId : index;
+      const scaledCost = Number(size.scaledTotalCost ?? 0);
+      if (Number.isFinite(scaledCost) && scaledCost > 0) {
+        perSize.set(sizeId, Math.ceil(scaledCost));
+      }
+    });
+
+    return {
+      perSize,
+      fallback: getMenuItemCostFloor(item),
+    };
+  };
+
   const validateEditForm = () => {
     const errors: EditErrors = {};
     const costFloor = getMenuItemCostFloor(editingItem);
+    const { perSize: sizeCostFloorMap, fallback: fallbackCostFloor } = getMenuItemSizeCostFloors(editingItem);
     const trimmedDescription = normalizeDescriptionInput(editDescription);
     if (!trimmedDescription) {
       errors.description = 'Description is required.';
@@ -774,10 +870,10 @@ export default function MenuInsightsScreen() {
     }
 
     if (!isMultiSizeEditing) {
-      const priceValue = editSellingPrice.replace(/[^0-9.]/g, '');
+      const priceValue = editSellingPrice.trim();
       const parsedPrice = Number(priceValue);
-      if (!priceValue || !Number.isFinite(parsedPrice)) {
-        errors.sellingPrice = 'Enter a valid price.';
+      if (!priceValue || !STRICT_PRICE_PATTERN.test(priceValue) || !Number.isFinite(parsedPrice)) {
+        errors.sellingPrice = 'Price must be numeric.';
       } else if (parsedPrice <= 0) {
         errors.sellingPrice = 'Price must be greater than 0.';
       } else if (Number.isFinite(costFloor) && costFloor > 0 && parsedPrice < costFloor) {
@@ -787,32 +883,28 @@ export default function MenuInsightsScreen() {
 
     if (editSizePrices.length > 0) {
       const sizeErrors: Record<number, string> = {};
-      editSizePrices.forEach((size) => {
-        const sizeValue = size.sellingPrice.replace(/[^0-9.]/g, '');
+      editSizePrices.forEach((size, index) => {
+        const sizeValue = size.sellingPrice.trim();
         const parsedSize = Number(sizeValue);
-        if (!sizeValue || !Number.isFinite(parsedSize)) {
-          sizeErrors[size.itemSizeId] = 'Enter a valid price.';
+        if (!sizeValue || !STRICT_PRICE_PATTERN.test(sizeValue) || !Number.isFinite(parsedSize)) {
+          sizeErrors[size.itemSizeId] = 'Price must be numeric.';
         } else if (parsedSize <= 0) {
           sizeErrors[size.itemSizeId] = 'Price must be greater than 0.';
+        } else {
+          const sizeCostFloor = sizeCostFloorMap.get(size.itemSizeId) ?? fallbackCostFloor;
+          if (Number.isFinite(sizeCostFloor) && sizeCostFloor > 0 && parsedSize < sizeCostFloor) {
+            sizeErrors[size.itemSizeId] = `${getSizeDraftLabel(size, index)} price must be at least cost (${formatAmountNoUnit(sizeCostFloor)} VND).`;
+          }
         }
       });
 
       const anchorSizeId = getAnchorSizeDraftId(editSizePrices);
       if (anchorSizeId != null) {
         const anchorDraft = editSizePrices.find((size) => size.itemSizeId === anchorSizeId);
-        const anchorPrice = Number(anchorDraft?.sellingPrice?.replace(/[^0-9.]/g, '') ?? 0);
-        const recipeCostFloor = costFloor;
-
+        const anchorPriceRaw = String(anchorDraft?.sellingPrice ?? '').trim();
+        const anchorPrice = STRICT_PRICE_PATTERN.test(anchorPriceRaw) ? Number(anchorPriceRaw) : 0;
         if (Number.isFinite(anchorPrice) && anchorPrice > MAX_S_SIZE_PRICE) {
           sizeErrors[anchorSizeId] = `Size S price must not exceed ${formatAmountNoUnit(MAX_S_SIZE_PRICE)} VND.`;
-        } else if (
-          Number.isFinite(recipeCostFloor) &&
-          recipeCostFloor > 0 &&
-          Number.isFinite(anchorPrice) &&
-          anchorPrice > 0 &&
-          anchorPrice < recipeCostFloor
-        ) {
-          sizeErrors[anchorSizeId] = `Size S price must be at least cost (${formatAmountNoUnit(recipeCostFloor)} VND).`;
         }
       }
 
@@ -825,8 +917,10 @@ export default function MenuInsightsScreen() {
       for (let i = 1; i < sizesSortedByVolume.length; i += 1) {
         const prev = sizesSortedByVolume[i - 1];
         const curr = sizesSortedByVolume[i];
-        const prevPrice = Number(prev.sellingPrice.replace(/[^0-9.]/g, ''));
-        const currPrice = Number(curr.sellingPrice.replace(/[^0-9.]/g, ''));
+        const prevPriceRaw = prev.sellingPrice.trim();
+        const currPriceRaw = curr.sellingPrice.trim();
+        const prevPrice = STRICT_PRICE_PATTERN.test(prevPriceRaw) ? Number(prevPriceRaw) : NaN;
+        const currPrice = STRICT_PRICE_PATTERN.test(currPriceRaw) ? Number(currPriceRaw) : NaN;
 
         if (
           Number.isFinite(prevPrice) &&
@@ -888,28 +982,43 @@ export default function MenuInsightsScreen() {
       sellingPrice: nextSellingPrice,
       itemSizeViewModels: updatedSizes.length > 0 ? updatedSizes : editingItem.itemSizeViewModels,
     };
+    const isAddingNewItem = pendingNewItem?.menuItemId === editingItem.menuItemId;
 
-    setMenuItems((prev) =>
-      prev.map((item) => (item.menuItemId === editingItem.menuItemId ? updatedItem : item))
-    );
-
-    const edited = isMenuItemEdited(updatedItem);
-    setEditedMenuItemIds((prev) => {
-      const next = new Set(prev);
-      if (edited) {
-        next.add(updatedItem.menuItemId);
-      } else {
-        next.delete(updatedItem.menuItemId);
-      }
-      const nextArray = Array.from(next);
-      setHasManualChanges(
-        nextArray.length > 0 || addedMenuItemIds.length > 0 || deletedMenuItemIds.length > 0
+    if (isAddingNewItem) {
+      setMenuItems((prev) => [updatedItem, ...prev]);
+      setEditedMenuItemIds((prev) => Array.from(new Set([...prev, updatedItem.menuItemId])));
+      setAddedMenuItemIds((prev) => Array.from(new Set([...prev, updatedItem.menuItemId])));
+      setHasManualChanges(true);
+      Toast.show({
+        type: 'success',
+        text1: 'Item added',
+        text2:
+          updatedSizes.length > 0
+            ? `${updatedItem.shopRecipe.recipeName} was added after completing required fields.`
+            : `${updatedItem.shopRecipe.recipeName} was added. No active beverage sizes found for this shop.`,
+      });
+    } else {
+      setMenuItems((prev) =>
+        prev.map((item) => (item.menuItemId === editingItem.menuItemId ? updatedItem : item))
       );
-      return nextArray;
-    });
 
-    setShowEditModal(false);
-    setIsEditModalReadOnly(false);
+      const edited = isMenuItemEdited(updatedItem);
+      setEditedMenuItemIds((prev) => {
+        const next = new Set(prev);
+        if (edited) {
+          next.add(updatedItem.menuItemId);
+        } else {
+          next.delete(updatedItem.menuItemId);
+        }
+        const nextArray = Array.from(next);
+        setHasManualChanges(
+          nextArray.length > 0 || addedMenuItemIds.length > 0 || deletedMenuItemIds.length > 0
+        );
+        return nextArray;
+      });
+    }
+
+    closeEditModal();
   };
 
   const buildUpdatePayload = (menuIdValue: number, menuRaw: any, items: MenuItem[], images: string[]) => {
@@ -1379,12 +1488,17 @@ export default function MenuInsightsScreen() {
               const isSSize = Number(size.beverageSizeId) === sSizeId;
               const ratio =
                 hasValidSVolume && hasValidSizeVolume ? sizeVolume / sVolume : isSSize ? 1 : 1;
+              const scaledCost =
+                Number.isFinite(recipeCost) && recipeCost > 0
+                  ? Math.ceil(recipeCost * ratio)
+                  : costFloorPrice;
 
               return {
                 itemSizeId: -(Math.abs(nextTempId) + index + 1),
                 beverageSizeId: size.beverageSizeId,
                 menuItemId: nextTempId,
                 sellingPrice: isSSize ? basePrice : Math.max(basePrice, Math.round(basePrice * ratio)),
+                scaledTotalCost: scaledCost,
                 beverageSize: {
                   beverageSizeId: size.beverageSizeId,
                   sizeName: size.sizeName,
@@ -1394,6 +1508,39 @@ export default function MenuInsightsScreen() {
               };
             })
           : [];
+
+      const sSizePriceForCreate =
+        generatedSizeViewModels.length > 0
+          ? Number(
+              generatedSizeViewModels.find((size) => Number(size.beverageSizeId) === sSizeId)?.sellingPrice ??
+                generatedSizeViewModels[0]?.sellingPrice ??
+                basePrice
+            )
+          : basePrice;
+
+      if (costFloorPrice > 0 && sSizePriceForCreate < costFloorPrice) {
+        openWarningModal(
+          'Cannot add item',
+          `Size S price must be at least recipe cost (${formatAmountNoUnit(costFloorPrice)} VND).`
+        );
+        return;
+      }
+
+      const invalidSizeCost = generatedSizeViewModels.find((size) => {
+        const sizePrice = Number(size.sellingPrice ?? 0);
+        const sizeCostFloor = Number(size.scaledTotalCost ?? 0);
+        return Number.isFinite(sizeCostFloor) && sizeCostFloor > 0 && sizePrice < sizeCostFloor;
+      });
+      if (invalidSizeCost) {
+        const violatedSizeName =
+          String(invalidSizeCost.beverageSize?.sizeName ?? '').trim() || 'Selected size';
+        const violatedFloor = Math.ceil(Number(invalidSizeCost.scaledTotalCost ?? 0));
+        openWarningModal(
+          'Cannot add item',
+          `${violatedSizeName} price must be at least cost (${formatAmountNoUnit(violatedFloor)} VND).`
+        );
+        return;
+      }
 
       const nextItem: MenuItem = {
         menuItemId: nextTempId,
@@ -1416,25 +1563,14 @@ export default function MenuInsightsScreen() {
           recipeId: Number(recipe.recipeId ?? 0),
           recipeName: String(recipe.recipeName ?? 'New recipe'),
           image: recipe.image ? String(recipe.image) : null,
+          totalCost: Number.isFinite(recipeCost) ? recipeCost : null,
         },
         isExisting: true,
       };
 
-      setMenuItems((prev) => [nextItem, ...prev]);
-      setEditedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
-      setAddedMenuItemIds((prev) => Array.from(new Set([...prev, nextTempId])));
-      setHasManualChanges(true);
+      setPendingNewItem(nextItem);
       setShowAddItemModal(false);
       openEditModalForItem(nextItem, { readOnly: false });
-
-      Toast.show({
-        type: 'success',
-        text1: 'Item added',
-        text2:
-          generatedSizeViewModels.length > 0
-            ? `${nextItem.shopRecipe.recipeName} was added. Size S is capped at 120,000 and other sizes follow size ratio.`
-            : `${nextItem.shopRecipe.recipeName} was added. No active beverage sizes found for this shop.`,
-      });
     },
     [existingMenuItemNameSet, menuId, openEditModalForItem, openWarningModal, shopSizes]
   );
@@ -2012,9 +2148,12 @@ export default function MenuInsightsScreen() {
     setVisibleCount(MENU_PAGE_SIZE);
   }, [searchQuery, selectedCategoryIds, menuItems.length]);
 
-  const fetchMenuPerformance = async () => {
+  const fetchMenuPerformance = async (options?: { showLoading?: boolean }) => {
+    const showLoading = options?.showLoading ?? true;
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
       const id = menuId ? Number(menuId) : 1;
       const result = await menuPerformanceService.getSummary(id);
@@ -2027,11 +2166,13 @@ export default function MenuInsightsScreen() {
       console.error('Error fetching menu performance:', err);
       setError('Failed to load menu performance data');
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
-  const fetchMenuItems = async () => {
+  const fetchMenuItems = async (): Promise<MenuItem[]> => {
     try {
       setLoadingItems(true);
       const id = menuId ? Number(menuId) : 1;
@@ -2153,15 +2294,24 @@ export default function MenuInsightsScreen() {
       }
 
       setItemUnitCostMap(unitCostMap);
+      return items;
     } catch (err) {
       console.error('Error fetching menu items:', err);
+      return [];
     } finally {
       setLoadingItems(false);
     }
   };
 
-  const fetchItemsSalesData = async () => {
+  const fetchItemsSalesData = async (itemsOverride?: MenuItem[]) => {
     try {
+      const itemsToFetch = itemsOverride ?? menuItems;
+      if (itemsToFetch.length === 0) {
+        setItemSalesMap(new Map());
+        setItemSalesBySizeMap(new Map());
+        return;
+      }
+
       const selectedData = getSelectedDateData();
       if (!selectedData) return;
 
@@ -2169,7 +2319,7 @@ export default function MenuInsightsScreen() {
       const salesBySize = new Map<string, number>();
       
       // Fetch sales data for each menu item for the selected date
-      const salesPromises = menuItems.map(async (item) => {
+      const salesPromises = itemsToFetch.map(async (item) => {
         try {
           const response = await authorizedFetch(
             API_ENDPOINTS.dailySale.getByMenuItem(item.menuItemId),
@@ -2216,6 +2366,21 @@ export default function MenuInsightsScreen() {
       console.error('Error fetching items sales data:', err);
     }
   };
+
+  const handleRefresh = useCallback(async () => {
+    try {
+      setRefreshing(true);
+      const [, refreshedItems] = await Promise.all([
+        fetchMenuPerformance({ showLoading: false }),
+        fetchMenuItems(),
+      ]);
+      await fetchItemsSalesData(refreshedItems);
+    } catch (err) {
+      console.error('Error refreshing menu insights:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchItemsSalesData, fetchMenuItems, fetchMenuPerformance]);
 
   const handleGenerateMenuVersion = async () => {
     if (!menuId) {
@@ -2463,11 +2628,6 @@ export default function MenuInsightsScreen() {
     }).format(amount);
   };
 
-  const formatPercentage = (value: number) => {
-    const sign = value > 0 ? '+' : '';
-    return `${sign}${value.toFixed(1)}%`;
-  };
-
   const getSelectedDateData = (): ChartDataItem | null => {
     if (!data || !data.chartData || data.chartData.length === 0) return null;
     return data.chartData[selectedDateIndex] || null;
@@ -2578,7 +2738,7 @@ export default function MenuInsightsScreen() {
           <Ionicons name="alert-circle-outline" size={48} color="#e71008" />
           <Text style={{ marginTop: 12, color: '#4a3621', fontSize: 16, textAlign: 'center' }}>{error}</Text>
           <TouchableOpacity
-            onPress={fetchMenuPerformance}
+            onPress={() => fetchMenuPerformance()}
             style={[styles.aiButton, { marginTop: 16, paddingHorizontal: 24 }]}
           >
             <Text style={styles.aiButtonText}>Retry</Text>
@@ -2590,7 +2750,18 @@ export default function MenuInsightsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#4a3621"
+            colors={['#4a3621']}
+          />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={handleBackPress}>
@@ -2688,22 +2859,6 @@ export default function MenuInsightsScreen() {
               <Text style={styles.kpiValue}>
                 {formatCurrency(getSelectedDateData()?.totalRevenue || 0)}
               </Text>
-              <View style={styles.kpiChange}>
-                <Ionicons
-                  name={data?.revenueChangePercent && data.revenueChangePercent >= 0 ? 'arrow-up' : 'arrow-down'}
-                  size={12}
-                  color={data?.revenueChangePercent && data.revenueChangePercent >= 0 ? '#07880e' : '#e71008'}
-                />
-                <Text
-                  style={
-                    data?.revenueChangePercent && data.revenueChangePercent >= 0
-                      ? styles.kpiChangeTextGreen
-                      : styles.kpiChangeTextRed
-                  }
-                >
-                  {formatPercentage(data?.revenueChangePercent || 0)}
-                </Text>
-              </View>
             </View>
 
             <View style={styles.kpiCard}>
@@ -2711,10 +2866,6 @@ export default function MenuInsightsScreen() {
               <Text style={styles.kpiValue}>
                 {formatCurrency((getSelectedDateData()?.totalRevenue || 0) - getSelectedCost())}
               </Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="ellipse" size={12} color="#847362" />
-                <Text style={styles.kpiChangeTextGreen}>—</Text>
-              </View>
             </View>
 
             <View style={styles.kpiCard}>
@@ -2722,21 +2873,13 @@ export default function MenuInsightsScreen() {
               <Text style={styles.kpiValue}>
                 {formatCurrency(getSelectedCost())}
               </Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="ellipse" size={12} color="#847362" />
-                <Text style={styles.kpiChangeTextGreen}>—</Text>
-              </View>
             </View>
 
             <View style={styles.kpiCard}>
-              <Text style={styles.kpiLabel}>CUPS</Text>
+              <Text style={styles.kpiLabel}>CUPS SOLD</Text>
               <Text style={styles.kpiValue}>
                 {getSelectedDateData()?.totalCups || 0}
               </Text>
-              <View style={styles.kpiChange}>
-                <Ionicons name="cafe" size={12} color="#847362" />
-                <Text style={styles.kpiChangeTextGreen}>Sold</Text>
-              </View>
             </View>
           </ScrollView>
         </View>
@@ -3298,7 +3441,7 @@ export default function MenuInsightsScreen() {
           visible={showEditModal}
           transparent={true}
           animationType="slide"
-          onRequestClose={() => setShowEditModal(false)}
+          onRequestClose={closeEditModal}
         >
           <View style={styles.modalOverlay}>
             <View style={[styles.modalContent, styles.editModalContent]}>
@@ -3307,10 +3450,7 @@ export default function MenuInsightsScreen() {
                   {isEditModalReadOnly ? 'Menu item detail' : 'Edit menu item'}
                 </Text>
                 <TouchableOpacity
-                  onPress={() => {
-                    setShowEditModal(false);
-                    setIsEditModalReadOnly(false);
-                  }}
+                  onPress={closeEditModal}
                 >
                   <Ionicons name="close" size={24} color="#4a3621" />
                 </TouchableOpacity>
@@ -3423,10 +3563,7 @@ export default function MenuInsightsScreen() {
               <View style={styles.editModalFooter}>
                 <TouchableOpacity
                   style={styles.editCancelButton}
-                  onPress={() => {
-                    setShowEditModal(false);
-                    setIsEditModalReadOnly(false);
-                  }}
+                  onPress={closeEditModal}
                 >
                   <Text style={styles.editCancelText}>{isEditModalReadOnly ? 'Close' : 'Cancel'}</Text>
                 </TouchableOpacity>
@@ -3460,6 +3597,17 @@ export default function MenuInsightsScreen() {
               }}
             >
               <Ionicons name="close" size={22} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.imageViewerDownloadButton,
+                downloadingViewerImage && styles.imageViewerDownloadButtonDisabled,
+              ]}
+              onPress={handleDownloadViewerImage}
+              disabled={downloadingViewerImage}
+            >
+              <Ionicons name="download-outline" size={20} color="#FFFFFF" />
             </TouchableOpacity>
 
             <View style={styles.imageViewerGestureArea}>
@@ -3846,6 +3994,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 2,
   },
+  imageViewerDownloadButton: {
+    position: 'absolute',
+    top: 52,
+    right: 70,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  imageViewerDownloadButtonDisabled: {
+    opacity: 0.6,
+  },
   imageViewerImage: {
     width: '95%',
     height: '75%',
@@ -4061,22 +4224,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4a3621',
     marginTop: 4,
-  },
-  kpiChange: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  kpiChangeTextGreen: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#07880e',
-  },
-  kpiChangeTextRed: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#e71008',
   },
   filterBar: {
     flexDirection: 'row',

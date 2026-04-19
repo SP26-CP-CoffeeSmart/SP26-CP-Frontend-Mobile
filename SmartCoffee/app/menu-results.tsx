@@ -1,7 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
+  ImageBackground,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,13 +13,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { Image as ExpoImage } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-
-const fallbackMenuImage =
-  'https://images.unsplash.com/photo-1509042239860-f550ce710b93?q=80&w=1200&auto=format&fit=crop';
 
 const toArray = (value: unknown): any[] => {
   if (!value) return [];
@@ -30,6 +31,14 @@ const safeParseJson = (value?: string) => {
     return JSON.parse(value);
   } catch {
     return value;
+  }
+};
+
+const safeStringify = (value: unknown) => {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
   }
 };
 
@@ -138,10 +147,10 @@ const getFirebaseImageVariants = (url: string): string[] => {
 
 const getMenuImageCandidates = (menu: any): string[] => {
   const rawUrl = getRawMenuImage(menu);
-  if (!rawUrl) return [fallbackMenuImage];
+  if (!rawUrl) return [];
 
   const variants = getFirebaseImageVariants(rawUrl);
-  return Array.from(new Set([...variants, fallbackMenuImage]));
+  return Array.from(new Set(variants));
 };
 
 const normalizeMenuImageUrl = (menu: any): string | null => {
@@ -151,48 +160,61 @@ const normalizeMenuImageUrl = (menu: any): string | null => {
   return variants[0] ?? rawUrl;
 };
 
-function ResilientMenuImage({ menu, menuKey }: { menu: any; menuKey: string }) {
+const CARD_IMAGE_ASPECT_RATIO = 16 / 9;
+
+function ResilientMenuImage({
+  menu,
+  menuKey,
+  onPreview,
+}: {
+  menu: any;
+  menuKey: string;
+  onPreview?: (uri: string) => void;
+}) {
   const candidates = useMemo(() => getMenuImageCandidates(menu), [menu]);
   const [candidateIndex, setCandidateIndex] = useState(0);
-  const [aspectRatio, setAspectRatio] = useState(16 / 9);
 
   useEffect(() => {
     setCandidateIndex(0);
-    setAspectRatio(16 / 9);
   }, [menuKey]);
 
-  const uri = candidates[Math.min(candidateIndex, candidates.length - 1)] ?? fallbackMenuImage;
+  const uri = candidates[Math.min(candidateIndex, candidates.length - 1)] ?? null;
+  if (!uri) {
+    return null;
+  }
 
   return (
-    <Image
-      source={{ uri }}
-      resizeMode="contain"
-      style={[styles.cardImage, { aspectRatio, height: undefined }]}
-      onLoad={(event) => {
-        const width = event.nativeEvent?.source?.width ?? 0;
-        const height = event.nativeEvent?.source?.height ?? 0;
-        if (width > 0 && height > 0) {
-          setAspectRatio(width / height);
-        }
-      }}
-      onError={() => {
-        const nextIndex = candidateIndex + 1;
-        if (nextIndex < candidates.length) {
-          console.log('[Menu Results] Image load failed, trying next URL variant:', {
-            menuKey,
-            failedUri: uri,
-            nextUri: candidates[nextIndex],
-          });
-          setCandidateIndex(nextIndex);
-          return;
-        }
+    <View style={styles.cardImageFrame}>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => onPreview?.(uri)}
+        style={styles.cardImagePressable}
+      >
+        <ExpoImage
+          source={{ uri }}
+          contentFit="cover"
+          contentPosition="top"
+          style={styles.cardImageForceFill}
+          onError={() => {
+            const nextIndex = candidateIndex + 1;
+            if (nextIndex < candidates.length) {
+              console.log('[Menu Results] Image load failed, trying next URL variant:', {
+                menuKey,
+                failedUri: uri,
+                nextUri: candidates[nextIndex],
+              });
+              setCandidateIndex(nextIndex);
+              return;
+            }
 
-        console.log('[Menu Results] Image load failed for all URL variants:', {
-          menuKey,
-          triedUris: candidates,
-        });
-      }}
-    />
+            console.log('[Menu Results] Image load failed for all URL variants:', {
+              menuKey,
+              triedUris: candidates,
+            });
+          }}
+        />
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -249,9 +271,16 @@ export default function MenuResultsScreen() {
     flow?: string;
   }>();
   const [cachedPayload, setCachedPayload] = useState<string>('');
+  const [detailPayloadCacheKey, setDetailPayloadCacheKey] = useState<string>('');
   const [fullP1Payload, setFullP1Payload] = useState<any>(null);
   const [savingMenuKey, setSavingMenuKey] = useState<string | null>(null);
+  const navigatingRef = useRef(false);
+  const lastPressAtRef = useRef(0);
+  const generatedPayloadCacheRef = useRef<{ source: string; key: string } | null>(null);
+  const [isImageViewerOpen, setIsImageViewerOpen] = useState(false);
+  const [viewerImageUri, setViewerImageUri] = useState<string | null>(null);
   const isCreateMenuFlow = flow === 'create-menu';
+  const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
 
   useEffect(() => {
     let isActive = true;
@@ -262,11 +291,11 @@ export default function MenuResultsScreen() {
       try {
         const stored = await AsyncStorage.getItem(cacheKey);
         if (isActive && stored) {
-          setCachedPayload(stored);
+          setCachedPayload((prev) => (prev === stored ? prev : stored));
         }
       } catch {
         if (isActive) {
-          setCachedPayload('');
+          setCachedPayload((prev) => (prev === '' ? prev : ''));
         }
       }
     };
@@ -279,6 +308,54 @@ export default function MenuResultsScreen() {
 
   const payloadSource = data || cachedPayload;
   const parsedPayload = useMemo(() => safeParseJson(payloadSource), [payloadSource]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const ensureDetailPayloadCache = async () => {
+      if (cacheKey && cacheKey.trim()) {
+        if (isMounted) {
+          setDetailPayloadCacheKey((prev) => (prev === cacheKey ? prev : cacheKey));
+        }
+        return;
+      }
+
+      if (!data || !String(data).trim()) {
+        if (isMounted) {
+          setDetailPayloadCacheKey((prev) => (prev === '' ? prev : ''));
+        }
+        return;
+      }
+
+      const source = String(data);
+      const cached = generatedPayloadCacheRef.current;
+      if (cached?.source === source) {
+        if (isMounted) {
+          setDetailPayloadCacheKey((prev) => (prev === cached.key ? prev : cached.key));
+        }
+        return;
+      }
+
+      const generatedKey = `menu:result:payload:${Date.now()}`;
+      try {
+        await AsyncStorage.setItem(generatedKey, source);
+        generatedPayloadCacheRef.current = { source, key: generatedKey };
+        if (isMounted) {
+          setDetailPayloadCacheKey((prev) => (prev === generatedKey ? prev : generatedKey));
+        }
+      } catch {
+        if (isMounted) {
+          setDetailPayloadCacheKey((prev) => (prev === '' ? prev : ''));
+        }
+      }
+    };
+
+    ensureDetailPayloadCache();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [cacheKey, data]);
 
   useEffect(() => {
     setFullP1Payload(parsedPayload);
@@ -394,25 +471,24 @@ export default function MenuResultsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={20} color="#3C2A21" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Menu Results</Text>
-        <View style={styles.headerSpacer} />
-      </View>
+      <ImageBackground
+        source={recommendationBgImage}
+        style={styles.header}
+        imageStyle={styles.headerImage}
+      >
+        <View style={styles.headerOverlay} />
+        <View style={styles.headerContent}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle} numberOfLines={2} ellipsizeMode="tail">
+            Menu Results
+          </Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </ImageBackground>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.suggestionBox}>
-          <View style={styles.suggestionRow}>
-            <Ionicons name="sparkles-outline" size={18} color="#8B5E3C" />
-            <Text style={styles.suggestionTitle}>AI suggestion:</Text>
-          </View>
-          <Text style={styles.suggestionText}>
-            Choose a template based on season, trends, and customer preferences.
-          </Text>
-        </View>
-
         {menus.length === 0 ? (
           <Text style={styles.emptyText}>No menu data returned from the API.</Text>
         ) : (
@@ -440,139 +516,161 @@ export default function MenuResultsScreen() {
                 menu?.menuConfig ??
                 baseConfig,
             };
+            const itemParam = safeStringify(menuWithConfig);
 
             return (
-              <View key={menuKey} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={styles.cardTitleSection}>
-                    <Text style={styles.cardTitle}>{title}</Text>
-                    <Text style={styles.cardPrice}>Average: {averagePrice}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.cardAction}
-                    onPress={() => {
-                      console.log(
-                        '[Menu Detail] Navigate from card action (detailed):',
-                        JSON.stringify({ menuId, title, item: menu }, null, 2)
-                      );
-                      router.push({
-                        pathname: '/menu-detail/[id]',
-                        params: {
-                          id: menuId,
-                          item: JSON.stringify(menuWithConfig),
-                          payload: JSON.stringify(payloadForDetail),
-                          menuIndex: String(index),
-                          title,
-                          flow,
-                        },
-                      });
-                    }}
-                  >
-                    <Ionicons name="pencil" size={16} color="#8B5E3C" />
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.cardSubtitle} numberOfLines={2}>
-                  {subtitle}
-                </Text>
-                <View style={styles.cardBody}>
-                  <ResilientMenuImage menu={menu} menuKey={menuKey} />
-                  <View style={styles.groupRow}>
-                    {groups.slice(0, 4).map((group, groupIndex) => (
-                      <View key={`${menuKey}-${group}-${groupIndex}`} style={styles.groupChip}>
-                        <Text style={styles.groupChipText}>{group}</Text>
-                      </View>
-                    ))}
-                    {groups.length === 0 ? (
-                      <Text style={styles.groupEmptyText}>No menu groups found.</Text>
-                    ) : null}
-                  </View>
-                </View>
+              <Pressable
+                key={menuKey}
+                style={styles.card}
+                onPress={() => {
+                  const now = Date.now();
+                  if (navigatingRef.current || now - lastPressAtRef.current < 450) {
+                    return;
+                  }
+                  navigatingRef.current = true;
+                  lastPressAtRef.current = now;
 
-                {visualTheme && (
-                  <View style={styles.themeSection}>
-                    <Text style={styles.themeSectionTitle}>Visual Theme</Text>
-                    <View style={styles.themeGrid}>
-                      {visualTheme.baseTheme && (
-                        <View style={styles.themeItem}>
-                          <Text style={styles.themeLabel}>Theme:</Text>
-                          <Text style={styles.themeValue}>{visualTheme.baseTheme}</Text>
-                        </View>
-                      )}
-                      {visualTheme.primaryHex && (
-                        <View style={styles.themeItem}>
-                          <Text style={styles.themeLabel}>Primary:</Text>
-                          <View style={[styles.colorSwatch, { backgroundColor: visualTheme.primaryHex }]} />
-                          <Text style={styles.themeValue}>{visualTheme.primaryHex}</Text>
-                        </View>
-                      )}
-                      {visualTheme.secondaryHex && (
-                        <View style={styles.themeItem}>
-                          <Text style={styles.themeLabel}>Secondary:</Text>
-                          <View style={[styles.colorSwatch, { backgroundColor: visualTheme.secondaryHex }]} />
-                          <Text style={styles.themeValue}>{visualTheme.secondaryHex}</Text>
-                        </View>
-                      )}
-                      {visualTheme.fontPairing && (
-                        <View style={styles.themeItem}>
-                          <Text style={styles.themeLabel}>Font:</Text>
-                          <Text style={styles.themeValue}>{visualTheme.fontPairing}</Text>
-                        </View>
-                      )}
+                  router.push({
+                    pathname: '/menu-detail/[id]',
+                    params: {
+                      id: menuId,
+                      item: itemParam,
+                      payloadCacheKey: detailPayloadCacheKey,
+                      menuIndex: String(index),
+                      title,
+                      flow,
+                    },
+                  });
+
+                  setTimeout(() => {
+                    navigatingRef.current = false;
+                  }, 700);
+                }}
+              >
+                <View style={styles.optionFrame}>
+                    <View style={styles.cardHeader}>
+                      <View style={styles.cardTitleSection}>
+                        <Text style={styles.cardTitle}>{title}</Text>
+                        <Text style={styles.cardPrice}>Average: {averagePrice}</Text>
+                      </View>
                     </View>
-                    {visualTheme.backgroundPrompt && (
-                      <View style={styles.promptBox}>
-                        <Text style={styles.promptLabel}>Background:</Text>
-                        <Text style={styles.promptText}>{visualTheme.backgroundPrompt}</Text>
+                    <Text style={styles.cardSubtitle} numberOfLines={2}>
+                      {subtitle}
+                    </Text>
+                    <View style={styles.cardBody}>
+                      <ResilientMenuImage
+                        menu={menu}
+                        menuKey={menuKey}
+                        onPreview={(uri) => {
+                          setViewerImageUri(uri);
+                          setIsImageViewerOpen(true);
+                        }}
+                      />
+                      <View style={styles.groupRow}>
+                        {groups.slice(0, 4).map((group, groupIndex) => (
+                          <View key={`${menuKey}-${group}-${groupIndex}`} style={styles.groupChip}>
+                            <Text style={styles.groupChipText}>{group}</Text>
+                          </View>
+                        ))}
+                        {groups.length === 0 ? (
+                          <Text style={styles.groupEmptyText}>No menu groups found.</Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {visualTheme && (
+                      <View style={styles.themeSection}>
+                        <Text style={styles.themeSectionTitle}>Visual Theme</Text>
+                        <View style={styles.themeGrid}>
+                          {visualTheme.baseTheme && (
+                            <View style={styles.themeItem}>
+                              <Text style={styles.themeLabel}>Theme:</Text>
+                              <Text style={styles.themeValue}>{visualTheme.baseTheme}</Text>
+                            </View>
+                          )}
+                          {visualTheme.primaryHex && (
+                            <View style={styles.themeItem}>
+                              <Text style={styles.themeLabel}>Primary:</Text>
+                              <View style={[styles.colorSwatch, { backgroundColor: visualTheme.primaryHex }]} />
+                              <Text style={styles.themeValue}>{visualTheme.primaryHex}</Text>
+                            </View>
+                          )}
+                          {visualTheme.secondaryHex && (
+                            <View style={styles.themeItem}>
+                              <Text style={styles.themeLabel}>Secondary:</Text>
+                              <View style={[styles.colorSwatch, { backgroundColor: visualTheme.secondaryHex }]} />
+                              <Text style={styles.themeValue}>{visualTheme.secondaryHex}</Text>
+                            </View>
+                          )}
+                          {visualTheme.fontPairing && (
+                            <View style={styles.themeItem}>
+                              <Text style={styles.themeLabel}>Font:</Text>
+                              <Text style={styles.themeValue}>{visualTheme.fontPairing}</Text>
+                            </View>
+                          )}
+                        </View>
+                        {visualTheme.backgroundPrompt && (
+                          <View style={styles.promptBox}>
+                            <Text style={styles.promptLabel}>Background:</Text>
+                            <Text style={styles.promptText}>{visualTheme.backgroundPrompt}</Text>
+                          </View>
+                        )}
                       </View>
                     )}
+
+                    {canSaveVersion ? (
+                      <TouchableOpacity
+                        style={[
+                          styles.saveVersionButton,
+                          savingMenuKey === menuKey && styles.saveVersionButtonDisabled,
+                        ]}
+                        onPress={() => handleSaveAiMenu(menu, menuKey)}
+                        disabled={savingMenuKey === menuKey}
+                      >
+                        <Text style={styles.saveVersionButtonText}>
+                          {savingMenuKey === menuKey ? 'Saving version...' : 'Save new version'}
+                        </Text>
+                        <Ionicons name="save-outline" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    ) : null}
+
+                    <View style={styles.detailsRow}>
+                      <Text style={styles.detailsText}>Tap to view detail</Text>
+                      <Ionicons name="chevron-forward" size={16} color="#8B5E3C" />
+                    </View>
                   </View>
-                )}
-
-                {canSaveVersion ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.saveVersionButton,
-                      savingMenuKey === menuKey && styles.saveVersionButtonDisabled,
-                    ]}
-                    onPress={() => handleSaveAiMenu(menu, menuKey)}
-                    disabled={savingMenuKey === menuKey}
-                  >
-                    <Text style={styles.saveVersionButtonText}>
-                      {savingMenuKey === menuKey ? 'Saving version...' : 'Save new version'}
-                    </Text>
-                    <Ionicons name="save-outline" size={16} color="#FFFFFF" />
-                  </TouchableOpacity>
-                ) : null}
-
-                <TouchableOpacity
-                  style={styles.detailsRow}
-                  onPress={() => {
-                    console.log(
-                      '[Menu Detail] Navigate from details row (detailed):',
-                      JSON.stringify({ menuId, title, item: menu }, null, 2)
-                    );
-                    router.push({
-                      pathname: '/menu-detail/[id]',
-                      params: {
-                        id: menuId,
-                        item: JSON.stringify(menuWithConfig),
-                        payload: JSON.stringify(payloadForDetail),
-                        menuIndex: String(index),
-                        title,
-                        flow,
-                      },
-                    });
-                  }}
-                >
-                  <Text style={styles.detailsText}>View Details</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#8B5E3C" />
-                </TouchableOpacity>
-              </View>
+              </Pressable>
             );
           })
         )}
 
       </ScrollView>
+
+      <Modal
+        visible={isImageViewerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsImageViewerOpen(false)}
+      >
+        <View style={styles.imageViewerOverlay}>
+          <TouchableOpacity
+            style={styles.imageViewerBackdrop}
+            activeOpacity={1}
+            onPress={() => setIsImageViewerOpen(false)}
+          />
+          <TouchableOpacity
+            style={styles.imageViewerCloseButton}
+            onPress={() => setIsImageViewerOpen(false)}
+          >
+            <Ionicons name="close" size={22} color="#FFFFFF" />
+          </TouchableOpacity>
+          <View style={styles.imageViewerContent}>
+            {viewerImageUri ? (
+              <Image source={{ uri: viewerImageUri }} style={styles.imageViewerImage} resizeMode="contain" />
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -580,72 +678,70 @@ export default function MenuResultsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F6F1EB',
+    backgroundColor: '#F6F2EE',
   },
   header: {
+    height: 180,
+    justifyContent: 'center',
+    paddingBottom: 0,
+    paddingHorizontal: 16,
+  },
+  headerImage: {
+    resizeMode: 'cover',
+  },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 48,
-    paddingBottom: 12,
-    backgroundColor: '#F6F1EB',
   },
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1E7DC',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    color: '#3C2A21',
+    color: '#FFFFFF',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+    lineHeight: 24,
   },
   headerSpacer: {
-    width: 36,
+    width: 38,
   },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 24,
-  },
-  suggestionBox: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 16,
-  },
-  suggestionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 6,
-  },
-  suggestionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#3C2A21',
-  },
-  suggestionText: {
-    fontSize: 12,
-    color: '#8E7B6F',
+    paddingTop: 14,
   },
   emptyText: {
     fontSize: 12,
     color: '#8E7B6F',
   },
   card: {
-    backgroundColor: '#FFF8E7',
-    borderRadius: 16,
+    marginBottom: 10,
+  },
+  optionFrame: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     padding: 14,
-    marginBottom: 16,
-    shadowColor: '#000',
+    borderWidth: 1,
+    borderColor: '#F1EAE2',
+    shadowColor: '#3E2723',
     shadowOpacity: 0.08,
-    shadowRadius: 10,
+    shadowRadius: 16,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 4,
+    marginVertical: 6,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -667,18 +763,11 @@ const styles = StyleSheet.create({
     color: '#8B5E3C',
     marginTop: 4,
   },
-  cardAction: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5E7D8',
-  },
   cardSubtitle: {
-    fontSize: 11,
-    color: '#8E7B6F',
-    marginBottom: 10,
+    fontSize: 12,
+    color: '#7B6454',
+    marginBottom: 12,
+    lineHeight: 18,
   },
   saveVersionButton: {
     marginTop: 12,
@@ -701,10 +790,54 @@ const styles = StyleSheet.create({
   cardBody: {
     gap: 10,
   },
-  cardImage: {
+  cardImageFrame: {
     width: '100%',
-    borderRadius: 12,
+    aspectRatio: CARD_IMAGE_ASPECT_RATIO,
+    borderRadius: 14,
     backgroundColor: '#E8DED3',
+    borderWidth: 1,
+    borderColor: '#DCC7B0',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  cardImagePressable: {
+    width: '100%',
+    height: '100%',
+  },
+  cardImageForceFill: {
+    width: '100%',
+    height: '100%',
+  },
+  imageViewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.92)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  imageViewerCloseButton: {
+    position: 'absolute',
+    top: 54,
+    right: 24,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    zIndex: 2,
+  },
+  imageViewerContent: {
+    width: '92%',
+    height: '78%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageViewerImage: {
+    width: '100%',
+    height: '100%',
   },
   groupRow: {
     flexDirection: 'row',
@@ -730,12 +863,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E5D3C0',
+    paddingTop: 10,
   },
   detailsText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#3C2A21',
+    fontWeight: '700',
+    color: '#6B412C',
   },
   themeSection: {
     marginTop: 12,
