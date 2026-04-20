@@ -61,6 +61,15 @@ interface UniquenessInfo {
   newIngredientCount?: number;
 }
 
+interface NormalizedIngredient {
+  ingredientId: number;
+  quantity: number;
+  cost: number;
+  measurement: string;
+  ingredientName?: string;
+  category?: string;
+}
+
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
@@ -199,6 +208,55 @@ export default function AiResultScreen() {
     return [];
   };
 
+  const parseIngredientArray = (value: unknown): Array<Record<string, any>> => {
+    if (Array.isArray(value)) return value as Array<Record<string, any>>;
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? (parsed as Array<Record<string, any>>) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const normalizeIngredientItems = (input: unknown): NormalizedIngredient[] => {
+    const source = parseIngredientArray(input);
+
+    return source
+      .map((item: any) => {
+        const ingredientId = Number(
+          item?.ingredientId ??
+          item?.ingredient_id ??
+          item?.ingredient?.ingredientId ??
+          item?.ingredient?.id ??
+          item?.id ??
+          0
+        );
+        const quantity = Number(item?.quantity ?? item?.amount ?? 0);
+        const cost = Number(item?.cost ?? item?.price ?? 0);
+        const category = String(item?.ingredient?.category ?? item?.category ?? '').trim();
+        const measurementRaw =
+          item?.measurement ??
+          item?.meassurement ??
+          item?.ingredient?.measurement ??
+          (category === 'Liquid' || category === 'Milk' || category === 'Beverage' ? 'ml' : 'g');
+
+        return {
+          ingredientId,
+          quantity: Number.isFinite(quantity) ? quantity : 0,
+          cost: Number.isFinite(cost) ? cost : 0,
+          measurement: String(measurementRaw ?? '').trim() || 'g',
+          ingredientName: String(
+            item?.ingredient?.name ?? item?.ingredientName ?? item?.name ?? ''
+          ).trim(),
+          category,
+        } as NormalizedIngredient;
+      })
+      .filter((item) => Number.isFinite(item.ingredientId) && item.ingredientId > 0);
+  };
+
   const resolveGeneratedImageUrl = (payload: any): string | null => {
     if (!payload) return null;
     if (typeof payload === 'string') return payload;
@@ -270,10 +328,15 @@ export default function AiResultScreen() {
     return null;
   };
 
-  const ingredientsList =
+  const ingredientsListRaw =
     (recipe?.shopRecipeIngredients && recipe.shopRecipeIngredients.length > 0
       ? recipe.shopRecipeIngredients
       : ((recipe as any)?.ingredients as Array<any> | undefined)) ?? [];
+
+  const normalizedIngredientList = useMemo(
+    () => normalizeIngredientItems(ingredientsListRaw),
+    [ingredientsListRaw]
+  );
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -288,9 +351,9 @@ export default function AiResultScreen() {
   const recipeSaveToken = useMemo(() => buildRecipeSaveToken(recipe), [recipe]);
 
   useEffect(() => {
-    const recipeId = resolveValidRecipeId(recipe?.recipeId);
+    const recipeId = resolveValidRecipeId((recipe as any)?.shopRecipeId ?? recipe?.recipeId);
     setIsSaved(isRecipeSaved(recipeId, recipeSaveToken));
-  }, [isRecipeSaved, recipe?.recipeId, recipeSaveToken]);
+  }, [isRecipeSaved, recipe?.recipeId, (recipe as any)?.shopRecipeId, recipeSaveToken]);
 
   useEffect(() => {
     let isActive = true;
@@ -408,41 +471,24 @@ export default function AiResultScreen() {
         orderedRecipe.isUnique = resolvedIsUnique;
       }
 
-      const sourceIngredients = Array.isArray(rawRecipe.ingredients)
-        ? rawRecipe.ingredients
-        : Array.isArray(rawRecipe.shopRecipeIngredients)
-          ? rawRecipe.shopRecipeIngredients
-          : [];
+      const sourceIngredients =
+        rawRecipe.ingredients ?? rawRecipe.shopRecipeIngredients ?? ingredientsListRaw;
 
-      const normalizedIngredients = sourceIngredients
-        .map((item: any) => {
-          const resolvedId = Number(
-            item?.id ?? item?.ingredientId ?? item?.ingredient?.ingredientId ?? 0
-          );
-          const quantity = Number(item?.quantity ?? item?.amount ?? 0);
-          const cost = Number(item?.cost ?? 0);
-          const measurement =
-            item?.measurement ??
-            (item?.ingredient?.category === 'Milk' || item?.ingredient?.category === 'Beverage'
-              ? 'ml'
-              : 'g');
-
-          return {
-            ingredientId: resolvedId,
-            quantity: Number.isFinite(quantity) ? quantity : 0,
-            cost: Number.isFinite(cost) ? cost : 0,
-            measurement: String(measurement ?? ''),
-          };
-        })
-        .filter((item: { ingredientId: number }) => Number.isFinite(item.ingredientId) && item.ingredientId > 0);
+      const normalizedIngredients = normalizeIngredientItems(sourceIngredients).map((item) => ({
+        ingredientId: item.ingredientId,
+        ingredient_id: item.ingredientId,
+        quantity: item.quantity,
+        cost: item.cost,
+        measurement: item.measurement,
+      }));
 
       if (normalizedIngredients.length > 0) {
         orderedRecipe.ingredients = normalizedIngredients;
+        orderedRecipe.shopRecipeIngredients = normalizedIngredients;
       } else {
         delete orderedRecipe.ingredients;
+        delete orderedRecipe.shopRecipeIngredients;
       }
-
-      delete orderedRecipe.shopRecipeIngredients;
 
       orderedRecipe.beverageId = Number.isFinite(parsedBeverageId)
         ? parsedBeverageId
@@ -465,6 +511,7 @@ export default function AiResultScreen() {
       console.log('========== SAVE RECIPE REQUEST ==========');
       console.log('Request Body:');
       console.log(JSON.stringify(requestBody, null, 2));
+      console.log('Normalized ingredients for save:', normalizedIngredients);
       console.log('========================================');
 
       const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/save-ai-recipe`, {
@@ -491,11 +538,36 @@ export default function AiResultScreen() {
       const result = JSON.parse(responseText);
       console.log('Recipe saved successfully:', result);
 
-      const recipeId = resolveValidRecipeId(recipe?.recipeId);
-      markRecipeSaved(recipeId, recipeSaveToken);
+      const savedRecipe = (result?.data ?? result ?? {}) as Record<string, any>;
+      const savedRecipeId = resolveValidRecipeId(
+        savedRecipe?.recipeId ?? savedRecipe?.shopRecipeId ?? recipe?.recipeId
+      );
+      markRecipeSaved(savedRecipeId, recipeSaveToken);
 
       setIsSaved(true);
       showToast('Recipe saved successfully!');
+
+      if (savedRecipeId) {
+        const savedIngredients = Array.isArray(savedRecipe?.ingredients)
+          ? savedRecipe.ingredients
+          : Array.isArray(savedRecipe?.shopRecipeIngredients)
+            ? savedRecipe.shopRecipeIngredients
+            : normalizedIngredients;
+
+        router.replace({
+          pathname: '/recipe-detail/[id]',
+          params: {
+            id: String(savedRecipe?.beverageId ?? parsedBeverageId ?? 0),
+            recipeId: String(savedRecipeId),
+            recipe: JSON.stringify(savedRecipe),
+            ingredients: JSON.stringify(savedIngredients),
+            beverageName:
+              String(savedRecipe?.beverage?.name ?? selectedBeverage?.name ?? '').trim() ||
+              undefined,
+            returnTo: '/(tabs)/menu',
+          },
+        });
+      }
     } catch (error) {
       console.error('Error saving recipe:', error);
       Alert.alert(
@@ -796,24 +868,19 @@ export default function AiResultScreen() {
             <MaterialIcons name="shopping-bag" size={16} color="#8B5E3C" />
             <ThemedText style={styles.sectionTitle}>Ingredients</ThemedText>
           </View>
-          {ingredientsList.length > 0 ? (
+          {normalizedIngredientList.length > 0 ? (
             <View style={styles.ingredientsList}>
-              {ingredientsList.map((item, index) => (
+              {normalizedIngredientList.map((item, index) => (
                 <View
-                  key={`${item.id ?? item.ingredient?.ingredientId ?? 'ingredient'}-${index}`}
+                  key={`${item.ingredientId}-${index}`}
                   style={styles.ingredientRow}>
                   <View style={styles.ingredientInfo}>
                     <ThemedText style={styles.ingredientName}>
-                      {item.ingredient?.name || item.name || (item.id ? `Ingredient ${item.id}` : 'Ingredient')}
+                      {item.ingredientName || `Ingredient #${item.ingredientId}`}
                     </ThemedText>
                     <ThemedText style={styles.ingredientDetail}>
-                      {(item.quantity ?? item.amount ?? '')}
-                      {item.measurement
-                        ? ` ${item.measurement}`
-                        : item.ingredient?.category === 'Milk' || item.ingredient?.category === 'Beverage'
-                          ? 'ml'
-                          : 'g'}
-                      {item.cost ? ` •${item.cost.toLocaleString()} ₫` : ''}
+                      ID {item.ingredientId} • {item.quantity} {item.measurement}
+                      {item.cost ? ` • ${item.cost.toLocaleString()} ₫` : ''}
                     </ThemedText>
                   </View>
                 </View>
