@@ -67,6 +67,25 @@ type SupplierInfo = {
     wardCode?: string | null;
 };
 
+const toArrayPayload = <T,>(payload: any): T[] => {
+    if (Array.isArray(payload)) return payload as T[];
+    if (payload && typeof payload === 'object') {
+        if (Array.isArray(payload.data)) return payload.data as T[];
+        if (Array.isArray(payload.items)) return payload.items as T[];
+        if (Array.isArray(payload.result)) return payload.result as T[];
+    }
+    return [];
+};
+
+const normalizeSupplierInfo = (raw: any): SupplierInfo => ({
+    supplierId: Number(raw?.supplierId ?? raw?.SupplierId ?? raw?.id ?? 0),
+    supplierName: String(raw?.supplierName ?? raw?.name ?? raw?.supplier?.name ?? 'Unknown Supplier').trim(),
+    address: raw?.address ?? raw?.Address ?? null,
+    provinceId: Number(raw?.provinceId ?? raw?.ProvinceId ?? 0) || null,
+    districtId: Number(raw?.districtId ?? raw?.DistrictId ?? 0) || null,
+    wardCode: String(raw?.wardCode ?? raw?.WardCode ?? '').trim() || null,
+});
+
 type GhnService = {
     service_id: number;
     short_name: string;
@@ -123,7 +142,13 @@ export default function CheckoutPage() {
     const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const topupPresets = [100000, 500000, 1000000, 5000000];
 
-    const hasShippingAddress = Boolean((profile as any)?.districtId && (profile as any)?.wardCode);
+    const shippingToDistrictId = Number(
+        (profile as any)?.districtId ?? (profile as any)?.DistrictId ?? 0
+    );
+    const shippingToWardCode = String(
+        (profile as any)?.wardCode ?? (profile as any)?.WardCode ?? ''
+    ).trim();
+    const hasShippingAddress = Number.isFinite(shippingToDistrictId) && shippingToDistrictId > 0 && !!shippingToWardCode;
 
     useEffect(() => {
         if (params.selectedIds) {
@@ -180,9 +205,12 @@ export default function CheckoutPage() {
                 }
 
                 const data = await response.json();
-                if (Array.isArray(data)) {
-                    setSuppliers(data as SupplierInfo[]);
-                }
+                const parsedSuppliers = toArrayPayload<any>(data)
+                    .map(normalizeSupplierInfo)
+                    .filter((s) => Number.isFinite(s.supplierId) && s.supplierId > 0);
+
+                console.log('[Checkout] Suppliers loaded:', parsedSuppliers.length);
+                setSuppliers(parsedSuppliers);
             } catch (error) {
                 console.error('Failed to load suppliers', error);
             }
@@ -293,15 +321,32 @@ export default function CheckoutPage() {
     const loadShippingForGroup = async (group: SupplierGroup, overwriteServiceId?: number) => {
         if (!profile) return;
 
-        const toDistrictId = (profile as any)?.districtId;
-        const toWardCode = (profile as any)?.wardCode;
+        const toDistrictId = shippingToDistrictId;
+        const toWardCode = shippingToWardCode;
+
+        console.log('[GHN] Begin load shipping', {
+            supplierId: group.supplierId,
+            toDistrictId,
+            toWardCode,
+            suppliersLoaded: suppliers.length,
+        });
 
         if (!toDistrictId || !toWardCode) {
+            console.log('[GHN] Skip: missing destination address', {
+                toDistrictId,
+                toWardCode,
+            });
             return;
         }
 
         const supplierInfo = suppliers.find((s) => s.supplierId === group.supplierId);
         if (!supplierInfo || !supplierInfo.districtId || !supplierInfo.wardCode) {
+            console.log('[GHN] Skip: missing supplier address info', {
+                supplierId: group.supplierId,
+                foundSupplier: !!supplierInfo,
+                districtId: supplierInfo?.districtId,
+                wardCode: supplierInfo?.wardCode,
+            });
             return;
         }
 
@@ -335,12 +380,20 @@ export default function CheckoutPage() {
                 }
 
                 const svcData = await svcRes.json();
-                const rawServices = Array.isArray(svcData?.data)
-                    ? (svcData.data as GhnService[])
-                    : [];
+                const rawServices = toArrayPayload<any>(svcData).map((service: any) => ({
+                    service_id: Number(service?.service_id ?? service?.serviceId ?? 0),
+                    short_name: String(service?.short_name ?? service?.shortName ?? 'GHN Service'),
+                    service_type_id: Number(service?.service_type_id ?? service?.serviceTypeId ?? 0),
+                })) as GhnService[];
 
                 // Filter out unsupported heavy service 100039
                 services = rawServices.filter((s) => s.service_id !== 100039);
+
+                console.log('[GHN] Services loaded', {
+                    supplierId,
+                    count: services.length,
+                    serviceIds: services.map((s) => s.service_id),
+                });
 
                 setGhnServicesBySupplier((prev) => ({ ...prev, [supplierId]: services }));
             }
@@ -507,7 +560,7 @@ export default function CheckoutPage() {
             }
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [groupedItems, profile, suppliers]);
+    }, [groupedItems, profile, suppliers, shippingToDistrictId, shippingToWardCode]);
 
     const canAfford = totals.totalAmount <= walletBalance;
     const missingAmount = Math.max(0, totals.totalAmount - walletBalance);
