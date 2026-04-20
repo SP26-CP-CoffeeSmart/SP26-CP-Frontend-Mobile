@@ -668,7 +668,9 @@ export default function MenuDetailScreen() {
 
     const quantity = Number.parseInt(regenerateQuantity, 10);
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      Alert.alert('Invalid quantity', 'Please enter a valid quantity greater than 0.');
+      setRegenerateErrorTitle('Invalid quantity');
+      setRegenerateErrorMessage('Please enter a valid quantity greater than 0.');
+      setIsRegenerateErrorOpen(true);
       return;
     }
 
