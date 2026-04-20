@@ -150,6 +150,11 @@ export default function RecipeDetailScreen() {
     const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
     const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
 
+    const resolvedRecipeEntityId = useMemo(() => {
+        const resolved = Number(recipeData?.shopRecipeId ?? recipeData?.recipeId ?? 0);
+        return Number.isFinite(resolved) && resolved > 0 ? resolved : 0;
+    }, [recipeData?.shopRecipeId, recipeData?.recipeId]);
+
     const handleOpenPublish = () => {
         if (isRecommendationMenuItem) {
             Toast.show({
@@ -221,6 +226,27 @@ export default function RecipeDetailScreen() {
         } catch {
             return null;
         }
+    };
+
+    const unwrapPayload = <T,>(payload: any): T | null => {
+        if (payload == null) return null;
+        if (payload && typeof payload === 'object') {
+            if ('data' in payload && payload.data != null) return payload.data as T;
+            if ('result' in payload && payload.result != null) return payload.result as T;
+            if ('item' in payload && payload.item != null) return payload.item as T;
+        }
+        return payload as T;
+    };
+
+    const toArrayPayload = (payload: any): any[] => {
+        if (Array.isArray(payload)) return payload;
+        if (payload && typeof payload === 'object') {
+            if (Array.isArray(payload.data)) return payload.data;
+            if (Array.isArray(payload.items)) return payload.items;
+            if (Array.isArray(payload.result)) return payload.result;
+            if (Array.isArray(payload.value)) return payload.value;
+        }
+        return [];
     };
 
     const normalizeIngredients = (raw: any): Ingredient[] => {
@@ -429,7 +455,8 @@ export default function RecipeDetailScreen() {
             // Priority: explicit recipeId -> menuItemId -> beverageId fallback.
             if (Number.isFinite(resolvedRecipeId) && resolvedRecipeId > 0) {
                 const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${resolvedRecipeId}`);
-                const data = await response.json();
+                const raw = await response.json();
+                const data = unwrapPayload<RecipeData>(raw);
                 if (data) {
                     setRecipes([data]);
                     setRecipeData(data);
@@ -444,13 +471,15 @@ export default function RecipeDetailScreen() {
 
             if (Number.isFinite(resolvedMenuItemId) && resolvedMenuItemId > 0) {
                 const menuItemResponse = await authorizedFetch(`${AUTH_BASE_URL}/MenuItem/${resolvedMenuItemId}`);
-                const menuItemData = await menuItemResponse.json();
+                const menuItemRaw = await menuItemResponse.json();
+                const menuItemData = unwrapPayload<any>(menuItemRaw) ?? menuItemRaw;
                 const menuItemRecipe = menuItemData?.shopRecipe ?? null;
                 const menuItemRecipeId = Number(menuItemRecipe?.recipeId ?? 0);
 
                 if (menuItemRecipeId > 0) {
                     const recipeResponse = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${menuItemRecipeId}`);
-                    const recipeDataFromApi = await recipeResponse.json();
+                    const recipeRaw = await recipeResponse.json();
+                    const recipeDataFromApi = unwrapPayload<RecipeData>(recipeRaw);
                     if (recipeDataFromApi) {
                         setRecipes([recipeDataFromApi]);
                         setRecipeData(recipeDataFromApi);
@@ -481,7 +510,9 @@ export default function RecipeDetailScreen() {
             }
 
             const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${fallbackId}`);
-            const data = await response.json();
+            const raw = await response.json();
+            const unwrapped = unwrapPayload<any>(raw);
+            const data = Array.isArray(unwrapped) ? unwrapped : unwrapped;
 
             if (Array.isArray(data) && data.length > 0) {
                 setRecipes(data);
@@ -515,10 +546,9 @@ export default function RecipeDetailScreen() {
 
     useEffect(() => {
         if (!recipeData) return;
-        const resolvedId = Number(recipeData.shopRecipeId ?? recipeData.recipeId ?? 0);
-        console.log('[RecipeDetail] recipeId:', resolvedId);
+        console.log('[RecipeDetail] recipeId:', resolvedRecipeEntityId);
         console.log('[RecipeDetail] image:', recipeData.image ?? null);
-    }, [recipeData]);
+    }, [recipeData, resolvedRecipeEntityId]);
 
     // Fetch ingredients when recipeData changes
     useEffect(() => {
@@ -533,19 +563,56 @@ export default function RecipeDetailScreen() {
             return;
         }
 
-        if (Array.isArray(recipeData?.ingredients)) {
+        if (Array.isArray(recipeData?.ingredients) && recipeData.ingredients.length > 0) {
             setIngredients(normalizeIngredients(recipeData.ingredients));
             return;
         }
 
-        if (recipeData?.recipeId) {
+        const fallbackShopRecipeIngredients = (recipeData as any)?.shopRecipeIngredients;
+        if (Array.isArray(fallbackShopRecipeIngredients) && fallbackShopRecipeIngredients.length > 0) {
+            setIngredients(normalizeIngredients(fallbackShopRecipeIngredients));
+            return;
+        }
+
+        if (resolvedRecipeEntityId > 0) {
             const fetchIngredients = async () => {
                 try {
-                    const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${recipeData.recipeId}`);
-                    const data = await response.json();
-                    if (Array.isArray(data)) {
-                        setIngredients(normalizeIngredients(data));
+                    const recipeResponse = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${resolvedRecipeEntityId}`);
+                    const recipeRaw = await recipeResponse.json();
+                    const recipePayload = unwrapPayload<any>(recipeRaw) ?? recipeRaw;
+                    const recipeIngredients =
+                        Array.isArray(recipePayload?.ingredients) && recipePayload.ingredients.length > 0
+                            ? recipePayload.ingredients
+                            : Array.isArray(recipePayload?.shopRecipeIngredients) && recipePayload.shopRecipeIngredients.length > 0
+                                ? recipePayload.shopRecipeIngredients
+                                : [];
+
+                    if (recipeIngredients.length > 0) {
+                        setIngredients(normalizeIngredients(recipeIngredients));
+                        return;
                     }
+
+                    const candidateIds = Array.from(
+                        new Set(
+                            [
+                                Number(recipeData?.recipeId ?? 0),
+                                Number(recipeData?.shopRecipeId ?? 0),
+                                resolvedRecipeEntityId,
+                            ].filter((id) => Number.isFinite(id) && id > 0)
+                        )
+                    );
+
+                    for (const candidateId of candidateIds) {
+                        const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipeIngredients/by-recipe/${candidateId}`);
+                        const raw = await response.json();
+                        const data = toArrayPayload(raw);
+                        if (data.length > 0) {
+                            setIngredients(normalizeIngredients(data));
+                            return;
+                        }
+                    }
+
+                    setIngredients([]);
                 } catch (err) {
                     console.error('Ingredients fetch error:', err);
                     setIngredients([]);
@@ -553,7 +620,13 @@ export default function RecipeDetailScreen() {
             };
             fetchIngredients();
         }
-    }, [recipeData?.recipeId, recipeData?.ingredients, ingredientsParam, activeItemSize]);
+    }, [
+        recipeData?.ingredients,
+        (recipeData as any)?.shopRecipeIngredients,
+        ingredientsParam,
+        activeItemSize,
+        resolvedRecipeEntityId,
+    ]);
 
     const getEmojiForIngredient = (category: string, ingredientName: string): string => {
         // Map by category first
@@ -798,7 +871,7 @@ export default function RecipeDetailScreen() {
             });
             return;
         }
-        if (!recipeData?.recipeId || uploadingRecipeImage) {
+        if (!resolvedRecipeEntityId || uploadingRecipeImage) {
             return;
         }
 
@@ -835,7 +908,7 @@ export default function RecipeDetailScreen() {
             } as any);
 
             const response = await authorizedFetch(
-                `${AUTH_BASE_URL}/ShopRecipe/upload-image?id=${recipeData.recipeId}`,
+                `${AUTH_BASE_URL}/ShopRecipe/upload-image?id=${resolvedRecipeEntityId}`,
                 {
                     method: 'POST',
                     headers: {

@@ -2256,14 +2256,19 @@ export default function MenuScreen() {
         onRequestClose={() => setShowCreateModal(false)}
       >
         <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={[styles.modalOverlay, Platform.OS === 'android' && styles.modalOverlayAndroid]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          enabled={Platform.OS === 'ios'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
         >
           <ScrollView
             style={styles.modalScroll}
-            contentContainerStyle={styles.modalScrollContent}
+            contentContainerStyle={[
+              styles.modalScrollContent,
+              Platform.OS === 'android' && styles.modalScrollContentAndroid,
+            ]}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
           >
@@ -3268,6 +3273,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
   },
+  modalOverlayAndroid: {
+    justifyContent: 'flex-start',
+    paddingTop: 32,
+    paddingBottom: 12,
+  },
   modalScroll: {
     width: '100%',
   },
@@ -3276,6 +3286,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 24,
     paddingHorizontal: 16,
+  },
+  modalScrollContentAndroid: {
+    justifyContent: 'flex-start',
+    paddingVertical: 0,
   },
   modalCard: {
     width: '100%',
