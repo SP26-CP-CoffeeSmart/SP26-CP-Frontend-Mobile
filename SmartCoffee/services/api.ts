@@ -172,6 +172,23 @@ export const API_ENDPOINTS = {
   },
   supplierProduct: {
     list: (page = 1, pageSize = 500) => `${AUTH_BASE_URL}/SupplierProduct?page=${page}&pageSize=${pageSize}`,
+    recommendationsByShop: (
+      coffeeShopId: number,
+      params: { threshold: number; from?: string; to?: string; numberCupWanted?: number }
+    ) => {
+      const query = new URLSearchParams();
+      query.set('threshold', String(params.threshold));
+      if (typeof params.numberCupWanted === 'number' && Number.isFinite(params.numberCupWanted)) {
+        query.set('numberCupWanted', String(params.numberCupWanted));
+      }
+      if (typeof params.from === 'string' && params.from.trim()) {
+        query.set('from', params.from.trim());
+      }
+      if (typeof params.to === 'string' && params.to.trim()) {
+        query.set('to', params.to.trim());
+      }
+      return `${AUTH_BASE_URL}/SupplierProduct/recommendations/shop/${coffeeShopId}?${query.toString()}`;
+    },
     checkAvailableStock: () => `${AUTH_BASE_URL}/SupplierProduct/check-available-stock`,
     averagePriceByIngredients: () => `${AUTH_BASE_URL}/SupplierProduct/average-price/ingredients`,
   },

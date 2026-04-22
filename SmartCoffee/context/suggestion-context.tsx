@@ -15,6 +15,7 @@ export type SuggestionItem = {
     measurement?: string | null;
     packageSize?: number | null;
     availableStock?: number | null;
+    suggestedQuantity?: number | null;
     priceVnd: number;
 };
 
