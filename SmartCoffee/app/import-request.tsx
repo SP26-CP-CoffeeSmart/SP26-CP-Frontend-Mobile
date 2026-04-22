@@ -166,6 +166,7 @@ const MOCK_INGREDIENTS: Ingredient[] = [
 ];
 
 const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
+const QUANTITY_INPUT_REGEX = /^\d*(\.\d*)?$/;
 
 const formatOrderDate = (value?: string) => {
   if (!value) {
@@ -266,6 +267,8 @@ export default function ImportRequestScreen() {
   });
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [submitDraft, setSubmitDraft] = useState<SubmitDraft | null>(null);
+  const [manualQuantityInputs, setManualQuantityInputs] = useState<Record<number, string>>({});
+  const [manualQuantityErrors, setManualQuantityErrors] = useState<Record<number, string>>({});
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
@@ -355,13 +358,33 @@ export default function ImportRequestScreen() {
     setManualDetails((prev) => {
       const existing = prev.find((detail) => detail.ingredientId === ingredient.ingredientId);
       if (existing) {
-        return prev.map((detail) =>
+        const nextDetails = prev.map((detail) =>
           detail.ingredientId === ingredient.ingredientId
             ? { ...detail, importQuantity: detail.importQuantity + 1 }
             : detail
         );
+        const updated = nextDetails.find((detail) => detail.ingredientId === ingredient.ingredientId);
+        if (updated) {
+          setManualQuantityInputs((current) => ({
+            ...current,
+            [ingredient.ingredientId]: String(updated.importQuantity),
+          }));
+          setManualQuantityErrors((current) => {
+            if (!current[ingredient.ingredientId]) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[ingredient.ingredientId];
+            return next;
+          });
+        }
+        return nextDetails;
       }
 
+      setManualQuantityInputs((current) => ({
+        ...current,
+        [ingredient.ingredientId]: '1',
+      }));
       return [
         ...prev,
         {
@@ -373,20 +396,125 @@ export default function ImportRequestScreen() {
     });
   };
 
-  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+  const updateManualQuantity = (ingredientId: number, quantity: number) => {
     setManualDetails((prev) =>
       prev.map((detail) => {
         if (detail.ingredientId !== ingredientId) {
           return detail;
         }
-        const nextQuantity = Math.max(detail.importQuantity + delta, 0);
-        return { ...detail, importQuantity: nextQuantity };
+        return { ...detail, importQuantity: quantity };
       })
     );
   };
 
+  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+    let nextQuantity = 0;
+    setManualDetails((prev) =>
+      prev.map((detail) => {
+        if (detail.ingredientId !== ingredientId) {
+          return detail;
+        }
+        nextQuantity = Math.max(detail.importQuantity + delta, 0);
+        return { ...detail, importQuantity: nextQuantity };
+      })
+    );
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(nextQuantity),
+    }));
+    setManualQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+  };
+
+  const handleManualQuantityInput = (ingredientId: number, rawValue: string) => {
+    const normalizedValue = rawValue.replace(',', '.').trim();
+
+    if (normalizedValue.includes('-')) {
+      setManualQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity cannot be negative.',
+      }));
+      return;
+    }
+
+    if (!QUANTITY_INPUT_REGEX.test(normalizedValue)) {
+      setManualQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity must be numeric.',
+      }));
+      return;
+    }
+
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: normalizedValue,
+    }));
+    setManualQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+
+    if (normalizedValue === '' || normalizedValue === '.') {
+      updateManualQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(normalizedValue);
+    updateManualQuantity(ingredientId, Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+  };
+
+  const handleManualQuantityBlur = (ingredientId: number) => {
+    const inputValue = manualQuantityInputs[ingredientId];
+    if (inputValue === undefined) {
+      return;
+    }
+
+    if (inputValue === '' || inputValue === '.') {
+      setManualQuantityInputs((current) => ({
+        ...current,
+        [ingredientId]: '0',
+      }));
+      updateManualQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(inputValue);
+    const normalized = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(normalized),
+    }));
+    updateManualQuantity(ingredientId, normalized);
+  };
+
   const handleRemoveDetail = (ingredientId: number) => {
     setManualDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
+    setManualQuantityInputs((prev) => {
+      if (prev[ingredientId] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
+    setManualQuantityErrors((prev) => {
+      if (!prev[ingredientId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
   };
 
   const handleLoadOrder = () => {
@@ -1039,7 +1167,18 @@ export default function ImportRequestScreen() {
                       >
                         <Ionicons name="remove" size={16} color={COLORS.ink} />
                       </TouchableOpacity>
-                      <Text style={styles.stepperValue}>{detail.importQuantity}</Text>
+                      <TextInput
+                        value={
+                          manualQuantityInputs[detail.ingredientId] ??
+                          String(detail.importQuantity)
+                        }
+                        onChangeText={(value) => handleManualQuantityInput(detail.ingredientId, value)}
+                        onBlur={() => handleManualQuantityBlur(detail.ingredientId)}
+                        keyboardType="decimal-pad"
+                        style={styles.stepperInput}
+                        placeholder="0"
+                        placeholderTextColor={COLORS.muted}
+                      />
                       <TouchableOpacity
                         style={styles.stepperButton}
                         onPress={() => handleUpdateQuantity(detail.ingredientId, 1)}
@@ -1048,6 +1187,9 @@ export default function ImportRequestScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
+                  {manualQuantityErrors[detail.ingredientId] ? (
+                    <Text style={styles.quantityError}>{manualQuantityErrors[detail.ingredientId]}</Text>
+                  ) : null}
 
                   <Text style={styles.detailMeta}>New total: {newTotal} {measurementLabel}</Text>
 
@@ -1577,6 +1719,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.ink,
     marginHorizontal: 6,
+  },
+  stepperInput: {
+    minWidth: 48,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginHorizontal: 6,
+    paddingVertical: 0,
+  },
+  quantityError: {
+    fontSize: 12,
+    color: '#B91C1C',
+    marginBottom: 8,
   },
   readonlyValue: {
     fontSize: 14,
