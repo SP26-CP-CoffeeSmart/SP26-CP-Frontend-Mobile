@@ -48,6 +48,76 @@ export default function AIOrderSuggestionsScreen() {
       ),
     [suggestions]
   );
+
+  const convertSuggestedQuantity = (
+    rawQty: number | null | undefined,
+    measurement: string | null | undefined
+  ): { value: number; unit: string } | null => {
+    if (rawQty == null || !Number.isFinite(rawQty)) return null;
+    const m = (measurement ?? '').trim().toLowerCase();
+    // API already returns suggestedQuantity in base units (ml/g).
+    // We only convert the unit label: l→ml, kg→g.
+    if (m === 'l' || m === 'liter' || m === 'litre') {
+      return { value: Math.round(rawQty), unit: 'ml' };
+    }
+    if (m === 'kg' || m === 'kilogram') {
+      return { value: Math.round(rawQty), unit: 'g' };
+    }
+    if (m === 'ml' || m === 'milliliter') {
+      return { value: Math.round(rawQty), unit: 'ml' };
+    }
+    // gram, g, or anything else → treat as grams
+    return { value: Math.round(rawQty), unit: 'g' };
+  };
+
+  const convertPackageSize = (
+    size: number | null | undefined,
+    measurement: string | null | undefined
+  ): { value: number; unit: string } | null => {
+    if (size == null || !Number.isFinite(size)) return null;
+    const m = (measurement ?? '').trim().toLowerCase();
+    // packageSize needs actual conversion: 1l = 1000ml, 1kg = 1000g
+    if (m === 'l' || m === 'liter' || m === 'litre') {
+      return { value: Math.round(size * 1000), unit: 'ml' };
+    }
+    if (m === 'kg' || m === 'kilogram') {
+      return { value: Math.round(size * 1000), unit: 'g' };
+    }
+    if (m === 'ml' || m === 'milliliter') {
+      return { value: Math.round(size), unit: 'ml' };
+    }
+    // gram, g, or anything else → treat as grams
+    return { value: Math.round(size), unit: 'g' };
+  };
+
+  // Calculate actual cost for an item:
+  // cost = (suggestedQuantityInBaseUnits / packageSizeInBaseUnits) * priceVnd * reviewQty
+  const calcItemPrice = (item: (typeof suggestions)[number]): number => {
+    const pkgBase = (() => {
+      const s = item.packageSize;
+      if (s == null || !Number.isFinite(s)) return null;
+      const m = (item.measurement ?? '').trim().toLowerCase();
+      if (m === 'l' || m === 'liter' || m === 'litre') return s * 1000;
+      if (m === 'kg' || m === 'kilogram') return s * 1000;
+      return s; // ml, gram, g, etc.
+    })();
+
+    const sqBase = (() => {
+      const q = item.suggestedQuantity;
+      if (q == null || !Number.isFinite(q)) return null;
+      return q; // API already returns in base unit (ml/g)
+    })();
+
+    if (pkgBase && pkgBase > 0 && sqBase != null) {
+      const reviewQty = isReviewing ? getSafeQty(reviewQtyById[item.id]) : 1;
+      return (sqBase / pkgBase) * item.priceVnd * reviewQty;
+    }
+
+    // fallback: priceVnd * reviewQty (package-level)
+    const reviewQty = isReviewing ? getSafeQty(reviewQtyById[item.id]) : 1;
+    return item.priceVnd * reviewQty;
+  };
+
   const suggestionIdsKey = useMemo(() => suggestionProductIds.join(','), [suggestionProductIds]);
 
   const getSafeQty = (rawQty: unknown) => {
@@ -175,8 +245,7 @@ export default function AIOrderSuggestionsScreen() {
 
   const totalVnd = suggestions.reduce(
     (sum, item) => {
-      const qty = getDisplayQty(item);
-      return sum + item.priceVnd * qty;
+      return sum + calcItemPrice(item);
     },
     0
   );
@@ -301,7 +370,16 @@ export default function AIOrderSuggestionsScreen() {
       >
         <View style={styles.headerOverlay} />
         <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <TouchableOpacity
+            onPress={() => {
+              if (isReviewing) {
+                setIsReviewing(false);
+              } else {
+                router.back();
+              }
+            }}
+            style={styles.backButton}
+          >
             <Ionicons name="chevron-back" size={24} color="#FFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Suggested List</Text>
@@ -363,12 +441,39 @@ export default function AIOrderSuggestionsScreen() {
                   </Text>
                   <Text style={styles.itemPrice}>
                     {formattedVnd(item.priceVnd)} VND /
-                    {item.packageSize ? ` ${item.packageSize}${item.measurement}` : ''}
+                    {(() => {
+                      const pkg = convertPackageSize(item.packageSize, item.measurement);
+                      if (pkg) return ` ${formattedVnd(pkg.value)}${pkg.unit}`;
+                      return item.packageSize ? ` ${item.packageSize}${item.measurement}` : '';
+                    })()}
                   </Text>
-                  <Text style={styles.itemQty}>Qty needed: {getDisplayQty(item)}  {item.measurement ? item.measurement : "g/ml"}</Text>
+                  {(() => {
+                    const converted = convertSuggestedQuantity(item.suggestedQuantity, item.measurement);
+                    if (converted) {
+                      return (
+                        <Text style={styles.itemQty}>
+                          Suggested quantity: {formattedVnd(converted.value)} {converted.unit}
+                        </Text>
+                      );
+                    }
+                    return (
+                      <Text style={styles.itemQty}>
+                        Qty needed: {getDisplayQty(item)} {item.measurement || 'g/ml'}
+                      </Text>
+                    );
+                  })()}
                   {typeof getItemLimit(item) === 'number' && (
                     <Text style={styles.itemQty}>Available quantity package: {getItemLimit(item)}</Text>
                   )}
+                  {/* Actual calculated price — only shown in review mode */}
+                  {isReviewing && (() => {
+                    const actualPrice = calcItemPrice(item);
+                    return (
+                      <Text style={[styles.itemQty, { color: '#B23B3B', fontWeight: '700', marginTop: 4 }]}>
+                        Estimated cost: {formattedVnd(Math.round(actualPrice))} VND
+                      </Text>
+                    );
+                  })()}
                   <View style={styles.itemMetaRow}>
                     <View style={styles.itemMetaBadge}>
                       <Ionicons name="time-outline" size={12} color="#9B8B7B" />
