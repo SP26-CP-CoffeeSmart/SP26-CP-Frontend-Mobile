@@ -11,11 +11,16 @@ import {
   Dimensions,
   Alert,
   RefreshControl,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
+import Slider from '@react-native-community/slider';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { AUTH_BASE_URL } from '@/services/api';
+import { useAuth } from '@/context/auth-context';
+import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
@@ -71,12 +76,16 @@ interface SupplierProductListResponse {
   items: SupplierProductApiItem[];
 }
 
-const { width } = Dimensions.get('window');
+type SuggestionInputMode = 'cups' | 'forecast';
+
+const { width, height } = Dimensions.get('window');
 const cardGap = 12;
 const cardWidth = (width - 32 - cardGap) / 2;
+const suggestionModalFixedHeight = Math.min(height * 0.65, 520);
 
 export default function ProductPage() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const params = useLocalSearchParams<{ fromSuggestions?: string; existingIds?: string }>();
   const fromSuggestions =
     params.fromSuggestions === '1' || params.fromSuggestions === 'true';
@@ -88,6 +97,13 @@ export default function ProductPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedForSuggestion, setSelectedForSuggestion] = useState<SupplierProductApiItem[]>([]);
+  const [showSuggestionModal, setShowSuggestionModal] = useState(false);
+  const [showMenuActivationRequiredModal, setShowMenuActivationRequiredModal] = useState(false);
+  const [numberCupWantedInput, setNumberCupWantedInput] = useState('');
+  const [rangeDays, setRangeDays] = useState(3);
+  const [suggestionInputMode, setSuggestionInputMode] = useState<SuggestionInputMode>('cups');
+  const [suggestionSubmitting, setSuggestionSubmitting] = useState(false);
+  const [checkingSuggestionGate, setCheckingSuggestionGate] = useState(false);
   const latestRequestId = useRef(0);
 
   // Pagination states
@@ -96,6 +112,22 @@ export default function ProductPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const PAGE_SIZE = 10;
+  const MAX_FORECAST_DAYS = 90;
+  const MIN_RANGE_DAYS = 3;
+  const DEFAULT_RANGE_FOR_CUPS = 30;
+
+  const toLocalIsoDate = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const todayIso = () => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return toLocalIsoDate(now);
+  };
 
   const dynamicCategories = useMemo(() => {
     const cats = new Set<string>();
@@ -243,6 +275,198 @@ export default function ProductPage() {
   const formatVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
 
+  const addDays = (baseDate: Date, days: number) => {
+    const next = new Date(baseDate);
+    next.setDate(next.getDate() + days);
+    return next;
+  };
+
+  const toIsoDate = (date: Date) => toLocalIsoDate(date);
+
+  const fromIso = todayIso();
+  const fromDate = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }, [showSuggestionModal]);
+  const toDate = useMemo(() => addDays(fromDate, rangeDays), [fromDate, rangeDays]);
+  const toIso = toIsoDate(toDate);
+
+  const hasEnteredAllSuggestionFields =
+    suggestionInputMode === 'cups'
+      ? numberCupWantedInput.trim().length > 0
+      : fromIso.length > 0 && toIso.length > 0;
+
+  const validateSuggestionInputs = () => {
+    if (suggestionInputMode === 'cups') {
+      const numberCupWanted = Number(numberCupWantedInput.trim());
+      if (!Number.isInteger(numberCupWanted) || numberCupWanted < 50) {
+        return {
+          valid: false,
+          message: 'Estimated cup count must be an integer of at least 50 cups.',
+        };
+      }
+
+      return {
+        valid: true,
+        params: {
+          numberCupWanted,
+        },
+      } as const;
+    }
+
+    if (rangeDays < MIN_RANGE_DAYS) {
+      return {
+        valid: false,
+        message: `The forecast range must be at least ${MIN_RANGE_DAYS} days.`,
+      };
+    }
+
+    if (rangeDays > MAX_FORECAST_DAYS) {
+      return {
+        valid: false,
+        message: 'Selected end date is outside the 90-day window.',
+      };
+    }
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const computedFrom = toIsoDate(now);
+    const computedTo = toIsoDate(addDays(now, rangeDays));
+
+    return {
+      valid: true,
+      params: {
+        from: computedFrom,
+        to: computedTo,
+      },
+    } as const;
+  };
+
+  const openSuggestionModal = () => {
+    setNumberCupWantedInput('');
+    setRangeDays(DEFAULT_RANGE_FOR_CUPS);
+    setSuggestionInputMode('cups');
+    setShowSuggestionModal(true);
+  };
+
+  const extractMenuArrayPayload = (payload: unknown): unknown[] => {
+    if (Array.isArray(payload)) return payload;
+    if (payload && typeof payload === 'object') {
+      const typed = payload as { data?: unknown; items?: unknown; result?: unknown };
+      if (Array.isArray(typed.data)) return typed.data;
+      if (Array.isArray(typed.items)) return typed.items;
+      if (Array.isArray(typed.result)) return typed.result;
+      return [payload];
+    }
+    return [];
+  };
+
+  const isExplicitActiveMenu = (raw: unknown) => {
+    if (!raw || typeof raw !== 'object') return false;
+
+    const obj = raw as {
+      is_active?: unknown;
+      isActive?: unknown;
+      active?: unknown;
+      isActived?: unknown;
+      status?: unknown;
+    };
+
+    const activeFlag = obj.is_active ?? obj.isActive ?? obj.active ?? obj.isActived;
+    if (typeof activeFlag === 'boolean') return activeFlag;
+    if (typeof activeFlag === 'number') return activeFlag === 1;
+    if (typeof activeFlag === 'string') {
+      const normalized = activeFlag.trim().toLowerCase();
+      if (normalized === 'true' || normalized === '1' || normalized === 'active') return true;
+      if (normalized === 'false' || normalized === '0' || normalized === 'inactive') return false;
+    }
+
+    if (typeof obj.status === 'string') {
+      return obj.status.trim().toLowerCase() === 'active';
+    }
+
+    return false;
+  };
+
+  const canUseProductSuggestion = async () => {
+    if (!coffeeShopId) {
+      throw new Error('Coffee shop ID not found.');
+    }
+
+    const response = await authorizedFetch(API_ENDPOINTS.menu.getByShop(coffeeShopId), {
+      method: 'GET',
+      headers: {
+        Accept: '*/*',
+      },
+    });
+
+    if (response.status === 404) {
+      return false;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to verify active menu (${response.status}).`);
+    }
+
+    const payload = await response.json();
+    const menuList = extractMenuArrayPayload(payload);
+    const hasActiveMenu = menuList.some((menu) => isExplicitActiveMenu(menu));
+    console.log('[Suggestion Gate] Menu by shop payload:', payload);
+    console.log('[Suggestion Gate] Menu count:', menuList.length);
+    console.log('[Suggestion Gate] Has active menu:', hasActiveMenu);
+    return hasActiveMenu;
+  };
+
+  const handleSuggestionEntryPress = async () => {
+    if (checkingSuggestionGate) return;
+
+    try {
+      setCheckingSuggestionGate(true);
+      const canUse = await canUseProductSuggestion();
+      if (!canUse) {
+        setShowMenuActivationRequiredModal(true);
+        return;
+      }
+      openSuggestionModal();
+    } catch (entryError) {
+      const message = entryError instanceof Error ? entryError.message : 'Unable to validate active menu.';
+      Alert.alert('Product Suggestion', message);
+    } finally {
+      setCheckingSuggestionGate(false);
+    }
+  };
+
+  const startAiSuggestions = () => {
+    if (suggestionSubmitting) return;
+
+    const validation = validateSuggestionInputs();
+    if (!validation.valid) {
+      Alert.alert('AI Product Suggestion', validation.message);
+      return;
+    }
+
+    setSuggestionSubmitting(true);
+    setShowSuggestionModal(false);
+
+    router.push({
+      pathname: '/ai-loading',
+      params: {
+        mode: 'order-suggestions',
+        suggestionInputMode,
+        ...(validation.valid && validation.params.numberCupWanted
+          ? { numberCupWanted: String(validation.params.numberCupWanted) }
+          : {}),
+        ...(validation.valid && validation.params.from ? { from: validation.params.from } : {}),
+        ...(validation.valid && validation.params.to ? { to: validation.params.to } : {}),
+      },
+    });
+
+    setSuggestionSubmitting(false);
+  };
+
+  const canStartSuggestions = hasEnteredAllSuggestionFields && !suggestionSubmitting;
+
   const handleAddToSuggestedList = (item: SupplierProductApiItem) => {
     const name = item?.ingredient?.name ?? 'Unknown';
     const imageUrl = item?.image ?? item?.ingredient?.image ?? fallbackProductImage;
@@ -269,7 +493,7 @@ export default function ProductPage() {
 
     addItems([suggestion]);
 
-    Alert.alert('Đã thêm', `${name} đã được thêm vào danh sách gợi ý.`);
+    Alert.alert('Added', `${name} has been added to the suggested list.`);
   };
 
   return (
@@ -369,14 +593,16 @@ export default function ProductPage() {
 
         <View style={styles.suggestionBox}>
           <TouchableOpacity
-            onPress={() =>
-              router.push({
-                pathname: '/ai-loading',
-                params: { mode: 'order-suggestions' },
-              })
-            }
+            style={styles.suggestionTouchable}
+            activeOpacity={0.85}
+            onPress={handleSuggestionEntryPress}
+            disabled={checkingSuggestionGate}
           >
-            <Ionicons name="sparkles" size={14} color={COLORS.text} />
+            {checkingSuggestionGate ? (
+              <ActivityIndicator size="small" color={COLORS.accent} />
+            ) : (
+              <Ionicons name="sparkles" size={14} color={COLORS.text} />
+            )}
             <Text style={styles.suggestionText}>
               Product Suggestion: Helping you make purchases quickly based on inventory analysis.
             </Text>
@@ -484,6 +710,233 @@ export default function ProductPage() {
           </View>
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={showSuggestionModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowSuggestionModal(false)}
+      >
+        <View style={styles.suggestionModalBackdrop}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.suggestionModalKeyboardWrap}
+          >
+            <View style={styles.suggestionModalCard}>
+              <View style={styles.suggestionModalTopSection}>
+                <View style={styles.suggestionModalHeaderRow}>
+                  <View>
+                    <Text style={styles.suggestionModalTitle}>AI Product Suggestion</Text>
+                    <Text style={styles.suggestionModalSubtitle}>
+                      Enter your sales forecast so AI can recommend supplier products.
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.suggestionModalCloseButton}
+                    onPress={() => setShowSuggestionModal(false)}
+                  >
+                    <Ionicons name="close" size={18} color={COLORS.textSecondary} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.suggestionModalFieldGroup}>
+                  <Text style={styles.suggestionModalLabel}>Choose Input Mode</Text>
+                  <View style={styles.suggestionModeRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.suggestionModeChip,
+                        suggestionInputMode === 'cups' && styles.suggestionModeChipActive,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setSuggestionInputMode('cups')}
+                    >
+                      <Ionicons
+                        name="cafe-outline"
+                        size={14}
+                        color={suggestionInputMode === 'cups' ? COLORS.white : COLORS.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.suggestionModeChipText,
+                          suggestionInputMode === 'cups' && styles.suggestionModeChipTextActive,
+                        ]}
+                      >
+                        Cups to Sell
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.suggestionModeChip,
+                        suggestionInputMode === 'forecast' && styles.suggestionModeChipActive,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setSuggestionInputMode('forecast')}
+                    >
+                      <Ionicons
+                        name="calendar-outline"
+                        size={14}
+                        color={suggestionInputMode === 'forecast' ? COLORS.white : COLORS.textSecondary}
+                      />
+                      <Text
+                        style={[
+                          styles.suggestionModeChipText,
+                          suggestionInputMode === 'forecast' && styles.suggestionModeChipTextActive,
+                        ]}
+                      >
+                        Forecast Duration
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View
+                  style={[
+                    styles.suggestionModalInputSlot,
+                    suggestionInputMode === 'cups' && styles.suggestionModalInputSlotCups,
+                  ]}
+                >
+                  {suggestionInputMode === 'cups' ? (
+                    <View style={styles.suggestionModalFieldGroup}>
+                      <Text style={styles.suggestionModalLabel}>Estimated Cups to Sell</Text>
+                      <TextInput
+                        style={styles.suggestionModalInput}
+                        value={numberCupWantedInput}
+                        onChangeText={(text) => setNumberCupWantedInput(text.replace(/[^0-9]/g, ''))}
+                        placeholder="Example: 200"
+                        placeholderTextColor={COLORS.textSecondary}
+                        keyboardType="number-pad"
+                        returnKeyType="done"
+                      />
+                      <Text style={styles.suggestionModalHintInline}>Minimum: 50 cups.</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.suggestionModalFieldGroup}>
+                      <View style={styles.sliderHeaderRow}>
+                        <Text style={styles.suggestionModalLabel}>Forecast Duration</Text>
+                        <Text style={styles.sliderValueText}>{rangeDays} days</Text>
+                      </View>
+                      <Slider
+                        minimumValue={MIN_RANGE_DAYS}
+                        maximumValue={MAX_FORECAST_DAYS}
+                        step={1}
+                        minimumTrackTintColor={COLORS.accent}
+                        maximumTrackTintColor={COLORS.border}
+                        thumbTintColor={COLORS.accent}
+                        value={rangeDays}
+                        onValueChange={(value) => {
+                          setRangeDays(Math.round(value));
+                        }}
+                      />
+                      <View style={styles.sliderMetaRow}>
+                        <Text style={styles.sliderMetaText}>Min: {MIN_RANGE_DAYS} days</Text>
+                        <Text style={styles.sliderMetaText}>Max: {MAX_FORECAST_DAYS} days</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+
+                <View
+                  style={[
+                    styles.suggestionModalDateSlot,
+                    suggestionInputMode === 'cups' && styles.suggestionModalDateSlotCups,
+                  ]}
+                >
+                  {suggestionInputMode === 'forecast' ? (
+                    <>
+                      <View style={styles.suggestionModalDatePreview}>
+                        <View style={styles.suggestionModalDatePreviewItem}>
+                          <Text style={styles.suggestionModalDatePreviewLabel}>From</Text>
+                          <Text style={styles.suggestionModalDatePreviewValue}>{fromIso}</Text>
+                        </View>
+                        <View style={styles.suggestionModalDatePreviewItem}>
+                          <Text style={styles.suggestionModalDatePreviewLabel}>To</Text>
+                          <Text style={styles.suggestionModalDatePreviewValue}>{toIso}</Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.suggestionModalHint}>
+                        From is always today's real-time date. To is auto-calculated from duration.
+                      </Text>
+                    </>
+                  ) : (
+                    <View style={styles.suggestionModalDateSpacer} />
+                  )}
+                </View>
+              </View>
+
+              <View style={styles.suggestionModalBottomSection}>
+                <TouchableOpacity
+                  style={[
+                    styles.suggestionModalStartCircle,
+                    !canStartSuggestions && styles.suggestionModalStartCircleDisabled,
+                  ]}
+                  onPress={startAiSuggestions}
+                  disabled={!canStartSuggestions}
+                  activeOpacity={0.85}
+                >
+                  {suggestionSubmitting ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="sparkles" size={22} color={COLORS.white} />
+                      <Text style={styles.suggestionModalStartText}>Start</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <Text style={styles.suggestionModalPendingText}>
+                  {!hasEnteredAllSuggestionFields
+                    ? 'Please complete all required fields to start.'
+                    : suggestionInputMode === 'cups' && Number(numberCupWantedInput || '0') < 50
+                      ? 'Estimated cups must be at least 50.'
+                      : 'Ready to run AI suggestion.'}
+                </Text>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showMenuActivationRequiredModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowMenuActivationRequiredModal(false)}
+      >
+        <View style={styles.guardModalBackdrop}>
+          <View style={styles.guardModalCard}>
+            <View style={styles.guardModalIconWrap}>
+              <Ionicons name="alert-circle-outline" size={30} color={COLORS.accent} />
+            </View>
+            <Text style={styles.guardModalTitle}>Active Menu Required</Text>
+            <Text style={styles.guardModalSubtitle}>
+              You need to activate a menu before using Product Suggestion.
+            </Text>
+
+            <View style={styles.guardModalActions}>
+              <TouchableOpacity
+                style={styles.guardModalCloseBtn}
+                onPress={() => setShowMenuActivationRequiredModal(false)}
+              >
+                <Text style={styles.guardModalCloseBtnText}>Close</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.guardModalPrimaryBtn}
+                onPress={() => {
+                  setShowMenuActivationRequiredModal(false);
+                  router.push('/(tabs)/menu');
+                }}
+              >
+                <Text style={styles.guardModalPrimaryBtnText}>Go to Menu List</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -572,15 +1025,17 @@ const styles = StyleSheet.create({
   suggestionBox: {
     marginHorizontal: 16,
     marginBottom: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  suggestionTouchable: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border,
   },
   suggestionText: {
     flex: 1,
@@ -693,5 +1148,290 @@ const styles = StyleSheet.create({
   loadingMoreText: {
     fontSize: 12,
     color: COLORS.textSecondary,
+  },
+  suggestionModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(32, 23, 17, 0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  suggestionModalKeyboardWrap: {
+    width: '100%',
+  },
+  suggestionModalCard: {
+    backgroundColor: '#FFF9F4',
+    borderRadius: 24,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 20,
+    height: suggestionModalFixedHeight,
+    borderWidth: 1,
+    borderColor: '#EEDBCB',
+    shadowColor: '#2D1708',
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  suggestionModalTopSection: {
+    flex: 1,
+  },
+  suggestionModalBottomSection: {
+    paddingTop: 8,
+  },
+  suggestionModalHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 14,
+  },
+  suggestionModalCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.white,
+  },
+  suggestionModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.text,
+  },
+  suggestionModalSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    lineHeight: 18,
+    maxWidth: 250,
+  },
+  suggestionModalFieldGroup: {
+    marginBottom: 12,
+  },
+  suggestionModalInputSlot: {
+    minHeight: 0,
+  },
+  suggestionModalInputSlotCups: {
+    minHeight: 118,
+  },
+  suggestionModalDateSlot: {
+    minHeight: 0,
+  },
+  suggestionModalDateSlotCups: {
+    minHeight: 132,
+  },
+  suggestionModalDateSpacer: {
+    flex: 1,
+  },
+  suggestionModeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  suggestionModeChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+  },
+  suggestionModeChipActive: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  suggestionModeChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  suggestionModeChipTextActive: {
+    color: COLORS.white,
+  },
+  sliderHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  sliderMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  sliderValueText: {
+    fontSize: 12,
+    color: COLORS.accent,
+    fontWeight: '700',
+  },
+  sliderMetaText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  suggestionModalLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 6,
+  },
+  suggestionModalInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 14,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: COLORS.text,
+  },
+  suggestionModalHintInline: {
+    marginTop: 6,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+  },
+  suggestionModalHint: {
+    marginTop: 10,
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  suggestionModalDatePreview: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  suggestionModalDatePreviewItem: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  suggestionModalDatePreviewLabel: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    marginBottom: 4,
+  },
+  suggestionModalDatePreviewValue: {
+    fontSize: 13,
+    color: COLORS.text,
+    fontWeight: '700',
+  },
+  suggestionModalStartCircle: {
+    marginTop: 16,
+    alignSelf: 'center',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    shadowColor: '#7C4808',
+    shadowOpacity: 0.36,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  suggestionModalStartCircleDisabled: {
+    opacity: 0.55,
+  },
+  suggestionModalStartText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.white,
+    letterSpacing: 0.3,
+  },
+  suggestionModalPendingText: {
+    marginTop: 18,
+    textAlign: 'center',
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  guardModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(32, 23, 17, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  guardModalCard: {
+    width: '100%',
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#EEDBCB',
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    shadowColor: '#2D1708',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 14,
+    elevation: 8,
+  },
+  guardModalIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF6ED',
+    marginBottom: 12,
+    alignSelf: 'center',
+  },
+  guardModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
+  guardModalSubtitle: {
+    marginTop: 8,
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  guardModalActions: {
+    marginTop: 16,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  guardModalCloseBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guardModalCloseBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  guardModalPrimaryBtn: {
+    flex: 1.2,
+    borderRadius: 12,
+    backgroundColor: COLORS.text,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guardModalPrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.white,
   },
 });

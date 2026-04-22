@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/themed-text';
 import { Fonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
-import { AUTH_BASE_URL } from '@/services/api';
+import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
 
@@ -27,11 +27,30 @@ interface SupplierProductRecommendation {
   packageSize?: number | null;
   measurement?: string | null;
   image?: string | null;
+  suggestedQuantity?: number | null;
 }
+
+const toArrayPayload = <T,>(payload: unknown): T[] => {
+  if (Array.isArray(payload)) return payload as T[];
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as { data?: unknown; items?: unknown; result?: unknown };
+    if (Array.isArray(candidate.data)) return candidate.data as T[];
+    if (Array.isArray(candidate.items)) return candidate.items as T[];
+    if (Array.isArray(candidate.result)) return candidate.result as T[];
+  }
+  return [];
+};
 
 export default function AiLoadingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ mode?: string; message?: string }>();
+  const params = useLocalSearchParams<{
+    mode?: string;
+    message?: string;
+    suggestionInputMode?: string;
+    numberCupWanted?: string;
+    from?: string;
+    to?: string;
+  }>();
   const { coffeeShopId } = useAuth();
   const { setItems, clear } = useSuggestions();
   const [messageIndex, setMessageIndex] = useState(0);
@@ -126,6 +145,20 @@ export default function AiLoadingScreen() {
     const runOrderSuggestionsFlow = async () => {
       const MIN_DURATION_MS = 3000;
       const startedAt = Date.now();
+      const readParam = (value?: string | string[]) => {
+        if (typeof value === 'string') return value.trim();
+        if (Array.isArray(value) && typeof value[0] === 'string') {
+          return value[0].trim();
+        }
+        return '';
+      };
+
+      const numberCupWanted = readParam(params.numberCupWanted);
+      const from = readParam(params.from);
+      const to = readParam(params.to);
+      const suggestionInputMode = readParam(params.suggestionInputMode).toLowerCase();
+      const hasCupInput = numberCupWanted.length > 0;
+      const hasDateInput = from.length > 0 && to.length > 0;
 
       const ensureMinDisplayTime = async () => {
         const elapsed = Date.now() - startedAt;
@@ -150,7 +183,7 @@ export default function AiLoadingScreen() {
           }
           return trimmed;
         }
-        return 'Không thể tải gợi ý mua hàng từ AI.';
+        return 'Unable to load AI purchase suggestions.';
       };
 
       const showErrorAndGoBack = (message: string) => {
@@ -171,28 +204,79 @@ export default function AiLoadingScreen() {
         clear();
         await ensureMinDisplayTime();
         if (isCancelled) return;
-        showErrorAndGoBack('Không tìm thấy Coffee Shop của bạn.');
+        showErrorAndGoBack('Could not find your coffee shop.');
+        return;
+      }
+
+      if (!hasCupInput && !hasDateInput) {
+        if (isCancelled) return;
+        clear();
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+        showErrorAndGoBack('Missing input. Please provide cups to sell or forecast duration to run AI suggestions.');
+        return;
+      }
+
+      if (hasCupInput) {
+        const parsedCup = Number(numberCupWanted);
+        if (!Number.isInteger(parsedCup) || parsedCup < 50) {
+          if (isCancelled) return;
+          clear();
+          await ensureMinDisplayTime();
+          if (isCancelled) return;
+          showErrorAndGoBack('Estimated cup count must be an integer of at least 50 cups.');
+          return;
+        }
+      }
+
+      if (suggestionInputMode === 'forecast' && !hasDateInput) {
+        if (isCancelled) return;
+        clear();
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+        showErrorAndGoBack('Forecast duration is missing. Please choose the forecast range again.');
+        return;
+      }
+
+      if (suggestionInputMode === 'cups' && !hasCupInput) {
+        if (isCancelled) return;
+        clear();
+        await ensureMinDisplayTime();
+        if (isCancelled) return;
+        showErrorAndGoBack('Estimated cups to sell is missing. Please enter a valid value.');
         return;
       }
 
       try {
-        const url = `${AUTH_BASE_URL}/SupplierProduct/recommendations/shop/${coffeeShopId}?threshold=100`;
+        const url = API_ENDPOINTS.supplierProduct.recommendationsByShop(coffeeShopId, {
+          threshold: 10,
+          ...(hasCupInput ? { numberCupWanted: Number(numberCupWanted) } : {}),
+          ...(hasDateInput ? { from, to } : {}),
+        });
+        console.log('[AI Suggestion] GET endpoint:', url);
+
         const response = await authorizedFetch(url, {
+          method: 'GET',
           headers: {
             Accept: '*/*',
           },
         });
 
+        console.log('[AI Suggestion] Response status:', response.status);
+
         const text = await response.text();
+        console.log('[AI Suggestion] Raw response preview:', text.slice(0, 1200));
         if (isCancelled) return;
 
         if (!response.ok) {
           throw new Error(text || `Request failed (${response.status})`);
         }
 
-        const data = text ? (JSON.parse(text) as SupplierProductRecommendation[]) : [];
+        const parsedJson = text ? JSON.parse(text) : [];
+        const data = toArrayPayload<SupplierProductRecommendation>(parsedJson);
+        console.log('[AI Suggestion] Parsed item count:', data.length);
 
-        const mapped: SuggestionItem[] = (Array.isArray(data) ? data : []).map(
+        const mapped: SuggestionItem[] = data.map(
           (item, index) => {
             const qtyNeeded = Math.max(item.minStock - item.currentStock, 0);
             const shortDescription = (item.productDescription || '').split('\n')[0];
@@ -218,10 +302,13 @@ export default function AiLoadingScreen() {
               measurement: item.measurement ?? null,
               packageSize: item.packageSize ?? null,
               availableStock,
+              suggestedQuantity: item.suggestedQuantity ?? null,
               priceVnd: item.price,
             };
           }
         );
+
+        console.log('[AI Suggestion] Mapped item count:', mapped.length);
 
         setItems(mapped);
 
@@ -245,7 +332,7 @@ export default function AiLoadingScreen() {
     return () => {
       isCancelled = true;
     };
-  }, [coffeeShopId, params.mode, router]);
+  }, [coffeeShopId, params.from, params.mode, params.numberCupWanted, params.to, router]);
 
   return (
     <View style={styles.root}>
