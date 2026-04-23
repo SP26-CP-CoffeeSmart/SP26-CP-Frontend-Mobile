@@ -58,6 +58,28 @@ type OrderItem = {
   orderDetails?: OrderDetailItem[];
 };
 
+const getSupplierNameFromPayload = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload as Record<string, any>;
+
+  const nameCandidates = [
+    data.supplierName,
+    data.SupplierName,
+    data.name,
+    data.supplier?.supplierName,
+    data.supplier?.SupplierName,
+    data.supplier?.name,
+  ];
+
+  for (const candidate of nameCandidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+};
+
 const formatVnd = (value?: number) =>
   new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -110,6 +132,7 @@ export default function StaffOrderDetailScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [supplierName, setSupplierName] = useState<string | null>(null);
 
   const loadOrderDetail = useCallback(
     async (isRefresh?: boolean) => {
@@ -134,12 +157,34 @@ export default function StaffOrderDetailScreen() {
           throw new Error(`Unable to fetch order detail (${response.status})`);
         }
 
-        const data = (await response.json()) as OrderItem;
+        const data = (await response.json()) as OrderItem & Record<string, unknown>;
+        const supplierId = Number(data.supplierId ?? 0);
+        let nextSupplierName = getSupplierNameFromPayload(data);
+
+        if (!nextSupplierName && Number.isFinite(supplierId) && supplierId > 0) {
+          try {
+            const supplierResponse = await authorizedFetch(`${API_ENDPOINTS.supplier.list()}/${supplierId}`, {
+              headers: {
+                Accept: '*/*',
+              },
+            });
+
+            if (supplierResponse.ok) {
+              const supplierData = (await supplierResponse.json()) as Record<string, unknown>;
+              nextSupplierName = getSupplierNameFromPayload(supplierData);
+            }
+          } catch {
+            // Keep fallback display when supplier lookup fails.
+          }
+        }
+
         setOrder(data);
+        setSupplierName(nextSupplierName);
       } catch (detailError) {
         const message = detailError instanceof Error ? detailError.message : 'Load detail failed.';
         setError(message);
         setOrder(null);
+        setSupplierName(null);
       } finally {
         if (isRefresh) setRefreshing(false);
         else setLoading(false);
@@ -158,13 +203,15 @@ export default function StaffOrderDetailScreen() {
 
   const summaryRows = useMemo(() => {
     if (!order) return [];
+    const supplierValue = supplierName || (order.supplierId ? `#${order.supplierId}` : '--');
+
     return [
-      { label: 'Supplier', value: `#${order.supplierId ?? '--'}` },
+      { label: 'Supplier', value: supplierValue },
       { label: 'Shipping fee', value: formatVnd(order.shippingFee) },
       { label: 'Total amount', value: formatVnd(order.totalPrice) },
       { label: 'Total line items', value: String(order.orderDetails?.length ?? 0) },
     ];
-  }, [order]);
+  }, [order, supplierName]);
 
   const timelineRows = useMemo(() => {
     if (!order) return [];
