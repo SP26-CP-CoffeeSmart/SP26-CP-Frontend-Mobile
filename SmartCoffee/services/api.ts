@@ -172,6 +172,8 @@ export const API_ENDPOINTS = {
   },
   supplierProduct: {
     list: (page = 1, pageSize = 500) => `${AUTH_BASE_URL}/SupplierProduct?page=${page}&pageSize=${pageSize}`,
+    bySupplier: (supplierId: number, page = 1, pageSize = 500) =>
+      `${AUTH_BASE_URL}/SupplierProduct/by-supplier/${supplierId}?page=${page}&pageSize=${pageSize}`,
     recommendationsByShop: (
       coffeeShopId: number,
       params: { threshold: number; from?: string; to?: string; numberCupWanted?: number }
