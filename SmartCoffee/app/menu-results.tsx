@@ -4,7 +4,6 @@ import {
   Image,
   ImageBackground,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -676,36 +675,33 @@ export default function MenuResultsScreen() {
                 baseConfig,
             };
             const itemParam = safeStringify(menuWithConfig);
+            const handleOpenDetail = () => {
+              const now = Date.now();
+              if (navigatingRef.current || now - lastPressAtRef.current < 450) {
+                return;
+              }
+              navigatingRef.current = true;
+              lastPressAtRef.current = now;
+
+              router.push({
+                pathname: '/menu-detail/[id]',
+                params: {
+                  id: menuId,
+                  item: itemParam,
+                  payloadCacheKey: detailPayloadCacheKey,
+                  menuIndex: String(index),
+                  title,
+                  flow,
+                },
+              });
+
+              setTimeout(() => {
+                navigatingRef.current = false;
+              }, 700);
+            };
 
             return (
-              <Pressable
-                key={menuKey}
-                style={styles.card}
-                onPress={() => {
-                  const now = Date.now();
-                  if (navigatingRef.current || now - lastPressAtRef.current < 450) {
-                    return;
-                  }
-                  navigatingRef.current = true;
-                  lastPressAtRef.current = now;
-
-                  router.push({
-                    pathname: '/menu-detail/[id]',
-                    params: {
-                      id: menuId,
-                      item: itemParam,
-                      payloadCacheKey: detailPayloadCacheKey,
-                      menuIndex: String(index),
-                      title,
-                      flow,
-                    },
-                  });
-
-                  setTimeout(() => {
-                    navigatingRef.current = false;
-                  }, 700);
-                }}
-              >
+              <View key={menuKey} style={styles.card}>
                 <View style={styles.optionFrame}>
                     <View style={styles.cardHeader}>
                       <View style={styles.cardTitleSection}>
@@ -813,12 +809,16 @@ export default function MenuResultsScreen() {
                       </TouchableOpacity>
                     ) : null}
 
-                    <View style={styles.detailsRow}>
+                    <TouchableOpacity
+                      style={styles.detailsRow}
+                      onPress={handleOpenDetail}
+                      activeOpacity={0.75}
+                    >
                       <Text style={styles.detailsText}>Tap to view detail</Text>
                       <Ionicons name="chevron-forward" size={16} color="#8B5E3C" />
-                    </View>
+                    </TouchableOpacity>
                   </View>
-              </Pressable>
+              </View>
             );
           })
         )}

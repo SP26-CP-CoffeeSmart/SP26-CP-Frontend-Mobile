@@ -59,12 +59,32 @@ const COLORS = {
   dangerText: '#991B1B',
 };
 
-const parsePositiveNumber = (value: string, fallback: number) => {
+const parseNonNegativeNumber = (value: string, fallback: number) => {
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;
   }
   return parsed;
+};
+
+const sanitizeDayInput = (value: string) => value.replace(/[^\d]/g, '');
+
+const getDayInputError = (value: string, fieldLabel: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return `${fieldLabel} must be numeric.`;
+  }
+
+  if (!/^\d+$/.test(trimmed)) {
+    return `${fieldLabel} must be numeric.`;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return `${fieldLabel} cannot be negative.`;
+  }
+
+  return null;
 };
 
 const formatAmount = (value: number) => {
@@ -107,16 +127,29 @@ export default function AIInventoryPredictScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InventoryPredictResponse | null>(null);
+  const [daysAnalyzeError, setDaysAnalyzeError] = useState<string | null>(null);
+  const [daysPredictError, setDaysPredictError] = useState<string | null>(null);
 
   const requestPayload = useMemo(
     () => ({
-      daysToAnalyze: parsePositiveNumber(daysAnalyzeInput, DEFAULT_DAYS_ANALYZE),
-      daysToPredict: parsePositiveNumber(daysPredictInput, DEFAULT_DAYS_PREDICT),
+      daysToAnalyze: parseNonNegativeNumber(daysAnalyzeInput, DEFAULT_DAYS_ANALYZE),
+      daysToPredict: parseNonNegativeNumber(daysPredictInput, DEFAULT_DAYS_PREDICT),
     }),
     [daysAnalyzeInput, daysPredictInput]
   );
 
   const runPredict = async (isPullToRefresh = false) => {
+    const analyzeValidationError = getDayInputError(daysAnalyzeInput, 'Days to Analyze');
+    const predictValidationError = getDayInputError(daysPredictInput, 'Days to Predict');
+
+    setDaysAnalyzeError(analyzeValidationError);
+    setDaysPredictError(predictValidationError);
+
+    if (analyzeValidationError || predictValidationError) {
+      setError(analyzeValidationError || predictValidationError || null);
+      return;
+    }
+
     if (isPullToRefresh) {
       setRefreshing(true);
     } else {
@@ -194,23 +227,31 @@ export default function AIInventoryPredictScreen() {
               <Text style={styles.label}>Days to Analyze</Text>
               <TextInput
                 value={daysAnalyzeInput}
-                onChangeText={setDaysAnalyzeInput}
+                onChangeText={(value) => {
+                  setDaysAnalyzeInput(sanitizeDayInput(value));
+                  setDaysAnalyzeError(null);
+                }}
                 keyboardType="number-pad"
-                style={styles.input}
+                style={[styles.input, daysAnalyzeError && styles.inputError]}
                 placeholder="30"
                 placeholderTextColor={COLORS.muted}
               />
+              {daysAnalyzeError ? <Text style={styles.fieldErrorText}>{daysAnalyzeError}</Text> : null}
             </View>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Days to Predict</Text>
               <TextInput
                 value={daysPredictInput}
-                onChangeText={setDaysPredictInput}
+                onChangeText={(value) => {
+                  setDaysPredictInput(sanitizeDayInput(value));
+                  setDaysPredictError(null);
+                }}
                 keyboardType="number-pad"
-                style={styles.input}
+                style={[styles.input, daysPredictError && styles.inputError]}
                 placeholder="7"
                 placeholderTextColor={COLORS.muted}
               />
+              {daysPredictError ? <Text style={styles.fieldErrorText}>{daysPredictError}</Text> : null}
             </View>
           </View>
 
@@ -392,6 +433,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.ink,
     backgroundColor: '#FAF7F3',
+  },
+  inputError: {
+    borderColor: COLORS.dangerText,
+  },
+  fieldErrorText: {
+    marginTop: 4,
+    color: COLORS.dangerText,
+    fontSize: 11,
   },
   primaryButton: {
     marginTop: 14,

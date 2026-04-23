@@ -76,6 +76,7 @@ type AlertModalState = {
 };
 
 const REASONS = ['Daily Sales', 'Internal Use', 'Expired', 'Damaged'];
+const QUANTITY_INPUT_REGEX = /^\d*(\.\d*)?$/;
 
 export default function ExportRequestScreen() {
   const router = useRouter();
@@ -96,6 +97,8 @@ export default function ExportRequestScreen() {
   });
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [submitDraft, setSubmitDraft] = useState<ExportSubmitDraft | null>(null);
+  const [exportQuantityInputs, setExportQuantityInputs] = useState<Record<number, string>>({});
+  const [exportQuantityErrors, setExportQuantityErrors] = useState<Record<number, string>>({});
 
   const categoryOptions = useMemo(() => {
     const unique = Array.from(
@@ -176,13 +179,33 @@ export default function ExportRequestScreen() {
     setDetails((prev) => {
       const existing = prev.find((detail) => detail.ingredientId === ingredient.ingredientId);
       if (existing) {
-        return prev.map((detail) =>
+        const nextDetails = prev.map((detail) =>
           detail.ingredientId === ingredient.ingredientId
             ? { ...detail, exportQuantity: detail.exportQuantity + 1 }
             : detail
         );
+        const updated = nextDetails.find((detail) => detail.ingredientId === ingredient.ingredientId);
+        if (updated) {
+          setExportQuantityInputs((current) => ({
+            ...current,
+            [ingredient.ingredientId]: String(updated.exportQuantity),
+          }));
+          setExportQuantityErrors((current) => {
+            if (!current[ingredient.ingredientId]) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[ingredient.ingredientId];
+            return next;
+          });
+        }
+        return nextDetails;
       }
 
+      setExportQuantityInputs((current) => ({
+        ...current,
+        [ingredient.ingredientId]: '1',
+      }));
       return [
         ...prev,
         {
@@ -195,20 +218,125 @@ export default function ExportRequestScreen() {
     });
   };
 
-  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+  const updateExportQuantity = (ingredientId: number, quantity: number) => {
     setDetails((prev) =>
       prev.map((detail) => {
         if (detail.ingredientId !== ingredientId) {
           return detail;
         }
-        const nextQuantity = Math.max(detail.exportQuantity + delta, 0);
-        return { ...detail, exportQuantity: nextQuantity };
+        return { ...detail, exportQuantity: quantity };
       })
     );
   };
 
+  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+    let nextQuantity = 0;
+    setDetails((prev) =>
+      prev.map((detail) => {
+        if (detail.ingredientId !== ingredientId) {
+          return detail;
+        }
+        nextQuantity = Math.max(detail.exportQuantity + delta, 0);
+        return { ...detail, exportQuantity: nextQuantity };
+      })
+    );
+    setExportQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(nextQuantity),
+    }));
+    setExportQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+  };
+
+  const handleExportQuantityInput = (ingredientId: number, rawValue: string) => {
+    const normalizedValue = rawValue.replace(',', '.').trim();
+
+    if (normalizedValue.includes('-')) {
+      setExportQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity cannot be negative.',
+      }));
+      return;
+    }
+
+    if (!QUANTITY_INPUT_REGEX.test(normalizedValue)) {
+      setExportQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity must be numeric.',
+      }));
+      return;
+    }
+
+    setExportQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: normalizedValue,
+    }));
+    setExportQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+
+    if (normalizedValue === '' || normalizedValue === '.') {
+      updateExportQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(normalizedValue);
+    updateExportQuantity(ingredientId, Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+  };
+
+  const handleExportQuantityBlur = (ingredientId: number) => {
+    const inputValue = exportQuantityInputs[ingredientId];
+    if (inputValue === undefined) {
+      return;
+    }
+
+    if (inputValue === '' || inputValue === '.') {
+      setExportQuantityInputs((current) => ({
+        ...current,
+        [ingredientId]: '0',
+      }));
+      updateExportQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(inputValue);
+    const normalized = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setExportQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(normalized),
+    }));
+    updateExportQuantity(ingredientId, normalized);
+  };
+
   const handleRemoveDetail = (ingredientId: number) => {
     setDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
+    setExportQuantityInputs((prev) => {
+      if (prev[ingredientId] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
+    setExportQuantityErrors((prev) => {
+      if (!prev[ingredientId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
   };
 
   const handleUpdateReason = (ingredientId: number, reason: string) => {
@@ -535,7 +663,18 @@ export default function ExportRequestScreen() {
                       >
                         <Ionicons name="remove" size={16} color={COLORS.ink} />
                       </TouchableOpacity>
-                      <Text style={styles.stepperValue}>{detail.exportQuantity}</Text>
+                      <TextInput
+                        value={
+                          exportQuantityInputs[detail.ingredientId] ??
+                          String(detail.exportQuantity)
+                        }
+                        onChangeText={(value) => handleExportQuantityInput(detail.ingredientId, value)}
+                        onBlur={() => handleExportQuantityBlur(detail.ingredientId)}
+                        keyboardType="decimal-pad"
+                        style={styles.stepperInput}
+                        placeholder="0"
+                        placeholderTextColor={COLORS.muted}
+                      />
                       <TouchableOpacity
                         style={styles.stepperButton}
                         onPress={() => handleUpdateQuantity(detail.ingredientId, 1)}
@@ -544,6 +683,9 @@ export default function ExportRequestScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
+                  {exportQuantityErrors[detail.ingredientId] ? (
+                    <Text style={styles.quantityError}>{exportQuantityErrors[detail.ingredientId]}</Text>
+                  ) : null}
 
                   <Text style={styles.detailMeta}>
                     Remaining: {remain} {detail.ingredient.measurement}
@@ -876,6 +1018,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.ink,
     marginHorizontal: 6,
+  },
+  stepperInput: {
+    minWidth: 48,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginHorizontal: 6,
+    paddingVertical: 0,
+  },
+  quantityError: {
+    fontSize: 12,
+    color: '#B91C1C',
+    marginBottom: 8,
   },
   fieldLabel: {
     marginTop: 10,

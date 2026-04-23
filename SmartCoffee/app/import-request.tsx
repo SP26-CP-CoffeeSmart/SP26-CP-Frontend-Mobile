@@ -74,6 +74,7 @@ type ImportNoteResponse = {
 
 type OrderItem = {
   id: number;
+  ingredientId: number;
   name: string;
   category: string;
   orderedQty: number;
@@ -86,6 +87,7 @@ type OrderItem = {
 type OrderSummary = {
   orderId: number;
   orderCode: string;
+  supplierId?: number;
   supplier: string;
   status: string;
   orderDate: string;
@@ -95,18 +97,27 @@ type OrderSummary = {
 
 type OrderDetailResponse = {
   orderDetailId?: number;
+  orderDetail_id?: number;
   ingredientId?: number;
+  ingredient_id?: number;
   ingredientName?: string;
+  ingredient_name?: string;
   quantity?: number;
+  Quantity?: number;
   price?: number;
+  Price?: number;
 };
 
 type OrderResponse = {
   orderId?: number;
+  OrderId?: number;
   status?: string;
   createAt?: string;
   expectedDeliveryTime?: string;
   supplierId?: number;
+  supplier_id?: number;
+  supplierName?: string;
+  SupplierName?: string;
   ghnOrderCode?: string;
   notes?: string;
   orderDetails?: OrderDetailResponse[];
@@ -114,6 +125,24 @@ type OrderResponse = {
 
 type PagedOrderResponse = {
   items?: OrderResponse[];
+};
+
+type SupplierProductIngredient = {
+  ingredientId?: number;
+  category?: string;
+};
+
+type SupplierProductItem = {
+  ingredientId?: number;
+  measurement?: string;
+  packageSize?: number;
+  price?: number;
+  ingredient?: SupplierProductIngredient;
+};
+
+type PagedSupplierProductResponse = {
+  items?: SupplierProductItem[];
+  totalPages?: number;
 };
 
 type SubmitDraft = {
@@ -166,6 +195,7 @@ const MOCK_INGREDIENTS: Ingredient[] = [
 ];
 
 const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
+const QUANTITY_INPUT_REGEX = /^\d*(\.\d*)?$/;
 
 const formatOrderDate = (value?: string) => {
   if (!value) {
@@ -182,25 +212,160 @@ const formatOrderDate = (value?: string) => {
   });
 };
 
-const mapOrderToSummary = (order: OrderResponse): OrderSummary => {
+const formatVnd = (value?: number) =>
+  new Intl.NumberFormat('vi-VN', {
+    style: 'currency',
+    currency: 'VND',
+    maximumFractionDigits: 0,
+  }).format(Number(value ?? 0));
+
+const normalizeMeasureToken = (value?: string | null) => (value ?? '').trim().toLowerCase();
+
+const isLiquidLikeCategory = (category?: string | null) =>
+  normalizeMeasureToken(category).includes('liquid');
+
+const isDryLikeCategory = (category?: string | null) => normalizeMeasureToken(category).includes('dry');
+
+const resolveBaseMeasurement = (category?: string | null, measurement?: string | null) => {
+  const normalizedMeasurement = normalizeMeasureToken(measurement);
+  if (['kg', 'kilogram', 'g', 'gram', 'grams'].includes(normalizedMeasurement)) {
+    return 'g';
+  }
+  if (['l', 'liter', 'litre', 'ml', 'milliliter', 'millilitre'].includes(normalizedMeasurement)) {
+    return 'ml';
+  }
+  if (isDryLikeCategory(category)) {
+    return 'g';
+  }
+  if (isLiquidLikeCategory(category)) {
+    return 'ml';
+  }
+  return measurement?.trim() || 'unit';
+};
+
+const resolveMeasurementMultiplier = (measurement?: string | null) => {
+  const normalized = normalizeMeasureToken(measurement);
+  if (['kg', 'kilogram'].includes(normalized)) {
+    return 1000;
+  }
+  if (['l', 'liter', 'litre'].includes(normalized)) {
+    return 1000;
+  }
+  return 1;
+};
+
+const normalizeQuantityBySupplierMeasurement = (params: {
+  orderedQuantity: number;
+  packageSize?: number | null;
+  category?: string | null;
+  measurement?: string | null;
+}) => {
+  const orderedQuantity = Number.isFinite(params.orderedQuantity) ? params.orderedQuantity : 0;
+  const packageSize =
+    typeof params.packageSize === 'number' && Number.isFinite(params.packageSize) && params.packageSize > 0
+      ? params.packageSize
+      : 1;
+  const multiplier = resolveMeasurementMultiplier(params.measurement);
+  const normalizedQuantity = orderedQuantity * packageSize * multiplier;
+  const unitLabel = resolveBaseMeasurement(params.category, params.measurement);
+
+  return {
+    quantity: Number(normalizedQuantity.toFixed(3)),
+    unitLabel,
+  };
+};
+
+const normalizeDisplayPriceBySupplierMeasurement = (params: {
+  rawPrice: number;
+  packageSize?: number | null;
+  category?: string | null;
+  measurement?: string | null;
+}) => {
+  const unitLabel = resolveBaseMeasurement(params.category, params.measurement);
+  const rawPrice = Number.isFinite(params.rawPrice) ? params.rawPrice : 0;
+  const packageSize =
+    typeof params.packageSize === 'number' && Number.isFinite(params.packageSize) && params.packageSize > 0
+      ? params.packageSize
+      : 1;
+  const multiplier = resolveMeasurementMultiplier(params.measurement);
+  const divisor = packageSize * multiplier;
+
+  if ((unitLabel === 'g' || unitLabel === 'ml') && divisor > 0) {
+    return Number((rawPrice / divisor).toFixed(3));
+  }
+
+  return Number(rawPrice.toFixed(3));
+};
+
+const resolveOrderSupplierId = (order: OrderResponse) =>
+  Number(order.supplierId ?? order.supplier_id ?? 0);
+
+const getSupplierNameFromPayload = (payload: unknown): string | null => {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload as Record<string, unknown>;
+  const candidates = [
+    data.supplierName,
+    data.SupplierName,
+    data.name,
+    data.Name,
+    (data.supplier as Record<string, unknown> | undefined)?.supplierName,
+    (data.supplier as Record<string, unknown> | undefined)?.SupplierName,
+    (data.supplier as Record<string, unknown> | undefined)?.name,
+    (data.supplier as Record<string, unknown> | undefined)?.Name,
+  ];
+
+  for (const item of candidates) {
+    if (typeof item === 'string' && item.trim()) {
+      return item.trim();
+    }
+  }
+  return null;
+};
+
+const mapOrderToSummary = (
+  order: OrderResponse,
+  supplierProductsByIngredient: Map<number, SupplierProductItem> = new Map(),
+  supplierName?: string
+): OrderSummary => {
   const items = (order.orderDetails ?? []).map((detail, index) => {
-    const orderedQty = Number(detail.quantity ?? 0);
+    const ingredientId = Number(detail.ingredientId ?? detail.ingredient_id ?? 0);
+    const supplierProduct = supplierProductsByIngredient.get(ingredientId);
+    const category = supplierProduct?.ingredient?.category ?? 'Ingredient';
+    const normalized = normalizeQuantityBySupplierMeasurement({
+      orderedQuantity: Number(detail.quantity ?? detail.Quantity ?? 0),
+      packageSize: supplierProduct?.packageSize,
+      category,
+      measurement: supplierProduct?.measurement,
+    });
+
     return {
-      id: detail.orderDetailId ?? index,
-      name: detail.ingredientName ?? 'Unknown item',
-      category: 'Ingredient',
-      orderedQty,
-      receivedQty: orderedQty,
-      unitLabel: 'units',
-      price: Number(detail.price ?? 0),
+      id: detail.orderDetailId ?? detail.orderDetail_id ?? index,
+      ingredientId,
+      name: detail.ingredientName ?? detail.ingredient_name ?? 'Unknown item',
+      category,
+      orderedQty: normalized.quantity,
+      receivedQty: normalized.quantity,
+      unitLabel: normalized.unitLabel,
+      price: normalizeDisplayPriceBySupplierMeasurement({
+        rawPrice: Number(detail.price ?? detail.Price ?? 0),
+        packageSize: supplierProduct?.packageSize,
+        category,
+        measurement: supplierProduct?.measurement,
+      }),
     };
   });
 
-  const orderId = order.orderId ?? 0;
+  const orderId = Number(order.orderId ?? order.OrderId ?? 0);
+  const supplierId = resolveOrderSupplierId(order);
+  const resolvedSupplierName =
+    supplierName ??
+    getSupplierNameFromPayload(order) ??
+    (supplierId > 0 ? `Supplier #${supplierId}` : 'Supplier');
   return {
     orderId,
     orderCode: order.ghnOrderCode ?? `ORD-${orderId || 'N/A'}`,
-    supplier: order.supplierId ? `Supplier #${order.supplierId}` : 'Supplier',
+    supplierId: supplierId > 0 ? supplierId : undefined,
+    supplier: resolvedSupplierName,
     status: order.status ?? 'Pending',
     orderDate: formatOrderDate(order.createAt),
     expectedDate: formatOrderDate(order.expectedDeliveryTime),
@@ -266,6 +431,8 @@ export default function ImportRequestScreen() {
   });
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [submitDraft, setSubmitDraft] = useState<SubmitDraft | null>(null);
+  const [manualQuantityInputs, setManualQuantityInputs] = useState<Record<number, string>>({});
+  const [manualQuantityErrors, setManualQuantityErrors] = useState<Record<number, string>>({});
 
   const selectedItemCount = selectedOrder?.items.length ?? 0;
 
@@ -355,13 +522,33 @@ export default function ImportRequestScreen() {
     setManualDetails((prev) => {
       const existing = prev.find((detail) => detail.ingredientId === ingredient.ingredientId);
       if (existing) {
-        return prev.map((detail) =>
+        const nextDetails = prev.map((detail) =>
           detail.ingredientId === ingredient.ingredientId
             ? { ...detail, importQuantity: detail.importQuantity + 1 }
             : detail
         );
+        const updated = nextDetails.find((detail) => detail.ingredientId === ingredient.ingredientId);
+        if (updated) {
+          setManualQuantityInputs((current) => ({
+            ...current,
+            [ingredient.ingredientId]: String(updated.importQuantity),
+          }));
+          setManualQuantityErrors((current) => {
+            if (!current[ingredient.ingredientId]) {
+              return current;
+            }
+            const next = { ...current };
+            delete next[ingredient.ingredientId];
+            return next;
+          });
+        }
+        return nextDetails;
       }
 
+      setManualQuantityInputs((current) => ({
+        ...current,
+        [ingredient.ingredientId]: '1',
+      }));
       return [
         ...prev,
         {
@@ -373,20 +560,125 @@ export default function ImportRequestScreen() {
     });
   };
 
-  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+  const updateManualQuantity = (ingredientId: number, quantity: number) => {
     setManualDetails((prev) =>
       prev.map((detail) => {
         if (detail.ingredientId !== ingredientId) {
           return detail;
         }
-        const nextQuantity = Math.max(detail.importQuantity + delta, 0);
-        return { ...detail, importQuantity: nextQuantity };
+        return { ...detail, importQuantity: quantity };
       })
     );
   };
 
+  const handleUpdateQuantity = (ingredientId: number, delta: number) => {
+    let nextQuantity = 0;
+    setManualDetails((prev) =>
+      prev.map((detail) => {
+        if (detail.ingredientId !== ingredientId) {
+          return detail;
+        }
+        nextQuantity = Math.max(detail.importQuantity + delta, 0);
+        return { ...detail, importQuantity: nextQuantity };
+      })
+    );
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(nextQuantity),
+    }));
+    setManualQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+  };
+
+  const handleManualQuantityInput = (ingredientId: number, rawValue: string) => {
+    const normalizedValue = rawValue.replace(',', '.').trim();
+
+    if (normalizedValue.includes('-')) {
+      setManualQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity cannot be negative.',
+      }));
+      return;
+    }
+
+    if (!QUANTITY_INPUT_REGEX.test(normalizedValue)) {
+      setManualQuantityErrors((current) => ({
+        ...current,
+        [ingredientId]: 'Quantity must be numeric.',
+      }));
+      return;
+    }
+
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: normalizedValue,
+    }));
+    setManualQuantityErrors((current) => {
+      if (!current[ingredientId]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
+
+    if (normalizedValue === '' || normalizedValue === '.') {
+      updateManualQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(normalizedValue);
+    updateManualQuantity(ingredientId, Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+  };
+
+  const handleManualQuantityBlur = (ingredientId: number) => {
+    const inputValue = manualQuantityInputs[ingredientId];
+    if (inputValue === undefined) {
+      return;
+    }
+
+    if (inputValue === '' || inputValue === '.') {
+      setManualQuantityInputs((current) => ({
+        ...current,
+        [ingredientId]: '0',
+      }));
+      updateManualQuantity(ingredientId, 0);
+      return;
+    }
+
+    const parsed = Number(inputValue);
+    const normalized = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    setManualQuantityInputs((current) => ({
+      ...current,
+      [ingredientId]: String(normalized),
+    }));
+    updateManualQuantity(ingredientId, normalized);
+  };
+
   const handleRemoveDetail = (ingredientId: number) => {
     setManualDetails((prev) => prev.filter((detail) => detail.ingredientId !== ingredientId));
+    setManualQuantityInputs((prev) => {
+      if (prev[ingredientId] === undefined) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
+    setManualQuantityErrors((prev) => {
+      if (!prev[ingredientId]) {
+        return prev;
+      }
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
   };
 
   const handleLoadOrder = () => {
@@ -417,24 +709,27 @@ export default function ImportRequestScreen() {
   };
 
   const handleSelectOrder = (order: OrderSummary) => {
+    console.log('[ImportRequest] Selected order details:', {
+      orderId: order.orderId,
+      orderCode: order.orderCode,
+      supplierId: order.supplierId,
+      items: order.items,
+    });
+
     setSelectedOrder(order);
     setOrderId(String(order.orderId));
-    const mappedDetails: ImportDetail[] = order.items.map((item) => {
-      const ingredient = MOCK_INGREDIENTS.find((mock) => mock.name === item.name) ?? {
-        ingredientId: item.id,
+    const mappedDetails: ImportDetail[] = order.items.map((item) => ({
+      ingredientId: item.ingredientId,
+      ingredient: {
+        ingredientId: item.ingredientId,
         name: item.name,
         image: null,
         category: item.category,
         measurement: item.unitLabel,
         currentQuantity: 0,
-      };
-
-      return {
-        ingredientId: ingredient.ingredientId,
-        ingredient,
-        importQuantity: item.receivedQty,
-      };
-    });
+      },
+      importQuantity: item.receivedQty,
+    }));
 
     setOrderDetails(mappedDetails);
     setOrderLoaded(true);
@@ -452,6 +747,53 @@ export default function ImportRequestScreen() {
     try {
       setOrderLoading(true);
       setOrderError(null);
+
+      const fetchSupplierProductsBySupplier = async (supplierId: number) => {
+        let page = 1;
+        let totalPages = 1;
+        const rows: SupplierProductItem[] = [];
+
+        while (page <= totalPages) {
+          const response = await authorizedFetch(
+            API_ENDPOINTS.supplierProduct.bySupplier(supplierId, page, 100),
+            {
+              headers: {
+                Accept: '*/*',
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`Request failed: ${response.status}`);
+          }
+
+          const data = (await response.json()) as SupplierProductItem[] | PagedSupplierProductResponse;
+          const pageRows = Array.isArray(data) ? data : data.items ?? [];
+          rows.push(...pageRows);
+
+          const nextTotalPages = Number(Array.isArray(data) ? 1 : data.totalPages ?? 1);
+          totalPages = Number.isFinite(nextTotalPages) && nextTotalPages > 0 ? nextTotalPages : 1;
+          page += 1;
+        }
+
+        return rows;
+      };
+
+      const fetchSupplierNameById = async (supplierId: number) => {
+        const response = await authorizedFetch(`${API_ENDPOINTS.supplier.list()}/${supplierId}`, {
+          headers: {
+            Accept: '*/*',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+
+        const data = (await response.json()) as unknown;
+        return getSupplierNameFromPayload(data);
+      };
+
       const fetchOrdersByStatus = async (status: 'Completed' | 'Delivered') => {
         const url = API_ENDPOINTS.order.byOwner(coffeeShopId, {
           page: 1,
@@ -493,7 +835,58 @@ export default function ImportRequestScreen() {
       const filtered = uniqueOrders.filter(
         (order) => !isImportedOrder(order) && isCompletedOrDelivered(order.status)
       );
-      const mapped = filtered.map(mapOrderToSummary);
+      const uniqueSupplierIds = Array.from(
+        new Set(
+          filtered
+            .map((order) => resolveOrderSupplierId(order))
+            .filter((supplierId) => Number.isFinite(supplierId) && supplierId > 0)
+        )
+      );
+
+      const supplierProductsResult = await Promise.allSettled(
+        uniqueSupplierIds.map(async (supplierId) => ({
+          supplierId,
+          items: await fetchSupplierProductsBySupplier(supplierId),
+        }))
+      );
+
+      const supplierProductMapBySupplierId = new Map<number, Map<number, SupplierProductItem>>();
+      supplierProductsResult.forEach((result) => {
+        if (result.status !== 'fulfilled') {
+          return;
+        }
+        const byIngredientId = new Map<number, SupplierProductItem>();
+        result.value.items.forEach((item) => {
+          const ingredientId = Number(item.ingredientId ?? item.ingredient?.ingredientId ?? 0);
+          if (Number.isFinite(ingredientId) && ingredientId > 0) {
+            byIngredientId.set(ingredientId, item);
+          }
+        });
+        supplierProductMapBySupplierId.set(result.value.supplierId, byIngredientId);
+      });
+
+      const supplierNameResult = await Promise.allSettled(
+        uniqueSupplierIds.map(async (supplierId) => ({
+          supplierId,
+          name: await fetchSupplierNameById(supplierId),
+        }))
+      );
+      const supplierNameById = new Map<number, string>();
+      supplierNameResult.forEach((result) => {
+        if (result.status !== 'fulfilled') {
+          return;
+        }
+        if (result.value.name) {
+          supplierNameById.set(result.value.supplierId, result.value.name);
+        }
+      });
+
+      const mapped = filtered.map((order) => {
+        const supplierId = resolveOrderSupplierId(order);
+        const supplierProductsByIngredient =
+          supplierProductMapBySupplierId.get(supplierId) ?? new Map<number, SupplierProductItem>();
+        return mapOrderToSummary(order, supplierProductsByIngredient, supplierNameById.get(supplierId));
+      });
       console.log('Fetched orders:', mapped);
       setOrders(mapped);
 
@@ -993,7 +1386,7 @@ export default function ImportRequestScreen() {
                         To receive: {item.receivedQty} {item.unitLabel}
                       </Text>
                       <Text style={styles.orderItemMeta}>
-                        ${item.price.toFixed(2)}/unit
+                        Price: {formatVnd(item.price)}/{item.unitLabel}
                       </Text>
                       {item.shortage ? (
                         <View style={styles.orderShortage}>
@@ -1039,7 +1432,18 @@ export default function ImportRequestScreen() {
                       >
                         <Ionicons name="remove" size={16} color={COLORS.ink} />
                       </TouchableOpacity>
-                      <Text style={styles.stepperValue}>{detail.importQuantity}</Text>
+                      <TextInput
+                        value={
+                          manualQuantityInputs[detail.ingredientId] ??
+                          String(detail.importQuantity)
+                        }
+                        onChangeText={(value) => handleManualQuantityInput(detail.ingredientId, value)}
+                        onBlur={() => handleManualQuantityBlur(detail.ingredientId)}
+                        keyboardType="decimal-pad"
+                        style={styles.stepperInput}
+                        placeholder="0"
+                        placeholderTextColor={COLORS.muted}
+                      />
                       <TouchableOpacity
                         style={styles.stepperButton}
                         onPress={() => handleUpdateQuantity(detail.ingredientId, 1)}
@@ -1048,6 +1452,9 @@ export default function ImportRequestScreen() {
                       </TouchableOpacity>
                     </View>
                   </View>
+                  {manualQuantityErrors[detail.ingredientId] ? (
+                    <Text style={styles.quantityError}>{manualQuantityErrors[detail.ingredientId]}</Text>
+                  ) : null}
 
                   <Text style={styles.detailMeta}>New total: {newTotal} {measurementLabel}</Text>
 
@@ -1577,6 +1984,20 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.ink,
     marginHorizontal: 6,
+  },
+  stepperInput: {
+    minWidth: 48,
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.ink,
+    marginHorizontal: 6,
+    paddingVertical: 0,
+  },
+  quantityError: {
+    fontSize: 12,
+    color: '#B91C1C',
+    marginBottom: 8,
   },
   readonlyValue: {
     fontSize: 14,
