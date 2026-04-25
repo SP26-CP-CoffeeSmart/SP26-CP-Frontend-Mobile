@@ -120,6 +120,17 @@ export const API_ENDPOINTS = {
     activate: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/${menuId}/activate`,
     saveAi: () => `${AUTH_BASE_URL}/Menu/save-ai`,
     updateAi: (menuId: number | string) => `${AUTH_BASE_URL}/Menu/update-ai/${menuId}`,
+    supplierRecommendations: (
+      menuId: number | string,
+      params: { threshold?: number; numberCupWanted?: number; from?: string; to?: string }
+    ) => {
+      const query = new URLSearchParams();
+      query.set('threshold', String(params.threshold ?? 10));
+      if (params.numberCupWanted != null) query.set('numberCupWanted', String(params.numberCupWanted));
+      if (params.from) query.set('from', params.from);
+      if (params.to) query.set('to', params.to);
+      return `${AUTH_BASE_URL}/Menu/${menuId}/supplier-recommendations?${query.toString()}`;
+    },
   },
   menuHeader: {
     getById: (id: number) => `${AUTH_BASE_URL}/MenuHeader/${id}`,

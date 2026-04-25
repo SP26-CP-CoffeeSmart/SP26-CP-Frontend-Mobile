@@ -11,14 +11,22 @@ import {
     Image,
     Dimensions,
     FlatList,
+    Modal,
+    TextInput,
+    KeyboardAvoidingView,
+    Platform,
+    Keyboard,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import Slider from '@react-native-community/slider';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useSuggestions } from '@/context/suggestion-context';
+import type { SuggestionItem } from '@/context/suggestion-context';
 
 const MENU_REFRESH_FLAG_KEY = 'menu:list:refresh:needed';
 
@@ -77,6 +85,27 @@ interface MenuVersionApi {
     }>;
 }
 
+interface MenuSupplierRecommendation {
+    ingredientId: number;
+    ingredientName: string;
+    currentStock: number;
+    minStock: number;
+    recommendedProductId: number;
+    productId: number;
+    productDescription?: string | null;
+    supplierId: number;
+    supplierName?: string | null;
+    supplierRating?: number | null;
+    productRating?: number | null;
+    price: number;
+    packageSize?: number | null;
+    measurement?: string | null;
+    image?: string | null;
+    suggestedQuantity?: number | null;
+    stock?: number | null;
+    holdStock?: number | null;
+}
+
 const fallbackMenuImage =
     Image.resolveAssetSource(require('../../assets/AI_RecommendationBackground.jpg')).uri;
 
@@ -90,12 +119,29 @@ const resolveImageUrl = (baseUrl: string, image?: string | null) => {
 const MenuVersionPage = () => {
     const router = useRouter();
     const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
+    const { setItems, clear } = useSuggestions();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [versions, setVersions] = useState<MenuVersion[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [activatingId, setActivatingId] = useState<string | null>(null);
+    const [missingIngredients, setMissingIngredients] = useState<Array<{ ingredientId: number; ingredientName: string; image: string | null }>>([]);
+    const [showMissingModal, setShowMissingModal] = useState(false);
+    const [pendingMenuId, setPendingMenuId] = useState<string | null>(null);
+    // Unified modal: 'missing' shows the ingredients list, 'ai-input' shows the forecast form
+    const [modalView, setModalView] = useState<'missing' | 'ai-input'>('missing');
+    const [aiInputMode, setAiInputMode] = useState<'cups' | 'forecast'>('cups');
+    const [aiCupsInput, setAiCupsInput] = useState('');
+    const [aiRangeDays, setAiRangeDays] = useState(7);
+    const [aiSubmitting, setAiSubmitting] = useState(false);
     const pulse = useRef(new Animated.Value(0.25)).current;
+
+    const todayStr = new Date().toISOString().split('T')[0];
+    const toDateStr = (() => {
+        const d = new Date();
+        d.setDate(d.getDate() + aiRangeDays);
+        return d.toISOString().split('T')[0];
+    })();
 
     const mapApiToMenuVersion = useCallback((item: MenuVersionApi): MenuVersion => {
         const groups = item.menuGroups ?? [];
@@ -184,24 +230,35 @@ const MenuVersionPage = () => {
     const handleActivate = async (menuId: string) => {
         try {
             setActivatingId(menuId);
-            console.log(`Activating menu ${menuId}`);
             setError(null);
             const endpoint = API_ENDPOINTS.menu.activate(menuId);
             let response = await authorizedFetch(endpoint, {
                 method: 'PATCH',
-                headers: {
-                    Accept: '*/*',
-                },
+                headers: { Accept: '*/*' },
             });
 
             // Some backends expose this action endpoint as POST instead of PATCH.
             if (response.status === 405 || response.status === 404) {
                 response = await authorizedFetch(endpoint, {
                     method: 'POST',
-                    headers: {
-                        Accept: '*/*',
-                    },
+                    headers: { Accept: '*/*' },
                 });
+            }
+
+            if (response.status === 400) {
+                // Missing ingredients case
+                const body = await response.json().catch(() => []);
+                const list = Array.isArray(body) ? body : [];
+                if (list.length > 0) {
+                    Keyboard.dismiss();
+                    setMissingIngredients(list);
+                    setPendingMenuId(menuId);
+                    setModalView('missing');
+                    setShowMissingModal(true);
+                } else {
+                    setError('Cannot activate: missing required ingredients.');
+                }
+                return;
             }
 
             if (!response.ok) {
@@ -212,13 +269,75 @@ const MenuVersionPage = () => {
             }
 
             await AsyncStorage.setItem(MENU_REFRESH_FLAG_KEY, '1');
-
-            // Refresh from endpoint containing isApplied to keep button state in sync.
             await fetchMenuVersions();
         } catch (err) {
             setError('Failed to activate menu');
         } finally {
             setActivatingId(null);
+        }
+    };
+
+    const handleAiSuggestOrder = async () => {
+        if (!pendingMenuId) return;
+
+        const cups = parseInt(aiCupsInput, 10);
+        if (aiInputMode === 'cups' && (!Number.isFinite(cups) || cups < 1)) return;
+
+        setAiSubmitting(true);
+        try {
+            const params: { threshold: number; numberCupWanted?: number; from?: string; to?: string } = {
+                threshold: 10,
+            };
+            if (aiInputMode === 'cups') {
+                params.numberCupWanted = cups;
+            } else {
+                params.from = todayStr;
+                params.to = toDateStr;
+            }
+
+            const url = API_ENDPOINTS.menu.supplierRecommendations(pendingMenuId, params);
+            const response = await authorizedFetch(url, { headers: { Accept: '*/*' } });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+            const data: MenuSupplierRecommendation[] = await response.json();
+            const list = Array.isArray(data) ? data : [];
+
+            const mapped: SuggestionItem[] = list.map((item, index) => {
+                const qtyNeeded = Math.max((item.minStock ?? 0) - (item.currentStock ?? 0), 0);
+                const shortDesc = (item.productDescription || '').split('\n')[0];
+                const imgUri = String(item.image || '').trim();
+                const availStock = typeof item.stock === 'number'
+                    ? Math.max(0, (item.stock ?? 0) - (item.holdStock ?? 0))
+                    : null;
+                return {
+                    id: String(item.recommendedProductId || item.ingredientId || index),
+                    productId: item.productId,
+                    supplierId: item.supplierId,
+                    supplierName: item.supplierName ?? null,
+                    name: item.ingredientName || 'Unknown',
+                    image: imgUri,
+                    subtitle: shortDesc || 'Recommended by menu AI.',
+                    qtyNeeded,
+                    productRating: typeof item.productRating === 'number' ? item.productRating : undefined,
+                    timeRange: qtyNeeded > 0 ? 'Need restock' : 'OK',
+                    rating: Number(item.supplierRating || 0),
+                    measurement: item.measurement ?? null,
+                    packageSize: item.packageSize ?? null,
+                    availableStock: availStock,
+                    suggestedQuantity: item.suggestedQuantity ?? null,
+                    priceVnd: item.price,
+                };
+            });
+
+            clear();
+            setItems(mapped);
+            setModalView('missing');
+            setShowMissingModal(false);
+            router.push('/ai-order-suggestions');
+        } catch (err) {
+            console.error('[AI Suggest Order]', err);
+        } finally {
+            setAiSubmitting(false);
         }
     };
 
@@ -444,6 +563,385 @@ const MenuVersionPage = () => {
                     </>
                 )}
             </ScrollView>
+
+            {/* Unified Modal: Missing Ingredients → AI Suggest Order */}
+            <Modal
+                visible={showMissingModal}
+                transparent
+                animationType="fade"
+                statusBarTranslucent
+                onRequestClose={() => {
+                    if (modalView === 'ai-input') {
+                        setModalView('missing');
+                    } else {
+                        setShowMissingModal(false);
+                    }
+                }}
+            >
+                {Platform.OS === 'ios' ? (
+                    <KeyboardAvoidingView behavior="padding" style={styles.modalBackdrop}>
+                        <View
+                            style={[
+                                styles.modalFrame,
+                                modalView === 'ai-input' ? styles.aiModalCard : styles.modalCard,
+                            ]}
+                        >
+
+                            {modalView === 'missing' ? (
+                                /* ── VIEW 1: Missing ingredients list ── */
+                                <>
+                                    <View style={styles.modalHeader}>
+                                        <View style={styles.modalIconWrap}>
+                                            <Ionicons name="alert-circle" size={28} color="#B45309" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.modalTitle}>Cannot Activate Menu</Text>
+                                            <Text style={styles.modalSubtitle}>
+                                                The following ingredients are missing from your inventory.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <ScrollView
+                                        style={styles.modalList}
+                                        showsVerticalScrollIndicator={false}
+                                        contentContainerStyle={{ gap: 10 }}
+                                    >
+                                        {missingIngredients.map((ing) => (
+                                            <View key={ing.ingredientId} style={styles.ingredientRow}>
+                                                <View style={styles.ingredientImageWrap}>
+                                                    {ing.image ? (
+                                                        <Image source={{ uri: ing.image }} style={styles.ingredientImage} />
+                                                    ) : (
+                                                        <View style={styles.ingredientImagePlaceholder}>
+                                                            <Ionicons name="leaf-outline" size={20} color="#C4A882" />
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <View style={styles.ingredientInfo}>
+                                                    <Text style={styles.ingredientName}>{ing.ingredientName}</Text>
+                                                    <Text style={styles.ingredientHint}>Not available in inventory</Text>
+                                                </View>
+                                                <View style={styles.ingredientBadge}>
+                                                    <Ionicons name="close-circle" size={14} color="#B45309" />
+                                                    <Text style={styles.ingredientBadgeText}>Missing</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+
+                                    <View style={styles.modalActions}>
+                                        <TouchableOpacity
+                                            style={styles.modalDismissBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Text style={styles.modalDismissBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.modalGoInventoryBtn}
+                                            onPress={() => setModalView('ai-input')}
+                                        >
+                                            <Ionicons name="sparkles-outline" size={14} color="#FFF" />
+                                            <Text style={styles.modalGoInventoryBtnText}>AI Suggest Order</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            ) : (
+                                /* ── VIEW 2: AI input form ── */
+                                <>
+                                    <View style={styles.aiModalHeader}>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setModalView('missing')}
+                                        >
+                                            <Ionicons name="chevron-back" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                        <View style={styles.aiModalIconWrap}>
+                                            <Ionicons name="sparkles" size={22} color="#8B6F4E" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.aiModalTitle}>AI Suggest Order</Text>
+                                            <Text style={styles.aiModalSubtitle}>
+                                                Enter your forecast to get supplier recommendations.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.aiModeRow}>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'cups' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('cups')}
+                                        >
+                                            <Ionicons name="cafe-outline" size={13} color={aiInputMode === 'cups' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'cups' && styles.aiModeTabTextActive]}>
+                                                Cups to Sell
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'forecast' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('forecast')}
+                                        >
+                                            <Ionicons name="calendar-outline" size={13} color={aiInputMode === 'forecast' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'forecast' && styles.aiModeTabTextActive]}>
+                                                Forecast Duration
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {aiInputMode === 'cups' ? (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Estimated Cups to Sell</Text>
+                                            <TextInput
+                                                style={styles.aiTextInput}
+                                                placeholder="Example: 200"
+                                                placeholderTextColor="#C4A882"
+                                                keyboardType="numeric"
+                                                value={aiCupsInput}
+                                                onChangeText={setAiCupsInput}
+                                            />
+                                            <Text style={styles.aiInputHint}>Minimum: 1 cup.</Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Forecast Duration: {aiRangeDays} days</Text>
+                                            <Slider
+                                                style={{ width: '100%', height: 40 }}
+                                                minimumValue={1}
+                                                maximumValue={60}
+                                                step={1}
+                                                value={aiRangeDays}
+                                                onValueChange={(v) => setAiRangeDays(Math.round(v))}
+                                                minimumTrackTintColor="#8B6F4E"
+                                                maximumTrackTintColor="#E2D5C8"
+                                                thumbTintColor="#8B6F4E"
+                                            />
+                                            <View style={styles.aiDateRow}>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>From</Text>
+                                                    <Text style={styles.aiDateValue}>{todayStr}</Text>
+                                                </View>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>To</Text>
+                                                    <Text style={styles.aiDateValue}>{toDateStr}</Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    <TouchableOpacity
+                                        style={[styles.aiStartBtn, aiSubmitting && { opacity: 0.6 }]}
+                                        onPress={handleAiSuggestOrder}
+                                        disabled={aiSubmitting}
+                                    >
+                                        {aiSubmitting ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="sparkles" size={16} color="#FFF" />
+                                                <Text style={styles.aiStartBtnText}>Start</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
+                    </KeyboardAvoidingView>
+                ) : (
+                    <View style={styles.modalBackdropAndroid}>
+                        <View
+                            style={[
+                                styles.modalFrame,
+                                modalView === 'ai-input' ? styles.aiModalCard : styles.modalCard,
+                            ]}
+                        >
+
+                            {modalView === 'missing' ? (
+                                /* ── VIEW 1: Missing ingredients list ── */
+                                <>
+                                    <View style={styles.modalHeader}>
+                                        <View style={styles.modalIconWrap}>
+                                            <Ionicons name="alert-circle" size={28} color="#B45309" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.modalTitle}>Cannot Activate Menu</Text>
+                                            <Text style={styles.modalSubtitle}>
+                                                The following ingredients are missing from your inventory.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <ScrollView
+                                        style={styles.modalList}
+                                        showsVerticalScrollIndicator={false}
+                                        contentContainerStyle={{ gap: 10 }}
+                                        keyboardShouldPersistTaps="handled"
+                                        keyboardDismissMode="on-drag"
+                                    >
+                                        {missingIngredients.map((ing) => (
+                                            <View key={ing.ingredientId} style={styles.ingredientRow}>
+                                                <View style={styles.ingredientImageWrap}>
+                                                    {ing.image ? (
+                                                        <Image source={{ uri: ing.image }} style={styles.ingredientImage} />
+                                                    ) : (
+                                                        <View style={styles.ingredientImagePlaceholder}>
+                                                            <Ionicons name="leaf-outline" size={20} color="#C4A882" />
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <View style={styles.ingredientInfo}>
+                                                    <Text style={styles.ingredientName}>{ing.ingredientName}</Text>
+                                                    <Text style={styles.ingredientHint}>Not available in inventory</Text>
+                                                </View>
+                                                <View style={styles.ingredientBadge}>
+                                                    <Ionicons name="close-circle" size={14} color="#B45309" />
+                                                    <Text style={styles.ingredientBadgeText}>Missing</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+
+                                    <View style={styles.modalActions}>
+                                        <TouchableOpacity
+                                            style={styles.modalDismissBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Text style={styles.modalDismissBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.modalGoInventoryBtn}
+                                            onPress={() => setModalView('ai-input')}
+                                        >
+                                            <Ionicons name="sparkles-outline" size={14} color="#FFF" />
+                                            <Text style={styles.modalGoInventoryBtnText}>AI Suggest Order</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            ) : (
+                                /* ── VIEW 2: AI input form ── */
+                                <>
+                                    <View style={styles.aiModalHeader}>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setModalView('missing')}
+                                        >
+                                            <Ionicons name="chevron-back" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                        <View style={styles.aiModalIconWrap}>
+                                            <Ionicons name="sparkles" size={22} color="#8B6F4E" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.aiModalTitle}>AI Suggest Order</Text>
+                                            <Text style={styles.aiModalSubtitle}>
+                                                Enter your forecast to get supplier recommendations.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.aiModeRow}>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'cups' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('cups')}
+                                        >
+                                            <Ionicons name="cafe-outline" size={13} color={aiInputMode === 'cups' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'cups' && styles.aiModeTabTextActive]}>
+                                                Cups to Sell
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'forecast' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('forecast')}
+                                        >
+                                            <Ionicons name="calendar-outline" size={13} color={aiInputMode === 'forecast' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'forecast' && styles.aiModeTabTextActive]}>
+                                                Forecast Duration
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {aiInputMode === 'cups' ? (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Estimated Cups to Sell</Text>
+                                            <TextInput
+                                                style={styles.aiTextInput}
+                                                placeholder="Example: 200"
+                                                placeholderTextColor="#C4A882"
+                                                keyboardType="numeric"
+                                                value={aiCupsInput}
+                                                onChangeText={setAiCupsInput}
+                                            />
+                                            <Text style={styles.aiInputHint}>Minimum: 1 cup.</Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Forecast Duration: {aiRangeDays} days</Text>
+                                            <Slider
+                                                style={{ width: '100%', height: 40 }}
+                                                minimumValue={1}
+                                                maximumValue={60}
+                                                step={1}
+                                                value={aiRangeDays}
+                                                onValueChange={(v) => setAiRangeDays(Math.round(v))}
+                                                minimumTrackTintColor="#8B6F4E"
+                                                maximumTrackTintColor="#E2D5C8"
+                                                thumbTintColor="#8B6F4E"
+                                            />
+                                            <View style={styles.aiDateRow}>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>From</Text>
+                                                    <Text style={styles.aiDateValue}>{todayStr}</Text>
+                                                </View>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>To</Text>
+                                                    <Text style={styles.aiDateValue}>{toDateStr}</Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    <TouchableOpacity
+                                        style={[styles.aiStartBtn, aiSubmitting && { opacity: 0.6 }]}
+                                        onPress={handleAiSuggestOrder}
+                                        disabled={aiSubmitting}
+                                    >
+                                        {aiSubmitting ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="sparkles" size={16} color="#FFF" />
+                                                <Text style={styles.aiStartBtnText}>Start</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
+                    </View>
+                )}
+            </Modal>
         </SafeAreaView>
     );
 };
@@ -747,6 +1245,311 @@ const styles = StyleSheet.create({
     dot: {
         height: 7,
         borderRadius: 3.5,
+    },
+    // ─── Missing Ingredients Modal ───────────────────────────────────
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(20, 14, 10, 0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+    },
+    modalBackdropAndroid: {
+        flex: 1,
+        backgroundColor: 'rgba(20, 14, 10, 0.5)',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 88,
+        paddingBottom: 20,
+    },
+    modalFrame: {
+        width: '100%',
+        maxWidth: 520,
+    },
+    modalCard: {
+        width: '100%',
+        backgroundColor: '#FFFBF7',
+        borderRadius: 24,
+        padding: 20,
+        maxHeight: '80%',
+        shadowColor: '#2D1708',
+        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 12 },
+        shadowRadius: 20,
+        elevation: 10,
+        borderWidth: 1,
+        borderColor: '#F0DEC8',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        marginBottom: 16,
+    },
+    modalIconWrap: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+    },
+    modalTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1F1F1F',
+        marginBottom: 4,
+    },
+    modalSubtitle: {
+        fontSize: 12,
+        color: '#8B7A6A',
+        lineHeight: 17,
+    },
+    modalCloseBtn: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        backgroundColor: '#F5EDE3',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalList: {
+        maxHeight: 300,
+        marginBottom: 16,
+    },
+    ingredientRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#FFF',
+        borderRadius: 14,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#EDE3D9',
+        gap: 12,
+        shadowColor: '#000',
+        shadowOpacity: 0.04,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 4,
+        elevation: 1,
+    },
+    ingredientImageWrap: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        overflow: 'hidden',
+        backgroundColor: '#F5EDE3',
+    },
+    ingredientImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    ingredientImagePlaceholder: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F0E4D4',
+    },
+    ingredientInfo: {
+        flex: 1,
+    },
+    ingredientName: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1F1F1F',
+        marginBottom: 3,
+    },
+    ingredientHint: {
+        fontSize: 11,
+        color: '#B45309',
+    },
+    ingredientBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#FEF3C7',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+    },
+    ingredientBadgeText: {
+        fontSize: 10,
+        fontWeight: '700',
+        color: '#B45309',
+    },
+    modalActions: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    modalDismissBtn: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: '#E2D5C8',
+        borderRadius: 14,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFF',
+    },
+    modalDismissBtnText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#8B7A6A',
+    },
+    modalGoInventoryBtn: {
+        flex: 1.4,
+        borderRadius: 14,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        backgroundColor: '#8B6F4E',
+    },
+    modalGoInventoryBtnText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#FFF',
+    },
+    // ─── AI Suggest Order Modal ────────────────────────────────────────
+    aiModalCard: {
+        width: '100%',
+        backgroundColor: '#FFFBF7',
+        borderRadius: 24,
+        padding: 20,
+        minHeight: 540,
+        maxHeight: '80%',
+        shadowColor: '#2D1708',
+        shadowOpacity: 0.2,
+        shadowOffset: { width: 0, height: 12 },
+        shadowRadius: 20,
+        elevation: 10,
+        borderWidth: 1,
+        borderColor: '#F0DEC8',
+        gap: 16,
+    },
+    aiModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+    },
+    aiModalIconWrap: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#F0DEC8',
+    },
+    aiModalTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1F1F1F',
+        marginBottom: 3,
+    },
+    aiModalSubtitle: {
+        fontSize: 12,
+        color: '#8B7A6A',
+        lineHeight: 17,
+    },
+    aiModeRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    aiModeTab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E2D5C8',
+        backgroundColor: '#FFF',
+    },
+    aiModeTabActive: {
+        backgroundColor: '#8B6F4E',
+        borderColor: '#8B6F4E',
+    },
+    aiModeTabText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#8B6F4E',
+    },
+    aiModeTabTextActive: {
+        color: '#FFF',
+    },
+    aiInputSection: {
+        gap: 8,
+    },
+    aiInputLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#2C1B13',
+    },
+    aiTextInput: {
+        borderWidth: 1,
+        borderColor: '#E2D5C8',
+        borderRadius: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        fontSize: 15,
+        color: '#1F1F1F',
+        backgroundColor: '#FFF',
+    },
+    aiInputHint: {
+        fontSize: 11,
+        color: '#B0956A',
+    },
+    aiDateRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    aiDateBox: {
+        flex: 1,
+        borderWidth: 1,
+        borderColor: '#E2D5C8',
+        borderRadius: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        backgroundColor: '#FFF',
+    },
+    aiDateLabel: {
+        fontSize: 11,
+        color: '#9B8B7B',
+        marginBottom: 2,
+    },
+    aiDateValue: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#2C1B13',
+    },
+    aiStartBtn: {
+        marginTop: 'auto',
+        marginBottom: 14,
+        width: 94,
+        height: 94,
+        alignSelf: 'center',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        backgroundColor: '#8B6F4E',
+        borderRadius: 47,
+    },
+    aiStartBtnText: {
+        fontSize: 14,
+        fontWeight: '800',
+        color: '#FFF',
     },
 });
 
