@@ -15,6 +15,7 @@ import {
     TextInput,
     KeyboardAvoidingView,
     Platform,
+    Keyboard,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -133,7 +134,6 @@ const MenuVersionPage = () => {
     const [aiCupsInput, setAiCupsInput] = useState('');
     const [aiRangeDays, setAiRangeDays] = useState(7);
     const [aiSubmitting, setAiSubmitting] = useState(false);
-    const [missingModalHeight, setMissingModalHeight] = useState<number | null>(null);
     const pulse = useRef(new Animated.Value(0.25)).current;
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -250,8 +250,10 @@ const MenuVersionPage = () => {
                 const body = await response.json().catch(() => []);
                 const list = Array.isArray(body) ? body : [];
                 if (list.length > 0) {
+                    Keyboard.dismiss();
                     setMissingIngredients(list);
                     setPendingMenuId(menuId);
+                    setModalView('missing');
                     setShowMissingModal(true);
                 } else {
                     setError('Cannot activate: missing required ingredients.');
@@ -576,197 +578,369 @@ const MenuVersionPage = () => {
                     }
                 }}
             >
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    style={styles.modalBackdrop}
-                >
-                    <View
-                        style={[
-                            modalView === 'ai-input' ? styles.aiModalCard : styles.modalCard,
-                            modalView === 'ai-input' && missingModalHeight
-                                ? { height: missingModalHeight }
-                                : null,
-                        ]}
-                        onLayout={(event) => {
-                            if (modalView !== 'missing') return;
-                            const measuredHeight = Math.round(event.nativeEvent.layout.height);
-                            if (measuredHeight <= 0) return;
-                            if (missingModalHeight && Math.abs(missingModalHeight - measuredHeight) <= 1) return;
-                            setMissingModalHeight(measuredHeight);
-                        }}
-                    >
+                {Platform.OS === 'ios' ? (
+                    <KeyboardAvoidingView behavior="padding" style={styles.modalBackdrop}>
+                        <View
+                            style={[
+                                styles.modalFrame,
+                                modalView === 'ai-input' ? styles.aiModalCard : styles.modalCard,
+                            ]}
+                        >
 
-                        {modalView === 'missing' ? (
-                            /* ── VIEW 1: Missing ingredients list ── */
-                            <>
-                                <View style={styles.modalHeader}>
-                                    <View style={styles.modalIconWrap}>
-                                        <Ionicons name="alert-circle" size={28} color="#B45309" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.modalTitle}>Cannot Activate Menu</Text>
-                                        <Text style={styles.modalSubtitle}>
-                                            The following ingredients are missing from your inventory.
-                                        </Text>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={styles.modalCloseBtn}
-                                        onPress={() => setShowMissingModal(false)}
-                                    >
-                                        <Ionicons name="close" size={18} color="#8B7A6A" />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <ScrollView
-                                    style={styles.modalList}
-                                    showsVerticalScrollIndicator={false}
-                                    contentContainerStyle={{ gap: 10 }}
-                                >
-                                    {missingIngredients.map((ing) => (
-                                        <View key={ing.ingredientId} style={styles.ingredientRow}>
-                                            <View style={styles.ingredientImageWrap}>
-                                                {ing.image ? (
-                                                    <Image source={{ uri: ing.image }} style={styles.ingredientImage} />
-                                                ) : (
-                                                    <View style={styles.ingredientImagePlaceholder}>
-                                                        <Ionicons name="leaf-outline" size={20} color="#C4A882" />
-                                                    </View>
-                                                )}
-                                            </View>
-                                            <View style={styles.ingredientInfo}>
-                                                <Text style={styles.ingredientName}>{ing.ingredientName}</Text>
-                                                <Text style={styles.ingredientHint}>Not available in inventory</Text>
-                                            </View>
-                                            <View style={styles.ingredientBadge}>
-                                                <Ionicons name="close-circle" size={14} color="#B45309" />
-                                                <Text style={styles.ingredientBadgeText}>Missing</Text>
-                                            </View>
+                            {modalView === 'missing' ? (
+                                /* ── VIEW 1: Missing ingredients list ── */
+                                <>
+                                    <View style={styles.modalHeader}>
+                                        <View style={styles.modalIconWrap}>
+                                            <Ionicons name="alert-circle" size={28} color="#B45309" />
                                         </View>
-                                    ))}
-                                </ScrollView>
-
-                                <View style={styles.modalActions}>
-                                    <TouchableOpacity
-                                        style={styles.modalDismissBtn}
-                                        onPress={() => setShowMissingModal(false)}
-                                    >
-                                        <Text style={styles.modalDismissBtnText}>Close</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.modalGoInventoryBtn}
-                                        onPress={() => setModalView('ai-input')}
-                                    >
-                                        <Ionicons name="sparkles-outline" size={14} color="#FFF" />
-                                        <Text style={styles.modalGoInventoryBtnText}>AI Suggest Order</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </>
-                        ) : (
-                            /* ── VIEW 2: AI input form ── */
-                            <>
-                                <View style={styles.aiModalHeader}>
-                                    <TouchableOpacity
-                                        style={styles.modalCloseBtn}
-                                        onPress={() => setModalView('missing')}
-                                    >
-                                        <Ionicons name="chevron-back" size={18} color="#8B7A6A" />
-                                    </TouchableOpacity>
-                                    <View style={styles.aiModalIconWrap}>
-                                        <Ionicons name="sparkles" size={22} color="#8B6F4E" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.aiModalTitle}>AI Suggest Order</Text>
-                                        <Text style={styles.aiModalSubtitle}>
-                                            Enter your forecast to get supplier recommendations.
-                                        </Text>
-                                    </View>
-                                    <TouchableOpacity
-                                        style={styles.modalCloseBtn}
-                                        onPress={() => setShowMissingModal(false)}
-                                    >
-                                        <Ionicons name="close" size={18} color="#8B7A6A" />
-                                    </TouchableOpacity>
-                                </View>
-
-                                <View style={styles.aiModeRow}>
-                                    <TouchableOpacity
-                                        style={[styles.aiModeTab, aiInputMode === 'cups' && styles.aiModeTabActive]}
-                                        onPress={() => setAiInputMode('cups')}
-                                    >
-                                        <Ionicons name="cafe-outline" size={13} color={aiInputMode === 'cups' ? '#FFF' : '#8B6F4E'} />
-                                        <Text style={[styles.aiModeTabText, aiInputMode === 'cups' && styles.aiModeTabTextActive]}>
-                                            Cups to Sell
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={[styles.aiModeTab, aiInputMode === 'forecast' && styles.aiModeTabActive]}
-                                        onPress={() => setAiInputMode('forecast')}
-                                    >
-                                        <Ionicons name="calendar-outline" size={13} color={aiInputMode === 'forecast' ? '#FFF' : '#8B6F4E'} />
-                                        <Text style={[styles.aiModeTabText, aiInputMode === 'forecast' && styles.aiModeTabTextActive]}>
-                                            Forecast Duration
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-
-                                {aiInputMode === 'cups' ? (
-                                    <View style={styles.aiInputSection}>
-                                        <Text style={styles.aiInputLabel}>Estimated Cups to Sell</Text>
-                                        <TextInput
-                                            style={styles.aiTextInput}
-                                            placeholder="Example: 200"
-                                            placeholderTextColor="#C4A882"
-                                            keyboardType="numeric"
-                                            value={aiCupsInput}
-                                            onChangeText={setAiCupsInput}
-                                        />
-                                        <Text style={styles.aiInputHint}>Minimum: 1 cup.</Text>
-                                    </View>
-                                ) : (
-                                    <View style={styles.aiInputSection}>
-                                        <Text style={styles.aiInputLabel}>Forecast Duration: {aiRangeDays} days</Text>
-                                        <Slider
-                                            style={{ width: '100%', height: 40 }}
-                                            minimumValue={1}
-                                            maximumValue={60}
-                                            step={1}
-                                            value={aiRangeDays}
-                                            onValueChange={(v) => setAiRangeDays(Math.round(v))}
-                                            minimumTrackTintColor="#8B6F4E"
-                                            maximumTrackTintColor="#E2D5C8"
-                                            thumbTintColor="#8B6F4E"
-                                        />
-                                        <View style={styles.aiDateRow}>
-                                            <View style={styles.aiDateBox}>
-                                                <Text style={styles.aiDateLabel}>From</Text>
-                                                <Text style={styles.aiDateValue}>{todayStr}</Text>
-                                            </View>
-                                            <View style={styles.aiDateBox}>
-                                                <Text style={styles.aiDateLabel}>To</Text>
-                                                <Text style={styles.aiDateValue}>{toDateStr}</Text>
-                                            </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.modalTitle}>Cannot Activate Menu</Text>
+                                            <Text style={styles.modalSubtitle}>
+                                                The following ingredients are missing from your inventory.
+                                            </Text>
                                         </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
                                     </View>
-                                )}
 
-                                <TouchableOpacity
-                                    style={[styles.aiStartBtn, aiSubmitting && { opacity: 0.6 }]}
-                                    onPress={handleAiSuggestOrder}
-                                    disabled={aiSubmitting}
-                                >
-                                    {aiSubmitting ? (
-                                        <ActivityIndicator size="small" color="#FFF" />
+                                    <ScrollView
+                                        style={styles.modalList}
+                                        showsVerticalScrollIndicator={false}
+                                        contentContainerStyle={{ gap: 10 }}
+                                    >
+                                        {missingIngredients.map((ing) => (
+                                            <View key={ing.ingredientId} style={styles.ingredientRow}>
+                                                <View style={styles.ingredientImageWrap}>
+                                                    {ing.image ? (
+                                                        <Image source={{ uri: ing.image }} style={styles.ingredientImage} />
+                                                    ) : (
+                                                        <View style={styles.ingredientImagePlaceholder}>
+                                                            <Ionicons name="leaf-outline" size={20} color="#C4A882" />
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <View style={styles.ingredientInfo}>
+                                                    <Text style={styles.ingredientName}>{ing.ingredientName}</Text>
+                                                    <Text style={styles.ingredientHint}>Not available in inventory</Text>
+                                                </View>
+                                                <View style={styles.ingredientBadge}>
+                                                    <Ionicons name="close-circle" size={14} color="#B45309" />
+                                                    <Text style={styles.ingredientBadgeText}>Missing</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+
+                                    <View style={styles.modalActions}>
+                                        <TouchableOpacity
+                                            style={styles.modalDismissBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Text style={styles.modalDismissBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.modalGoInventoryBtn}
+                                            onPress={() => setModalView('ai-input')}
+                                        >
+                                            <Ionicons name="sparkles-outline" size={14} color="#FFF" />
+                                            <Text style={styles.modalGoInventoryBtnText}>AI Suggest Order</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            ) : (
+                                /* ── VIEW 2: AI input form ── */
+                                <>
+                                    <View style={styles.aiModalHeader}>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setModalView('missing')}
+                                        >
+                                            <Ionicons name="chevron-back" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                        <View style={styles.aiModalIconWrap}>
+                                            <Ionicons name="sparkles" size={22} color="#8B6F4E" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.aiModalTitle}>AI Suggest Order</Text>
+                                            <Text style={styles.aiModalSubtitle}>
+                                                Enter your forecast to get supplier recommendations.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.aiModeRow}>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'cups' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('cups')}
+                                        >
+                                            <Ionicons name="cafe-outline" size={13} color={aiInputMode === 'cups' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'cups' && styles.aiModeTabTextActive]}>
+                                                Cups to Sell
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'forecast' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('forecast')}
+                                        >
+                                            <Ionicons name="calendar-outline" size={13} color={aiInputMode === 'forecast' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'forecast' && styles.aiModeTabTextActive]}>
+                                                Forecast Duration
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {aiInputMode === 'cups' ? (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Estimated Cups to Sell</Text>
+                                            <TextInput
+                                                style={styles.aiTextInput}
+                                                placeholder="Example: 200"
+                                                placeholderTextColor="#C4A882"
+                                                keyboardType="numeric"
+                                                value={aiCupsInput}
+                                                onChangeText={setAiCupsInput}
+                                            />
+                                            <Text style={styles.aiInputHint}>Minimum: 1 cup.</Text>
+                                        </View>
                                     ) : (
-                                        <>
-                                            <Ionicons name="sparkles" size={16} color="#FFF" />
-                                            <Text style={styles.aiStartBtnText}>Start</Text>
-                                        </>
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Forecast Duration: {aiRangeDays} days</Text>
+                                            <Slider
+                                                style={{ width: '100%', height: 40 }}
+                                                minimumValue={1}
+                                                maximumValue={60}
+                                                step={1}
+                                                value={aiRangeDays}
+                                                onValueChange={(v) => setAiRangeDays(Math.round(v))}
+                                                minimumTrackTintColor="#8B6F4E"
+                                                maximumTrackTintColor="#E2D5C8"
+                                                thumbTintColor="#8B6F4E"
+                                            />
+                                            <View style={styles.aiDateRow}>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>From</Text>
+                                                    <Text style={styles.aiDateValue}>{todayStr}</Text>
+                                                </View>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>To</Text>
+                                                    <Text style={styles.aiDateValue}>{toDateStr}</Text>
+                                                </View>
+                                            </View>
+                                        </View>
                                     )}
-                                </TouchableOpacity>
-                            </>
-                        )}
+
+                                    <TouchableOpacity
+                                        style={[styles.aiStartBtn, aiSubmitting && { opacity: 0.6 }]}
+                                        onPress={handleAiSuggestOrder}
+                                        disabled={aiSubmitting}
+                                    >
+                                        {aiSubmitting ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="sparkles" size={16} color="#FFF" />
+                                                <Text style={styles.aiStartBtnText}>Start</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
+                    </KeyboardAvoidingView>
+                ) : (
+                    <View style={styles.modalBackdropAndroid}>
+                        <View
+                            style={[
+                                styles.modalFrame,
+                                modalView === 'ai-input' ? styles.aiModalCard : styles.modalCard,
+                            ]}
+                        >
+
+                            {modalView === 'missing' ? (
+                                /* ── VIEW 1: Missing ingredients list ── */
+                                <>
+                                    <View style={styles.modalHeader}>
+                                        <View style={styles.modalIconWrap}>
+                                            <Ionicons name="alert-circle" size={28} color="#B45309" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.modalTitle}>Cannot Activate Menu</Text>
+                                            <Text style={styles.modalSubtitle}>
+                                                The following ingredients are missing from your inventory.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <ScrollView
+                                        style={styles.modalList}
+                                        showsVerticalScrollIndicator={false}
+                                        contentContainerStyle={{ gap: 10 }}
+                                        keyboardShouldPersistTaps="handled"
+                                        keyboardDismissMode="on-drag"
+                                    >
+                                        {missingIngredients.map((ing) => (
+                                            <View key={ing.ingredientId} style={styles.ingredientRow}>
+                                                <View style={styles.ingredientImageWrap}>
+                                                    {ing.image ? (
+                                                        <Image source={{ uri: ing.image }} style={styles.ingredientImage} />
+                                                    ) : (
+                                                        <View style={styles.ingredientImagePlaceholder}>
+                                                            <Ionicons name="leaf-outline" size={20} color="#C4A882" />
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <View style={styles.ingredientInfo}>
+                                                    <Text style={styles.ingredientName}>{ing.ingredientName}</Text>
+                                                    <Text style={styles.ingredientHint}>Not available in inventory</Text>
+                                                </View>
+                                                <View style={styles.ingredientBadge}>
+                                                    <Ionicons name="close-circle" size={14} color="#B45309" />
+                                                    <Text style={styles.ingredientBadgeText}>Missing</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </ScrollView>
+
+                                    <View style={styles.modalActions}>
+                                        <TouchableOpacity
+                                            style={styles.modalDismissBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Text style={styles.modalDismissBtnText}>Close</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.modalGoInventoryBtn}
+                                            onPress={() => setModalView('ai-input')}
+                                        >
+                                            <Ionicons name="sparkles-outline" size={14} color="#FFF" />
+                                            <Text style={styles.modalGoInventoryBtnText}>AI Suggest Order</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </>
+                            ) : (
+                                /* ── VIEW 2: AI input form ── */
+                                <>
+                                    <View style={styles.aiModalHeader}>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setModalView('missing')}
+                                        >
+                                            <Ionicons name="chevron-back" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                        <View style={styles.aiModalIconWrap}>
+                                            <Ionicons name="sparkles" size={22} color="#8B6F4E" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.aiModalTitle}>AI Suggest Order</Text>
+                                            <Text style={styles.aiModalSubtitle}>
+                                                Enter your forecast to get supplier recommendations.
+                                            </Text>
+                                        </View>
+                                        <TouchableOpacity
+                                            style={styles.modalCloseBtn}
+                                            onPress={() => setShowMissingModal(false)}
+                                        >
+                                            <Ionicons name="close" size={18} color="#8B7A6A" />
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    <View style={styles.aiModeRow}>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'cups' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('cups')}
+                                        >
+                                            <Ionicons name="cafe-outline" size={13} color={aiInputMode === 'cups' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'cups' && styles.aiModeTabTextActive]}>
+                                                Cups to Sell
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={[styles.aiModeTab, aiInputMode === 'forecast' && styles.aiModeTabActive]}
+                                            onPress={() => setAiInputMode('forecast')}
+                                        >
+                                            <Ionicons name="calendar-outline" size={13} color={aiInputMode === 'forecast' ? '#FFF' : '#8B6F4E'} />
+                                            <Text style={[styles.aiModeTabText, aiInputMode === 'forecast' && styles.aiModeTabTextActive]}>
+                                                Forecast Duration
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+
+                                    {aiInputMode === 'cups' ? (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Estimated Cups to Sell</Text>
+                                            <TextInput
+                                                style={styles.aiTextInput}
+                                                placeholder="Example: 200"
+                                                placeholderTextColor="#C4A882"
+                                                keyboardType="numeric"
+                                                value={aiCupsInput}
+                                                onChangeText={setAiCupsInput}
+                                            />
+                                            <Text style={styles.aiInputHint}>Minimum: 1 cup.</Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.aiInputSection}>
+                                            <Text style={styles.aiInputLabel}>Forecast Duration: {aiRangeDays} days</Text>
+                                            <Slider
+                                                style={{ width: '100%', height: 40 }}
+                                                minimumValue={1}
+                                                maximumValue={60}
+                                                step={1}
+                                                value={aiRangeDays}
+                                                onValueChange={(v) => setAiRangeDays(Math.round(v))}
+                                                minimumTrackTintColor="#8B6F4E"
+                                                maximumTrackTintColor="#E2D5C8"
+                                                thumbTintColor="#8B6F4E"
+                                            />
+                                            <View style={styles.aiDateRow}>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>From</Text>
+                                                    <Text style={styles.aiDateValue}>{todayStr}</Text>
+                                                </View>
+                                                <View style={styles.aiDateBox}>
+                                                    <Text style={styles.aiDateLabel}>To</Text>
+                                                    <Text style={styles.aiDateValue}>{toDateStr}</Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    )}
+
+                                    <TouchableOpacity
+                                        style={[styles.aiStartBtn, aiSubmitting && { opacity: 0.6 }]}
+                                        onPress={handleAiSuggestOrder}
+                                        disabled={aiSubmitting}
+                                    >
+                                        {aiSubmitting ? (
+                                            <ActivityIndicator size="small" color="#FFF" />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="sparkles" size={16} color="#FFF" />
+                                                <Text style={styles.aiStartBtnText}>Start</Text>
+                                            </>
+                                        )}
+                                    </TouchableOpacity>
+                                </>
+                            )}
+                        </View>
                     </View>
-                </KeyboardAvoidingView>
+                )}
             </Modal>
         </SafeAreaView>
     );
@@ -1080,6 +1254,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
     },
+    modalBackdropAndroid: {
+        flex: 1,
+        backgroundColor: 'rgba(20, 14, 10, 0.5)',
+        justifyContent: 'flex-start',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingTop: 88,
+        paddingBottom: 20,
+    },
+    modalFrame: {
+        width: '100%',
+        maxWidth: 520,
+    },
     modalCard: {
         width: '100%',
         backgroundColor: '#FFFBF7',
@@ -1236,6 +1423,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFBF7',
         borderRadius: 24,
         padding: 20,
+        minHeight: 540,
         maxHeight: '80%',
         shadowColor: '#2D1708',
         shadowOpacity: 0.2,
