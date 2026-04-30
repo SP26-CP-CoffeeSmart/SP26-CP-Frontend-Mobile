@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     StyleSheet,
     Text,
@@ -15,6 +15,7 @@ import { TextInput } from 'react-native';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface ShopStaff {
     id?: number;
@@ -51,6 +52,217 @@ const COLORS = {
     iconSoft: '#E6DED6',
 };
 
+const STAFF_CONTACT_CACHE_KEY = 'staff-contact-cache-v1';
+
+type StaffContactMap = Record<string, { email?: string; phone?: string }>;
+
+const pickFirstString = (...values: unknown[]) => {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) {
+            return value.trim();
+        }
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return String(value);
+        }
+    }
+    return '';
+};
+
+const pickByKeys = (source: Record<string, unknown>, keys: string[]) =>
+    pickFirstString(...keys.map((key) => source[key]));
+
+const normalizeKey = (key: string) => key.replace(/[^a-z]/gi, '').toLowerCase();
+
+const isEmailLikeKey = (key: string) => {
+    const normalized = normalizeKey(key);
+    return normalized.includes('email') || normalized === 'mail';
+};
+
+const isPhoneLikeKey = (key: string) => {
+    const normalized = normalizeKey(key);
+    return (
+        normalized.includes('phone') ||
+        normalized.includes('mobile') ||
+        normalized.includes('tel') ||
+        normalized.includes('contactnumber')
+    );
+};
+
+const findFirstStringByKeyMatcher = (
+    value: unknown,
+    matcher: (key: string) => boolean,
+    visited = new Set<unknown>()
+): string => {
+    if (!value || typeof value !== 'object') return '';
+    if (visited.has(value)) return '';
+    visited.add(value);
+
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const found = findFirstStringByKeyMatcher(item, matcher, visited);
+            if (found) return found;
+        }
+        return '';
+    }
+
+    const obj = value as Record<string, unknown>;
+
+    for (const [key, nestedValue] of Object.entries(obj)) {
+        if (matcher(key)) {
+            const picked = pickFirstString(nestedValue);
+            if (picked) return picked;
+        }
+    }
+
+    for (const nestedValue of Object.values(obj)) {
+        if (nestedValue && typeof nestedValue === 'object') {
+            const found = findFirstStringByKeyMatcher(nestedValue, matcher, visited);
+            if (found) return found;
+        }
+    }
+
+    return '';
+};
+
+const toNumber = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+};
+
+const getStaffAccountId = (staffMember: ShopStaff) =>
+    toNumber(staffMember.accountId ?? (staffMember as any).accountID ?? (staffMember as any).account_id);
+
+const getStaffEmailFromPayload = (staffMember: ShopStaff) => {
+    const raw = staffMember as any;
+    return pickFirstString(
+        pickByKeys(raw, [
+            'email',
+            'Email',
+            'emailAddress',
+            'email_address',
+            'mail',
+            'Mail',
+            'staffEmail',
+            'staff_email',
+            'userEmail',
+            'user_email',
+        ]),
+        pickByKeys(raw.account ?? {}, [
+            'email',
+            'Email',
+            'emailAddress',
+            'email_address',
+            'mail',
+            'Mail',
+            'staffEmail',
+            'staff_email',
+        ]),
+        pickByKeys(raw.user ?? {}, [
+            'email',
+            'Email',
+            'emailAddress',
+            'email_address',
+            'mail',
+            'Mail',
+        ]),
+        findFirstStringByKeyMatcher(raw, isEmailLikeKey)
+    );
+};
+
+const getStaffPhoneFromPayload = (staffMember: ShopStaff) => {
+    const raw = staffMember as any;
+    return pickFirstString(
+        pickByKeys(raw, [
+            'phoneNumber',
+            'PhoneNumber',
+            'phone_number',
+            'phone',
+            'Phone',
+            'mobile',
+            'Mobile',
+            'mobileNumber',
+            'mobile_number',
+            'phoneNo',
+            'phone_no',
+            'tel',
+        ]),
+        pickByKeys(raw.account ?? {}, [
+            'phoneNumber',
+            'PhoneNumber',
+            'phone_number',
+            'phone',
+            'Phone',
+            'mobile',
+            'Mobile',
+            'mobileNumber',
+            'mobile_number',
+            'phoneNo',
+            'phone_no',
+            'tel',
+        ]),
+        pickByKeys(raw.user ?? {}, [
+            'phoneNumber',
+            'PhoneNumber',
+            'phone_number',
+            'phone',
+            'Phone',
+            'mobile',
+            'Mobile',
+            'mobileNumber',
+            'mobile_number',
+            'phoneNo',
+            'phone_no',
+            'tel',
+        ]),
+        findFirstStringByKeyMatcher(raw, isPhoneLikeKey)
+    );
+};
+
+const extractStaffListFromResponse = (payload: unknown, visited = new Set<unknown>()): ShopStaff[] => {
+    if (Array.isArray(payload)) {
+        return payload as ShopStaff[];
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return [];
+    }
+
+    if (visited.has(payload)) {
+        return [];
+    }
+    visited.add(payload);
+
+    const obj = payload as Record<string, unknown>;
+    const directCandidates = [
+        obj.items,
+        obj.data,
+        obj.results,
+        obj.value,
+        obj.list,
+        obj.$values,
+    ];
+
+    for (const candidate of directCandidates) {
+        const found = extractStaffListFromResponse(candidate, visited);
+        if (found.length > 0) {
+            return found;
+        }
+    }
+
+    for (const value of Object.values(obj)) {
+        const found = extractStaffListFromResponse(value, visited);
+        if (found.length > 0) {
+            return found;
+        }
+    }
+
+    return [];
+};
+
 export default function StaffManagementScreen() {
     type SortOption = 'NAME_ASC' | 'NAME_DESC' | 'ROLE_ASC';
 
@@ -63,6 +275,84 @@ export default function StaffManagementScreen() {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortOption, setSortOption] = useState<SortOption>('NAME_ASC');
     const [showSortOptions, setShowSortOptions] = useState(false);
+
+    const readContactCache = useCallback(async (): Promise<StaffContactMap> => {
+        try {
+            const raw = await AsyncStorage.getItem(STAFF_CONTACT_CACHE_KEY);
+            if (!raw) return {};
+            const parsed = JSON.parse(raw) as StaffContactMap;
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch {
+            return {};
+        }
+    }, []);
+
+    const writeContactCache = useCallback(async (cache: StaffContactMap) => {
+        try {
+            await AsyncStorage.setItem(STAFF_CONTACT_CACHE_KEY, JSON.stringify(cache));
+        } catch {
+            // Ignore cache write failures.
+        }
+    }, []);
+
+    const hydrateStaffContacts = useCallback(
+        async (items: ShopStaff[]) => {
+            const cache = await readContactCache();
+            const nextCache: StaffContactMap = { ...cache };
+
+            const hydrated = items.map((item) => {
+                const accountId = getStaffAccountId(item);
+                const cacheKey = accountId ? String(accountId) : '';
+                const cached = cacheKey ? nextCache[cacheKey] : undefined;
+
+                const emailFromPayload = getStaffEmailFromPayload(item);
+                const phoneFromPayload = getStaffPhoneFromPayload(item);
+
+                const resolvedEmail = emailFromPayload || cached?.email || '';
+                const resolvedPhone = phoneFromPayload || cached?.phone || '';
+
+                if (cacheKey && (resolvedEmail || resolvedPhone)) {
+                    nextCache[cacheKey] = {
+                        email: resolvedEmail || cached?.email || '',
+                        phone: resolvedPhone || cached?.phone || '',
+                    };
+                }
+
+                return {
+                    ...item,
+                    email: resolvedEmail || undefined,
+                    phoneNumber: resolvedPhone || undefined,
+                };
+            });
+
+            await writeContactCache(nextCache);
+            return hydrated;
+        },
+        [readContactCache, writeContactCache]
+    );
+
+    const fetchStaffMembers = useCallback(async () => {
+        if (!profileCoffeeShopId) {
+            setStaff([]);
+            setError('You have not added your coffee shop yet.');
+            return;
+        }
+
+        const response = await authorizedFetch(
+            API_ENDPOINTS.shopStaff.getByShop(profileCoffeeShopId),
+            {
+                headers: {
+                    Accept: '*/*',
+                },
+            }
+        );
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        const list = extractStaffListFromResponse(data);
+        return hydrateStaffContacts(list);
+    }, [hydrateStaffContacts, profileCoffeeShopId]);
 
     useEffect(() => {
         let isActive = true;
@@ -81,18 +371,7 @@ export default function StaffManagementScreen() {
                 if (isActive) {
                     setLoading(true);
                 }
-                const response = await authorizedFetch(
-                    API_ENDPOINTS.shopStaff.getByShop(profileCoffeeShopId),
-                    {
-                        headers: {
-                            Accept: '*/*',
-                        },
-                    }
-                );
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const data = await response.json();
+                const data = await fetchStaffMembers();
                 if (isActive) {
                     setStaff(Array.isArray(data) ? data : []);
                     setError(null);
@@ -114,7 +393,7 @@ export default function StaffManagementScreen() {
         return () => {
             isActive = false;
         };
-    }, [profileCoffeeShopId]);
+    }, [fetchStaffMembers, profileCoffeeShopId]);
 
     const handleRefresh = async () => {
         if (!profileCoffeeShopId) {
@@ -123,18 +402,7 @@ export default function StaffManagementScreen() {
 
         try {
             setRefreshing(true);
-            const response = await authorizedFetch(
-                API_ENDPOINTS.shopStaff.getByShop(profileCoffeeShopId),
-                {
-                    headers: {
-                        Accept: '*/*',
-                    },
-                }
-            );
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
+            const data = await fetchStaffMembers();
             setStaff(Array.isArray(data) ? data : []);
             setError(null);
         } catch (err) {
@@ -156,11 +424,11 @@ export default function StaffManagementScreen() {
     };
 
     const getStaffEmail = (staffMember: ShopStaff) => {
-        return staffMember.email ?? '-';
+        return staffMember.email?.trim() || '-';
     };
 
     const getStaffPhone = (staffMember: ShopStaff) => {
-        return staffMember.phoneNumber ?? staffMember.phone ?? '-';
+        return staffMember.phoneNumber?.trim() || staffMember.phone?.trim() || '-';
     };
 
     const getStaffPosition = (staffMember: ShopStaff) => {
