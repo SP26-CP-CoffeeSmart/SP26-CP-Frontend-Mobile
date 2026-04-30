@@ -133,8 +133,8 @@ const getStatusStyles = (status?: string) => {
 export default function StaffOrdersScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ status?: string | string[] }>();
-  const { ownerId, coffeeShopId } = useAuth();
-  const resolvedOwnerId = useMemo(() => ownerId ?? coffeeShopId ?? null, [ownerId, coffeeShopId]);
+  const { ownerId } = useAuth();
+  const resolvedOwnerId = useMemo(() => ownerId ?? null, [ownerId]);
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [orders, setOrders] = useState<OrderItem[]>([]);
@@ -193,7 +193,7 @@ export default function StaffOrdersScreen() {
 
       if (!resolvedOwnerId) {
         setOrders([]);
-        setError('Missing owner/shop ID. Unable to load orders.');
+        setError('Missing owner ID. Unable to load orders.');
         return;
       }
 

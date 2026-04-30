@@ -62,6 +62,34 @@ const getCoffeeShopId = (profile: ProfileResponse | null) => {
   );
 };
 
+const getOwnerId = (profile: ProfileResponse | null) => {
+  if (!profile) return null;
+  return (
+    toNumber((profile as any).ownerId) ??
+    toNumber((profile as any).ownerID) ??
+    toNumber((profile as any).owner_id) ??
+    toNumber((profile as any).owner?.accountId) ??
+    toNumber((profile as any).owner?.id)
+  );
+};
+
+const getOwnerIdFromCoffeeShopPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const data = payload as Record<string, unknown>;
+  return (
+    toNumber(data.ownerId) ??
+    toNumber(data.ownerID) ??
+    toNumber(data.owner_id) ??
+    toNumber(data.accountId) ??
+    toNumber(data.userId) ??
+    toNumber((data.owner as Record<string, unknown> | undefined)?.ownerId) ??
+    toNumber((data.owner as Record<string, unknown> | undefined)?.accountId) ??
+    toNumber((data.account as Record<string, unknown> | undefined)?.accountId)
+  );
+};
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [coffeeShopId, setCoffeeShopId] = useState<number | null>(null);
@@ -157,6 +185,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         toNumber((data as any)?.ownerId) ?? null;
       setAccountId(accountIdValue);
 
+      const ownerIdValue = getOwnerId(data);
+      if (ownerIdValue !== null) {
+        await setOwnerId(ownerIdValue);
+      } else if (shopId) {
+        try {
+          const coffeeShopResponse = await authorizedFetch(API_ENDPOINTS.coffeeShop.getById(shopId), {
+            headers: {
+              Accept: '*/*',
+            },
+          });
+          if (coffeeShopResponse.ok) {
+            const coffeeShopData = (await coffeeShopResponse.json()) as unknown;
+            const fallbackOwnerId = getOwnerIdFromCoffeeShopPayload(coffeeShopData);
+            if (fallbackOwnerId !== null) {
+              await setOwnerId(fallbackOwnerId);
+            }
+          }
+        } catch {
+          // Ignore owner fallback errors and keep app usable with current profile data.
+        }
+      }
+
       // Extract shopName
       const shopNameValue =
         (data as any)?.shopName ??
@@ -237,7 +287,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [checkToken]);
+  }, [checkToken, setOwnerId]);
 
   useEffect(() => {
     const loadOwnerId = async () => {
