@@ -405,7 +405,8 @@ const resolveManualImportMeasurement = (ingredient: Ingredient) => {
 
 export default function ImportRequestScreen() {
   const router = useRouter();
-  const { coffeeShopId } = useAuth();
+  const { coffeeShopId, ownerId } = useAuth();
+  const resolvedOwnerId = useMemo(() => ownerId ?? null, [ownerId]);
   const [activeTab, setActiveTab] = useState<'order' | 'manual'>('order');
   const [noteTitle, setNoteTitle] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -739,8 +740,9 @@ export default function ImportRequestScreen() {
   };
 
   const loadOrders = useCallback(async () => {
-    if (!coffeeShopId) {
+    if (!resolvedOwnerId) {
       setOrders([]);
+      setOrderError('Unable to load orders.');
       return;
     }
 
@@ -795,7 +797,7 @@ export default function ImportRequestScreen() {
       };
 
       const fetchOrdersByStatus = async (status: 'Completed' | 'Delivered') => {
-        const url = API_ENDPOINTS.order.byOwner(coffeeShopId, {
+        const url = API_ENDPOINTS.order.byOwner(resolvedOwnerId, {
           page: 1,
           pageSize: 20,
           orderStatus: status,
@@ -824,7 +826,7 @@ export default function ImportRequestScreen() {
       const deliveredOrders = deliveredResult.status === 'fulfilled' ? deliveredResult.value : [];
 
       if (!completedOrders.length && !deliveredOrders.length) {
-        throw new Error('Unable to load completed or delivered orders.');
+        throw new Error('No Orders Found.');
       }
 
       const mergedOrders = [...completedOrders, ...deliveredOrders];
@@ -899,7 +901,7 @@ export default function ImportRequestScreen() {
     } finally {
       setOrderLoading(false);
     }
-  }, [coffeeShopId, selectedOrder]);
+  }, [resolvedOwnerId, selectedOrder]);
 
   useFocusEffect(
     useCallback(() => {
