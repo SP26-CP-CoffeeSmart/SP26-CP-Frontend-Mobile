@@ -314,29 +314,6 @@ export default function InventoryScreen() {
               </Text>
             </View>
 
-            {/* Progress Bar */}
-            <View className="flex-row items-center">
-              <View
-                style={{
-                  flex: 1,
-                  height: 6,
-                  backgroundColor: COLORS.border,
-                  borderRadius: 999,
-                  overflow: 'hidden',
-                  marginRight: 10,
-                }}>
-                <View
-                  style={{
-                    height: '100%',
-                    width: `${percentage}%`,
-                    backgroundColor: status.barColor,
-                  }}
-                />
-              </View>
-              <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: '700' }}>
-                {Math.round(percentage)}%
-              </Text>
-            </View>
           </View>
         </View>
       </TouchableOpacity>

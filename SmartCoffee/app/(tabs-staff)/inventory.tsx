@@ -217,12 +217,23 @@ export default function InventoryScreen() {
         fetchIngredients();
     };
 
+    const formatMeasurement = (measurement?: string) => {
+        if (!measurement) return 'units';
+        const normalized = measurement.trim().toLowerCase();
+        if (['g', 'gram', 'grams', 'gam'].includes(normalized)) return 'g';
+        if (['kg', 'kilogram', 'kilograms'].includes(normalized)) return 'kg';
+        if (['ml', 'milliliter', 'milliliters'].includes(normalized)) return 'ml';
+        if (['l', 'liter', 'liters', 'litre', 'litres'].includes(normalized)) return 'l';
+        if (['unit', 'units', 'pcs', 'pc', 'piece', 'pieces'].includes(normalized)) return 'units';
+        return measurement;
+    };
+
     const renderItem = ({ item }: { item: ShopInventoryItem }) => {
         const ingredientName = item.ingredient?.name || `Inventory #${item.inventoryDetailId}`;
         const ingredientImage = item.image || item.imageUrl || item.ingredient?.image;
         const ingredientCategory = item.ingredient?.category || 'Uncategorized';
         const quantity = Number(item.quantity ?? 0);
-        const measurement = item.measurement ?? 'units';
+        const measurement = formatMeasurement(item.measurement);
         const status = getStatus(item);
 
         return (
@@ -251,7 +262,7 @@ export default function InventoryScreen() {
                     </View>
                     <Text style={styles.cardSubtitle}>{ingredientCategory}</Text>
                     <Text style={styles.cardQuantity}>
-                        {quantity.toFixed(1)} {measurement}
+                        {quantity} {measurement}
                     </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />

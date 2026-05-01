@@ -327,7 +327,6 @@ export default function IngredientDetailScreen() {
   const ingredientImage =
     inventoryDetail.image || inventoryDetail.imageUrl || inventoryDetail.ingredient?.image || null;
   const ingredientCategory = inventoryDetail.ingredient?.category || 'Uncategorized';
-  const ingredientEndDate = inventoryDetail.ingredient?.endDate || new Date().toISOString();
   const ingredientCreateDate = inventoryDetail.ingredient?.createDate || null;
   const measurementUnit = formatMeasurement(inventoryDetail.measurement);
   const quantityValue = Number(inventoryDetail.quantity ?? 0);
@@ -405,11 +404,6 @@ export default function IngredientDetailScreen() {
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Created date</Text>
             <Text style={styles.infoValue}>{formatDate(ingredientCreateDate)}</Text>
-          </View>
-
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Expiry date</Text>
-            <Text style={styles.infoValue}>{formatDate(ingredientEndDate)}</Text>
           </View>
 
           <View style={styles.infoRow}>
