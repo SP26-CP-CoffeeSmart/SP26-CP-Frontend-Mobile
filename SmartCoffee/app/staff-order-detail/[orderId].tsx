@@ -356,8 +356,6 @@ export default function StaffOrderDetailScreen() {
                       <Text style={styles.detailPrice}>{formatVnd(item.price)}</Text>
                     </View>
                     <View style={styles.detailMetaWrap}>
-                      <Text style={styles.detailMeta}>ID: {item.orderDetailId ?? '--'}</Text>
-                      <Text style={styles.detailMeta}>Type: {item.type || '--'}</Text>
                       <Text style={styles.detailMeta}>Qty: {item.quantity ?? 0}</Text>
                     </View>
                   </View>
