@@ -16,6 +16,9 @@ import { useRouter } from 'expo-router';
 
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
+import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 type UrgencyLevel = 'Cao' | 'Trung binh' | 'Thap' | string;
 
@@ -119,6 +122,7 @@ const getUrgencyStyle = (urgency: string) => {
 
 export default function AIInventoryPredictScreen() {
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const recommendationBgImage = require('../assets/AI_RecommendationBackground.jpg');
 
   const [daysAnalyzeInput, setDaysAnalyzeInput] = useState(String(DEFAULT_DAYS_ANALYZE));
@@ -129,6 +133,12 @@ export default function AIInventoryPredictScreen() {
   const [result, setResult] = useState<InventoryPredictResponse | null>(null);
   const [daysAnalyzeError, setDaysAnalyzeError] = useState<string | null>(null);
   const [daysPredictError, setDaysPredictError] = useState<string | null>(null);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
+    'The shop does not have an active subscription.'
+  );
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
 
   const requestPayload = useMemo(
     () => ({
@@ -139,6 +149,37 @@ export default function AIInventoryPredictScreen() {
   );
 
   const runPredict = async (isPullToRefresh = false) => {
+    if (!coffeeShopId) {
+      setSubscriptionModalMessage('Missing coffee shop information.');
+      setShowSubscriptionModal(true);
+      return;
+    }
+
+    if (!hasActiveSubscription && !checkingSubscription) {
+      try {
+        setCheckingSubscription(true);
+        const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const data = await response.json();
+        const resolved = resolveCurrentSubscription(data);
+        const active = resolved ? isSubscriptionActive(resolved) : false;
+        setHasActiveSubscription(active);
+        if (!active) {
+          setSubscriptionModalMessage('The shop does not have an active subscription.');
+          setShowSubscriptionModal(true);
+          return;
+        }
+      } catch {
+        setSubscriptionModalMessage('Unable to verify subscription status.');
+        setShowSubscriptionModal(true);
+        return;
+      } finally {
+        setCheckingSubscription(false);
+      }
+    }
+
     const analyzeValidationError = getDayInputError(daysAnalyzeInput, 'Days to Analyze');
     const predictValidationError = getDayInputError(daysPredictInput, 'Days to Predict');
 
@@ -348,6 +389,11 @@ export default function AIInventoryPredictScreen() {
           </View>
         ) : null}
       </ScrollView>
+      <SubscriptionGateModal
+        visible={showSubscriptionModal}
+        message={subscriptionModalMessage}
+        onClose={() => setShowSubscriptionModal(false)}
+      />
     </SafeAreaView>
   );
 }

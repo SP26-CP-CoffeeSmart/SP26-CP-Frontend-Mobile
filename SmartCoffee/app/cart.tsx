@@ -171,6 +171,21 @@ export default function CartPage() {
     }, 2000);
   };
 
+  const convertPackageSize = (size: number | null | undefined, measurement: string | null | undefined) => {
+    if (size == null || !Number.isFinite(size)) return null;
+    const m = (measurement ?? '').trim().toLowerCase();
+    if (m === 'l' || m === 'liter' || m === 'litre') {
+      return { value: Math.round(size * 1000), unit: 'ml' };
+    }
+    if (m === 'kg' || m === 'kilogram' || m === 'kilograms') {
+      return { value: Math.round(size * 1000), unit: 'g' };
+    }
+    if (m === 'ml' || m === 'milliliter') {
+      return { value: Math.round(size), unit: 'ml' };
+    }
+    return { value: Math.round(size), unit: 'g' };
+  };
+
   const handlePurchase = async () => {
     if (selectedItems.length === 0) {
       Alert.alert('Purchase', 'Please select at least one item.');
@@ -345,7 +360,12 @@ export default function CartPage() {
                                       <Text style={styles.itemName}>{item.name}</Text>
                                       <Text style={styles.itemDesc}>{item.category}</Text>
                                       <Text style={styles.itemPrice}>
-                                        {formatVnd(item.unitPrice)} VND/{item.measurement}
+                                        {formatVnd(item.unitPrice)} VND/
+                                        {(() => {
+                                          const pkg = convertPackageSize(item.packageSize, item.measurement);
+                                          if (pkg) return `(${formatVnd(pkg.value)} ${pkg.unit})`;
+                                          return item.measurement ? item.measurement : 'unit';
+                                        })()}
                                       </Text>
                                       <View style={styles.qtyRow}>
                                         <TouchableOpacity
