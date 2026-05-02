@@ -1000,6 +1000,12 @@ export default function ProfileScreen() {
     return normalized;
   };
 
+  const getTransactionStatusValue = (tx?: any) =>
+    tx?.status ?? tx?.transactionStatus ?? tx?.paymentStatus ?? tx?.state ?? null;
+
+  const getTransactionMethodValue = (tx?: any) =>
+    tx?.paymentMethod ?? tx?.method ?? tx?.paymentType ?? tx?.type ?? null;
+
   const getTransactionStatusDisplay = (status?: string) => {
     const normalized = String(status ?? '').trim();
     if (!normalized) return '-';
@@ -1779,21 +1785,6 @@ export default function ProfileScreen() {
               >
                 {formatPrice(selectedTransaction?.totalPrice)}
               </Text>
-            </View>
-            <View style={styles.txDetailRow}>
-              <Text style={styles.txDetailLabel}>Status</Text>
-              <Text
-                style={[
-                  styles.txDetailValue,
-                  { color: getTransactionStatusDetailColor(selectedTransaction?.status) },
-                ]}
-              >
-                {getTransactionStatusDisplay(selectedTransaction?.status)}
-              </Text>
-            </View>
-            <View style={styles.txDetailRow}>
-              <Text style={styles.txDetailLabel}>Method</Text>
-              <Text style={styles.txDetailValue}>{selectedTransaction?.paymentMethod || '-'}</Text>
             </View>
             <View style={styles.txDetailNotesWrap}>
               <Text style={styles.txDetailLabel}>Notes</Text>

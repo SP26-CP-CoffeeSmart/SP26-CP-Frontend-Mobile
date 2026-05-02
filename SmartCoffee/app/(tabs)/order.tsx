@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -108,7 +108,10 @@ export default function OrderScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<OrderResponse | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+  const [selectedOrderDetail, setSelectedOrderDetail] = useState<OrderResponse | null>(null);
+  const [orderDetailLoading, setOrderDetailLoading] = useState(false);
+  const [orderDetailError, setOrderDetailError] = useState<string | null>(null);
   const [feedbackOrder, setFeedbackOrder] = useState<OrderResponse | null>(null);
   const [selectedFeedbackDetailId, setSelectedFeedbackDetailId] = useState<number | null>(null);
   const [feedbackForm, setFeedbackForm] = useState<FeedbackFormState>({
@@ -306,6 +309,47 @@ export default function OrderScreen() {
     loadOrders({ isRefresh: true, page: 1, append: false, statusKey: selectedStatus });
   }, [loadOrders, selectedStatus]);
 
+  const handleCloseOrderDetail = useCallback(() => {
+    setSelectedOrderId(null);
+    setSelectedOrderDetail(null);
+    setOrderDetailError(null);
+    loadOrders({ page: 1, append: false, statusKey: selectedStatus });
+  }, [loadOrders, selectedStatus]);
+
+  const loadOrderDetail = useCallback(async (orderId: number) => {
+    setOrderDetailLoading(true);
+    setOrderDetailError(null);
+    try {
+      const response = await authorizedFetch(API_ENDPOINTS.order.byId(orderId), {
+        headers: {
+          Accept: '*/*',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as OrderResponse;
+      setSelectedOrderDetail(data ?? null);
+    } catch (err) {
+      setSelectedOrderDetail(null);
+      setOrderDetailError('Unable to load order detail.');
+    } finally {
+      setOrderDetailLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedOrderId == null) {
+      setSelectedOrderDetail(null);
+      setOrderDetailError(null);
+      return;
+    }
+
+    loadOrderDetail(selectedOrderId);
+  }, [loadOrderDetail, selectedOrderId]);
+
   const handleCancelOrder = (orderId: number) => {
     Alert.alert(
       'Cancel Order',
@@ -335,7 +379,8 @@ export default function OrderScreen() {
               }
 
               Toast.show({ type: 'success', text1: 'Order cancelled successfully' });
-              setSelectedOrder(null);
+              setSelectedOrderId(null);
+              setSelectedOrderDetail(null);
               loadOrders({ page: 1, append: false, statusKey: selectedStatus });
             } catch (err: any) {
               Toast.show({ type: 'error', text1: 'Failed to cancel order' });
@@ -508,7 +553,11 @@ export default function OrderScreen() {
                 key={String(order.orderId ?? Math.random())}
                 style={styles.orderCard}
                 activeOpacity={0.7}
-                onPress={() => setSelectedOrder(order)}
+                onPress={() => {
+                  if (order.orderId) {
+                    setSelectedOrderId(order.orderId);
+                  }
+                }}
               >
                 <View style={styles.orderCardMain}>
                   <Image source={{ uri: fallbackOrderImage }} style={styles.orderImage} />
@@ -527,29 +576,6 @@ export default function OrderScreen() {
                     <Text style={styles.orderPrice}>
                       {formatVnd(order.totalPrice ?? 0)} VND
                     </Text>
-                  </View>
-                  <View style={styles.actionButtons}>
-                    {String(order.status ?? '').toLowerCase() === 'pending' && (
-                      <TouchableOpacity
-                        style={styles.cancelButton}
-                        activeOpacity={0.7}
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          if (order.orderId) handleCancelOrder(order.orderId);
-                        }}
-                      >
-                        <Text style={styles.cancelText}>Cancel</Text>
-                      </TouchableOpacity>
-                    )}
-                    {String(order.status ?? '').toLowerCase() === 'completed' && (
-                      <TouchableOpacity
-                        style={[styles.cancelButton, { borderColor: COLORS.text, backgroundColor: COLORS.text }]}
-                        activeOpacity={0.7}
-                        onPress={(e) => handleReorder(order, e)}
-                      >
-                        <Text style={[styles.cancelText, { color: COLORS.white }]}>Re-Order</Text>
-                      </TouchableOpacity>
-                    )}
                   </View>
                 </View>
 
@@ -606,39 +632,64 @@ export default function OrderScreen() {
 
       {/* Order Detail Modal */}
       <Modal
-        visible={!!selectedOrder}
+        visible={selectedOrderId != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setSelectedOrder(null)}
+        onRequestClose={handleCloseOrderDetail}
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Order #{selectedOrder?.orderId}</Text>
-              <TouchableOpacity onPress={() => setSelectedOrder(null)} style={styles.closeModalBtn}>
+              <Text style={styles.modalTitle}>Order #{selectedOrderDetail?.orderId ?? selectedOrderId}</Text>
+              <TouchableOpacity onPress={handleCloseOrderDetail} style={styles.closeModalBtn}>
                 <Ionicons name="close" size={24} color={COLORS.textSecondary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalBody}>
+            <View style={styles.modalContent}>
+            <ScrollView
+              style={styles.modalBody}
+              contentContainerStyle={styles.modalBodyContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {orderDetailLoading ? (
+                <View style={styles.orderDetailState}>
+                  <ActivityIndicator size="small" color={COLORS.accent} />
+                  <Text style={styles.orderDetailStateText}>Loading order details...</Text>
+                </View>
+              ) : orderDetailError ? (
+                <View style={styles.orderDetailState}>
+                  <Text style={styles.orderDetailStateText}>{orderDetailError}</Text>
+                  {selectedOrderId != null ? (
+                    <TouchableOpacity
+                      style={styles.orderDetailRetry}
+                      onPress={() => loadOrderDetail(selectedOrderId)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.orderDetailRetryText}>Retry</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : null}
+
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Status:</Text>
                 <Text style={[styles.detailValue, { color: COLORS.accent, fontWeight: '700' }]}>
-                  {selectedOrder?.status || 'Pending'}
+                  {selectedOrderDetail?.status || 'Pending'}
                 </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Shipping Fee:</Text>
                 <Text style={styles.detailValue}>
-                  {selectedOrder?.shippingFee
-                    ? `${formatVnd(selectedOrder.shippingFee)} VND`
+                  {selectedOrderDetail?.shippingFee
+                    ? `${formatVnd(selectedOrderDetail.shippingFee)} VND`
                     : '0 VND'}
                 </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Total Price:</Text>
                 <Text style={[styles.detailValue, { color: COLORS.danger, fontWeight: '700' }]}>
-                  {selectedOrder?.totalPrice ? formatVnd(selectedOrder.totalPrice) : 0} VND
+                  {selectedOrderDetail?.totalPrice ? formatVnd(selectedOrderDetail.totalPrice) : 0} VND
                 </Text>
               </View>
 
@@ -653,20 +704,20 @@ export default function OrderScreen() {
                 <View style={[styles.timelineItem, { borderRightWidth: 1, borderColor: COLORS.border }]}>
                   <Text style={styles.timelineLabel}>Ship Date</Text>
                   <Text style={styles.timelineValue}>
-                    {selectedOrder?.shipDate ? new Date(selectedOrder.shipDate).toLocaleDateString() : 'Pending'}
+                    {selectedOrderDetail?.shipDate ? new Date(selectedOrderDetail.shipDate).toLocaleDateString() : 'Pending'}
                   </Text>
                 </View>
                 <View style={[styles.timelineItem, { borderRightWidth: 1, borderColor: COLORS.border }]}>
                   <Text style={styles.timelineLabel}>Receive Date</Text>
                   <Text style={styles.timelineValue}>
-                    {selectedOrder?.receiveDate ? new Date(selectedOrder.receiveDate).toLocaleDateString() : 'Pending'}
+                    {selectedOrderDetail?.receiveDate ? new Date(selectedOrderDetail.receiveDate).toLocaleDateString() : 'Pending'}
                   </Text>
                 </View>
                 <View style={styles.timelineItem}>
                   <Text style={styles.timelineLabel}>Expected</Text>
                   <Text style={styles.timelineValue}>
-                    {selectedOrder?.expectedDeliveryTime
-                      ? new Date(selectedOrder.expectedDeliveryTime).toLocaleDateString()
+                    {selectedOrderDetail?.expectedDeliveryTime
+                      ? new Date(selectedOrderDetail.expectedDeliveryTime).toLocaleDateString()
                       : 'Pending'}
                   </Text>
                 </View>
@@ -679,7 +730,7 @@ export default function OrderScreen() {
                   </View>
                   <View style={styles.addressTextWrap}>
                     <Text style={styles.addressLabel}>Ship From</Text>
-                    <Text style={styles.addressValue}>{selectedOrder?.shipAddress || 'Pending update'}</Text>
+                    <Text style={styles.addressValue}>{selectedOrderDetail?.shipAddress || 'Pending update'}</Text>
                   </View>
                 </View>
 
@@ -691,7 +742,7 @@ export default function OrderScreen() {
                   </View>
                   <View style={styles.addressTextWrap}>
                     <Text style={styles.addressLabel}>Deliver To</Text>
-                    <Text style={styles.addressValue}>{selectedOrder?.receiveAddress || 'Pending update'}</Text>
+                    <Text style={styles.addressValue}>{selectedOrderDetail?.receiveAddress || 'Pending update'}</Text>
                   </View>
                 </View>
               </View>
@@ -701,7 +752,7 @@ export default function OrderScreen() {
               <Text style={styles.sectionHeading}>Items</Text>
 
               <View style={styles.receiptBox}>
-                {selectedOrder?.orderDetails?.map((item, idx) => (
+                {selectedOrderDetail?.orderDetails?.map((item, idx) => (
                   <View key={idx} style={styles.receiptItemRow}>
                     <View style={styles.receiptItemQtyWrap}>
                       <Text style={styles.receiptItemQty}>{item.quantity || 1}x</Text>
@@ -715,14 +766,15 @@ export default function OrderScreen() {
                   </View>
                 ))}
               </View>
-
-              {String(selectedOrder?.status ?? '').toLowerCase() === 'pending' && (
+            </ScrollView>
+            <View style={styles.modalFooter}>
+              {String(selectedOrderDetail?.status ?? '').toLowerCase() === 'pending' && (
                 <TouchableOpacity
                   style={styles.modalCancelButton}
                   activeOpacity={0.7}
                   onPress={() => {
-                    if (selectedOrder?.orderId) {
-                      handleCancelOrder(selectedOrder.orderId);
+                    if (selectedOrderDetail?.orderId) {
+                      handleCancelOrder(selectedOrderDetail.orderId);
                     }
                   }}
                 >
@@ -730,18 +782,19 @@ export default function OrderScreen() {
                 </TouchableOpacity>
               )}
 
-              {String(selectedOrder?.status ?? '').toLowerCase() === 'completed' && (
+              {String(selectedOrderDetail?.status ?? '').toLowerCase() === 'completed' && (
                 <TouchableOpacity
                   style={[styles.modalCancelButton, { backgroundColor: COLORS.text }]}
                   activeOpacity={0.7}
                   onPress={() => {
-                    if (selectedOrder) handleReorder(selectedOrder);
+                    if (selectedOrderDetail) handleReorder(selectedOrderDetail);
                   }}
                 >
                   <Text style={styles.modalCancelText}>Re-Order</Text>
                 </TouchableOpacity>
               )}
-            </ScrollView>
+            </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1107,6 +1160,7 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '85%',
+    height: '80%',
     maxHeight: '80%',
     backgroundColor: COLORS.white,
     borderRadius: 16,
@@ -1134,7 +1188,41 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   modalBody: {
+    flex: 1,
     padding: 16,
+  },
+  modalBodyContent: {
+    paddingBottom: 8,
+  },
+  modalContent: {
+    flex: 1,
+  },
+  orderDetailState: {
+    alignItems: 'center',
+    paddingBottom: 8,
+    gap: 8,
+  },
+  orderDetailStateText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  orderDetailRetry: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  orderDetailRetryText: {
+    fontSize: 12,
+    color: COLORS.text,
+    fontWeight: '600',
+  },
+  modalFooter: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    paddingTop: 8,
+    backgroundColor: COLORS.white,
   },
   detailRow: {
     flexDirection: 'row',

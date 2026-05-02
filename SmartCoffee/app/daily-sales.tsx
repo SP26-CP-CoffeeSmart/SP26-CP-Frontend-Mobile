@@ -147,6 +147,8 @@ export default function DailySalesScreen() {
     const [salesData, setSalesData] = useState<Map<number, DailySalesItem>>(new Map());
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
+    const [showErrorModal, setShowErrorModal] = useState(false);
+    const [errorModalMessage, setErrorModalMessage] = useState('');
 
     const getTodayEnd = () => {
         const today = new Date();
@@ -561,7 +563,41 @@ export default function DailySalesScreen() {
             console.log('[Daily Sales] Payload sent:', { menuItemList });
 
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                let responseBody = '';
+                try {
+                    responseBody = await response.text();
+                } catch (readError) {
+                    console.log('[Daily Sales] Failed to read error response:', readError);
+                }
+                console.log('[Daily Sales] Save response status:', response.status);
+                console.log('[Daily Sales] Save response body:', responseBody);
+                let backendMessage = '';
+                if (responseBody) {
+                    try {
+                        const parsed = JSON.parse(responseBody);
+                        if (typeof parsed === 'string') {
+                            backendMessage = parsed;
+                        } else if (Array.isArray(parsed)) {
+                            backendMessage = parsed.filter(Boolean).join(', ');
+                        } else {
+                            backendMessage =
+                                parsed?.message ||
+                                parsed?.error ||
+                                parsed?.detail ||
+                                parsed?.title ||
+                                '';
+                        }
+                    } catch {
+                        backendMessage = responseBody;
+                    }
+                }
+
+                const fallbackMessage = responseBody.trim() || backendMessage.trim();
+                setErrorModalMessage(
+                    fallbackMessage || `HTTP error! status: ${response.status}`
+                );
+                setShowErrorModal(true);
+                return;
             }
 
             // Clear data and show success
@@ -574,12 +610,9 @@ export default function DailySalesScreen() {
             });
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Failed to save records';
-            Toast.show({
-                type: 'error',
-                text1: 'Save failed',
-                text2: errorMessage,
-            });
-            console.error('[Daily Sales] Save error:', errorMessage);
+            setErrorModalMessage(errorMessage);
+            setShowErrorModal(true);
+            console.log('[Daily Sales] Save error:', errorMessage);
         }
     };
 
@@ -762,6 +795,29 @@ export default function DailySalesScreen() {
 
                 {/* Date Time Picker Modal - Outside SafeAreaView */}
             </SafeAreaView>
+
+            <Modal
+                transparent
+                visible={showErrorModal}
+                animationType="fade"
+                onRequestClose={() => setShowErrorModal(false)}
+            >
+                <View style={styles.errorModalBackdrop}>
+                    <View style={styles.errorModalCard}>
+                        <View style={styles.errorModalIconWrap}>
+                            <Ionicons name="alert-circle-outline" size={28} color={COLORS.accent} />
+                        </View>
+                        <Text style={styles.errorModalTitle}>Save failed</Text>
+                        <Text style={styles.errorModalMessage}>{errorModalMessage}</Text>
+                        <TouchableOpacity
+                            style={styles.errorModalButton}
+                            onPress={() => setShowErrorModal(false)}
+                        >
+                            <Text style={styles.errorModalButtonText}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             {showDatePicker && (
                 <Modal
@@ -1147,6 +1203,57 @@ const styles = StyleSheet.create({
     datePickerConfirmBtn: {
         fontSize: 16,
         color: DAILY_SALES_BROWN,
+        fontWeight: '600',
+    },
+    errorModalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    errorModalCard: {
+        width: '100%',
+        backgroundColor: COLORS.white,
+        borderRadius: 16,
+        paddingHorizontal: 18,
+        paddingVertical: 20,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+    },
+    errorModalIconWrap: {
+        width: 52,
+        height: 52,
+        borderRadius: 26,
+        backgroundColor: '#FFF3E6',
+        alignItems: 'center',
+        justifyContent: 'center',
+        alignSelf: 'center',
+        marginBottom: 12,
+    },
+    errorModalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.text,
+        textAlign: 'center',
+        marginBottom: 8,
+    },
+    errorModalMessage: {
+        fontSize: 13,
+        color: COLORS.textSecondary,
+        textAlign: 'center',
+        lineHeight: 18,
+    },
+    errorModalButton: {
+        marginTop: 16,
+        backgroundColor: DAILY_SALES_BROWN,
+        borderRadius: 10,
+        paddingVertical: 10,
+        alignItems: 'center',
+    },
+    errorModalButtonText: {
+        color: COLORS.white,
+        fontSize: 14,
         fontWeight: '600',
     },
 });

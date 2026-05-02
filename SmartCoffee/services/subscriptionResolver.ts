@@ -22,7 +22,7 @@ const toNumber = (value: unknown) => {
   return 0;
 };
 
-const isActiveSubscription = (item: any) => {
+export const isSubscriptionActive = (item: any) => {
   const status = normalizeText(item?.status ?? item?.subscriptionStatus ?? item?.state);
 
   if (typeof item?.isActive === 'boolean') {
@@ -92,7 +92,7 @@ export const resolveCurrentSubscription = (payload: any) => {
   }
 
   const sorted = [...candidates].sort((a, b) => {
-    const activeDiff = Number(isActiveSubscription(b)) - Number(isActiveSubscription(a));
+    const activeDiff = Number(isSubscriptionActive(b)) - Number(isSubscriptionActive(a));
     if (activeDiff !== 0) {
       return activeDiff;
     }

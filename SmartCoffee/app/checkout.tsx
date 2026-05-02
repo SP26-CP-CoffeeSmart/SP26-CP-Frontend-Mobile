@@ -97,6 +97,21 @@ type GhnFeeResponse = {
     service_fee: number;
 };
 
+const convertPackageSize = (size: number | null | undefined, measurement: string | null | undefined) => {
+    if (size == null || !Number.isFinite(size)) return null;
+    const m = (measurement ?? '').trim().toLowerCase();
+    if (m === 'l' || m === 'liter' || m === 'litre') {
+        return { value: Math.round(size * 1000), unit: 'ml' };
+    }
+    if (m === 'kg' || m === 'kilogram' || m === 'kilograms') {
+        return { value: Math.round(size * 1000), unit: 'g' };
+    }
+    if (m === 'ml' || m === 'milliliter') {
+        return { value: Math.round(size), unit: 'ml' };
+    }
+    return { value: Math.round(size), unit: 'g' };
+};
+
 export default function CheckoutPage() {
     const router = useRouter();
     const params = useLocalSearchParams();
@@ -1012,10 +1027,14 @@ export default function CheckoutPage() {
                                 const measurementLabel = String(item.measurement || '').trim();
                                 const hasPackageSize =
                                     typeof item.packageSize === 'number' && item.packageSize > 0;
-                                const packageSizeText = hasPackageSize
-                                    ? `${item.packageSize} ${measurementLabel || 'unit'}`
+                                const baseSize = hasPackageSize ? item.packageSize : 1;
+                                const converted = measurementLabel
+                                    ? convertPackageSize(baseSize, measurementLabel)
+                                    : null;
+                                const packageSizeText = converted
+                                    ? `${converted.value} ${converted.unit}`
                                     : measurementLabel
-                                        ? `1 ${measurementLabel}`
+                                        ? `${baseSize} ${measurementLabel}`
                                         : '';
 
                                 const productSubText = [item.category, packageSizeText]
