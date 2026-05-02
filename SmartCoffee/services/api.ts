@@ -227,6 +227,16 @@ export const API_ENDPOINTS = {
     topUpOrders: () => `${AUTH_BASE_URL}/Wallet/top-up-orders`,
     withdraw: () => `${AUTH_BASE_URL}/Wallet/withdraw`,
     verifyWithdraw: () => `${AUTH_BASE_URL}/Wallet/verify-withdraw`,
+    withdrawalsByWallet: (
+      walletId: number | string,
+      params?: { page?: number; pageSize?: number }
+    ) => {
+      const query = new URLSearchParams();
+      if (params?.page) query.set('page', String(params.page));
+      if (params?.pageSize) query.set('pageSize', String(params.pageSize));
+      const qs = query.toString();
+      return `${AUTH_BASE_URL}/Wallet/withdrawals/by-wallet/${walletId}${qs ? `?${qs}` : ''}`;
+    },
     cancelOrderPayment: (orderCode: number | string) => `${AUTH_BASE_URL}/Wallet/cancel-order-payment?orderCode=${orderCode}`,
   },
   subscription: {

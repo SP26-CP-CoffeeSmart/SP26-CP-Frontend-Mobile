@@ -20,6 +20,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
+import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 const COLORS = {
   bg: '#F4EFE9',
@@ -118,6 +120,12 @@ export default function MenuRecommendationsScreen() {
   const [numberOfOptions, setNumberOfOptions] = useState(1);
   const [menuGroups, setMenuGroups] = useState<MenuGroup[]>([]);
   const [menuGroupInput, setMenuGroupInput] = useState('');
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
+    'The shop does not have an active subscription.'
+  );
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
   const [categories, setCategories] = useState<BeverageCategory[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
@@ -284,6 +292,38 @@ export default function MenuRecommendationsScreen() {
   const handleSubmit = async () => {
     if (submitting) {
       return;
+    }
+
+    if (!coffeeShopId) {
+      setSubscriptionModalMessage('Missing coffee shop information.');
+      setShowSubscriptionModal(true);
+      return;
+    }
+
+    if (!hasActiveSubscription && !checkingSubscription) {
+      try {
+        setCheckingSubscription(true);
+        const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        const data = await response.json();
+        const resolved = resolveCurrentSubscription(data);
+        const active = resolved ? isSubscriptionActive(resolved) : false;
+        setHasActiveSubscription(active);
+
+        if (!active) {
+          setSubscriptionModalMessage('The shop does not have an active subscription.');
+          setShowSubscriptionModal(true);
+          return;
+        }
+      } catch {
+        setSubscriptionModalMessage('Unable to verify subscription status.');
+        setShowSubscriptionModal(true);
+        return;
+      } finally {
+        setCheckingSubscription(false);
+      }
     }
 
     const title = menuTitle.trim();
@@ -786,6 +826,11 @@ export default function MenuRecommendationsScreen() {
           </View>
         </View>
       </Modal>
+      <SubscriptionGateModal
+        visible={showSubscriptionModal}
+        message={subscriptionModalMessage}
+        onClose={() => setShowSubscriptionModal(false)}
+      />
     </SafeAreaView>
   );
 }

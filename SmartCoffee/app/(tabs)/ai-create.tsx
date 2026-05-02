@@ -23,18 +23,16 @@ import { Colors, Fonts } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
-import { resolveCurrentSubscription } from '@/services/subscriptionResolver';
+import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import SubscriptionGateModal from '@/components/subscription-gate-modal';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
-const COFFEE_TYPES = ['Robusta', 'Arabica', 'Blend', 'Cherry', 'Culi'];
+const COFFEE_TYPES = ['Moka', 'Exelsa', 'Culi', 'Liberica', 'Robusta', 'Arabica'];
 const ROAST_LEVELS = ['Light', 'Medium', 'Dark'];
-const GRIND_LEVELS = ['Coarse', 'Fine', 'Espresso'];
-
-const LIQUID_TYPES = ['Water', 'Mineral'];
-const MILK_TYPES = ['Fresh', 'Almond', 'Soy', 'Oat', 'Condensed'];
+const GRIND_LEVELS = ['Coarse', 'Medium', 'Fine', 'Extra Fine'];
 
 const SWEETENERS = ['Sugar', 'Brown-sugar', 'Vanilla-syrup', 'Hazelnut-syrup', 'Caramel-syrup', 'Honey'];
 const TOPPINGS = [
@@ -116,9 +114,6 @@ export default function AiCreateScreen() {
   const [grindLevel, setGrindLevel] = useState('Coarse');
   const [heatLevel] = useState('High');
 
-  const [liquidType, setLiquidType] = useState('Water');
-  const [milkType, setMilkType] = useState('None');
-
   const [sweetener, setSweetener] = useState('Sugar');
   const [topping, setTopping] = useState('Pink-salt');
   const [brewMethod, setBrewMethod] = useState('Espresso');
@@ -126,13 +121,21 @@ export default function AiCreateScreen() {
   const [iceRatio, setIceRatio] = useState('30%');
   const [frothingLevel, setFrothingLevel] = useState('Micro-foam');
   const [difficulty, setDifficulty] = useState('Easy');
-  const [equipment, setEquipment] = useState('Espresso Machine');
+  const [selectedEquipments, setSelectedEquipments] = useState<string[]>(
+    EQUIPMENTS.map((item) => item.label)
+  );
   const [cupType, setCupType] = useState('Plastic');
   const [colorStyle, setColorStyle] = useState('Black');
   const [category, setCategory] = useState('Seasonal');
 
   const [isUnique, setIsUnique] = useState(false);
   const [subscriptionPackageName, setSubscriptionPackageName] = useState<string | null>(null);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
+    'The shop does not have an active subscription.'
+  );
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [showUniqueModal, setShowUniqueModal] = useState(false);
   const [numberOption, setNumberOption] = useState(3);
   const [pricingStrategy, setPricingStrategy] = useState(2);
@@ -261,12 +264,15 @@ export default function AiCreateScreen() {
           resolved?.packageName ??
           resolved?.name ??
           null;
+        const active = resolved ? isSubscriptionActive(resolved) : false;
         if (isMounted) {
           setSubscriptionPackageName(typeof name === 'string' ? name : null);
+          setHasActiveSubscription(active);
         }
       } catch (error) {
         if (isMounted) {
           setSubscriptionPackageName(null);
+          setHasActiveSubscription(false);
         }
       }
     };
@@ -277,6 +283,44 @@ export default function AiCreateScreen() {
       isMounted = false;
     };
   }, [coffeeShopId]);
+
+  const ensureActiveSubscription = useCallback(async () => {
+    if (checkingSubscription) return false;
+    if (!coffeeShopId) {
+      setSubscriptionModalMessage('Missing coffee shop information.');
+      setShowSubscriptionModal(true);
+      return false;
+    }
+
+    if (hasActiveSubscription === true) {
+      return true;
+    }
+
+    try {
+      setCheckingSubscription(true);
+      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      const resolved = resolveCurrentSubscription(data);
+      const active = resolved ? isSubscriptionActive(resolved) : false;
+      setHasActiveSubscription(active);
+
+      if (!active) {
+        setSubscriptionModalMessage('The shop does not have an active subscription.');
+        setShowSubscriptionModal(true);
+      }
+
+      return active;
+    } catch {
+      setSubscriptionModalMessage('Unable to verify subscription status.');
+      setShowSubscriptionModal(true);
+      return false;
+    } finally {
+      setCheckingSubscription(false);
+    }
+  }, [checkingSubscription, coffeeShopId, hasActiveSubscription]);
 
   useFocusEffect(
     useCallback(() => {
@@ -306,6 +350,10 @@ export default function AiCreateScreen() {
 
   const handleSubmit = async () => {
     if (isLoading) return;
+    const canProceed = await ensureActiveSubscription();
+    if (!canProceed) {
+      return;
+    }
     if (!selectedBeverageId) {
       setBeverageSelectionError('Please choose a beverage.');
       return;
@@ -331,18 +379,16 @@ export default function AiCreateScreen() {
         selectedHeatLevelId: heatLevel,
       },
       ingredients: {
-        selectedLiquidId: liquidType,
-        selectedMilkId: milkType,
         selectedSweetenerId: sweetener,
         selectedToppingId: topping,
       },
       brewing: {
-        selectedMethodId: brewMethod,
+        selectedMethodId: '',
         brewingTimeMinutes: brewTime,
         selectedIceRatio: Number.parseInt(iceRatio.replace('%', ''), 10) || 0,
         selectedFrothingId: frothingLevel,
         selectedDifficultyId: difficulty,
-        selectedEquipmentId: equipment,
+        selectedEquipmentId: selectedEquipments.length > 0 ? selectedEquipments.join(', ') : '',
       },
       presentation: {
         selectedCupTypeId: cupType,
@@ -637,51 +683,6 @@ export default function AiCreateScreen() {
 
               <View style={styles.sectionSpacing} />
 
-              <ThemedText style={styles.subSectionTitle}>Liquid</ThemedText>
-              <ThemedText style={styles.helperText}>Decide what liquid to add to your coffee</ThemedText>
-
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.groupTitle}>Type</ThemedText>
-                <ThemedText style={styles.groupValue}>{liquidType}</ThemedText>
-              </View>
-              <View style={styles.tags}>
-                {LIQUID_TYPES.map((item) => {
-                  const isSelected = item === liquidType;
-                  return (
-                    <Pressable
-                      key={item}
-                      onPress={() => setLiquidType(item)}
-                      style={[styles.tag, isSelected && styles.tagSelected]}>
-                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                        {item}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.groupTitle}>Milk</ThemedText>
-                <ThemedText style={styles.groupValue}>{milkType}</ThemedText>
-              </View>
-              <View style={styles.tags}>
-                {['None', ...MILK_TYPES].map((item) => {
-                  const isSelected = item === milkType;
-                  return (
-                    <Pressable
-                      key={item}
-                      onPress={() => setMilkType(item)}
-                      style={[styles.tag, isSelected && styles.tagSelected]}>
-                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                        {item}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <View style={styles.sectionSpacing} />
-
               <ThemedText style={styles.subSectionTitle}>Sweetener</ThemedText>
               <ThemedText style={styles.helperText}>How do you want your coffee sweet?</ThemedText>
               <View style={styles.groupHeader}>
@@ -729,28 +730,6 @@ export default function AiCreateScreen() {
               </View>
 
               <View style={styles.sectionSpacing} />
-
-              <ThemedText style={styles.subSectionTitle}>Brewing Method</ThemedText>
-              <ThemedText style={styles.helperText}>Choose method to make coffee</ThemedText>
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.groupTitle}></ThemedText>
-                <ThemedText style={styles.groupValue}>{brewMethod}</ThemedText>
-              </View>
-              <View style={styles.tags}>
-                {BREW_METHODS.map((item) => {
-                  const isSelected = item === brewMethod;
-                  return (
-                    <Pressable
-                      key={item}
-                      onPress={() => setBrewMethod(item)}
-                      style={[styles.tag, isSelected && styles.tagSelected]}>
-                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                        {item}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
-              </View>
 
               <View style={styles.groupHeader}>
                 <ThemedText style={styles.groupTitle}>Time</ThemedText>
@@ -842,15 +821,23 @@ export default function AiCreateScreen() {
 
               <View style={styles.groupHeader}>
                 <ThemedText style={styles.subSectionTitle}>Special Equipment</ThemedText>
-                <ThemedText style={styles.groupValue}>{equipment}</ThemedText>
+                <ThemedText style={styles.groupValue} numberOfLines={1}>
+                  {selectedEquipments.length > 0 ? selectedEquipments.join(', ') : 'None'}
+                </ThemedText>
               </View>
               <View style={styles.cardsRow}>
                 {EQUIPMENTS.map((item) => {
-                  const isSelected = item.label === equipment;
+                  const isSelected = selectedEquipments.includes(item.label);
                   return (
                     <Pressable
                       key={item.label}
-                      onPress={() => setEquipment(item.label)}
+                      onPress={() => {
+                        setSelectedEquipments((prev) =>
+                          prev.includes(item.label)
+                            ? prev.filter((value) => value !== item.label)
+                            : [...prev, item.label]
+                        );
+                      }}
                       style={[styles.iconCard, isSelected && styles.iconCardSelected]}>
                       <MaterialIcons name={item.icon as any} size={26} color={isSelected ? '#6B3E1F' : '#B69A86'} />
                       <ThemedText style={[styles.iconCardText, isSelected && styles.iconCardTextSelected]}>
@@ -1106,6 +1093,11 @@ export default function AiCreateScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+      <SubscriptionGateModal
+        visible={showSubscriptionModal}
+        message={subscriptionModalMessage}
+        onClose={() => setShowSubscriptionModal(false)}
+      />
     </View>
   );
 }
@@ -1480,8 +1472,9 @@ const styles = StyleSheet.create({
   groupHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 6,
+    gap: 8,
   },
   groupTitle: {
     fontSize: 12,
@@ -1490,6 +1483,9 @@ const styles = StyleSheet.create({
   groupValue: {
     fontSize: 12,
     color: '#B4632D',
+    flexShrink: 1,
+    maxWidth: '58%',
+    textAlign: 'right',
   },
   tag: {
     paddingHorizontal: 10,

@@ -23,6 +23,8 @@ import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS, AUTH_BASE_URL } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useSuggestions, SuggestionItem } from '@/context/suggestion-context';
+import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -111,6 +113,12 @@ export default function ProductPage() {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+  const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
+    'The shop does not have an active subscription.'
+  );
+  const [checkingSubscription, setCheckingSubscription] = useState(false);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
   const PAGE_SIZE = 10;
   const MAX_FORECAST_DAYS = 90;
   const MIN_RANGE_DAYS = 3;
@@ -437,8 +445,50 @@ export default function ProductPage() {
     }
   };
 
-  const startAiSuggestions = () => {
+  const ensureActiveSubscription = async () => {
+    if (!coffeeShopId) {
+      setSubscriptionModalMessage('Missing coffee shop information.');
+      setShowSubscriptionModal(true);
+      return false;
+    }
+
+    if (hasActiveSubscription === true) {
+      return true;
+    }
+
+    if (checkingSubscription) return false;
+
+    try {
+      setCheckingSubscription(true);
+      const response = await authorizedFetch(API_ENDPOINTS.subscription.byShop(coffeeShopId));
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.status}`);
+      }
+      const data = await response.json();
+      const resolved = resolveCurrentSubscription(data);
+      const active = resolved ? isSubscriptionActive(resolved) : false;
+      setHasActiveSubscription(active);
+      if (!active) {
+        setSubscriptionModalMessage('The shop does not have an active subscription.');
+        setShowSubscriptionModal(true);
+      }
+      return active;
+    } catch {
+      setSubscriptionModalMessage('Unable to verify subscription status.');
+      setShowSubscriptionModal(true);
+      return false;
+    } finally {
+      setCheckingSubscription(false);
+    }
+  };
+
+  const startAiSuggestions = async () => {
     if (suggestionSubmitting) return;
+
+    const hasSubscription = await ensureActiveSubscription();
+    if (!hasSubscription) {
+      return;
+    }
 
     const validation = validateSuggestionInputs();
     if (!validation.valid) {
@@ -728,6 +778,11 @@ export default function ProductPage() {
                 <View style={styles.suggestionModalHeaderRow}>
                   <View>
                     <Text style={styles.suggestionModalTitle}>AI Product Suggestion</Text>
+                <SubscriptionGateModal
+                  visible={showSubscriptionModal}
+                  message={subscriptionModalMessage}
+                  onClose={() => setShowSubscriptionModal(false)}
+                />
                     <Text style={styles.suggestionModalSubtitle}>
                       Enter your sales forecast so AI can recommend supplier products.
                     </Text>

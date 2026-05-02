@@ -241,6 +241,14 @@ export default function WalletManagementScreen() {
                     <Ionicons name="arrow-back" size={24} color="#333" />
                   </TouchableOpacity>
                 </View>
+                <TouchableOpacity
+                  style={styles.historyShortcut}
+                  onPress={() => router.push('/wallet-withdraw-history')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="time-outline" size={20} color="#A36D2D" />
+                  <Text style={styles.historyShortcutText}>Withdraw history</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Main Card */}
@@ -505,6 +513,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  historyShortcut: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  historyShortcutText: {
+    marginTop: 2,
+    fontSize: 11,
+    color: '#8A6A3B',
+    fontWeight: '600',
   },
   headerTitle: {
     fontSize: 18,
