@@ -169,10 +169,11 @@ export default function InventoryHistoryScreen() {
         const raw = String(value).trim();
         if (!raw) return null;
 
-        // Backend sometimes returns ISO-like strings without timezone.
-        // Treat those values as UTC to avoid shifting inventory history by -7 hours.
+        // Backend stores timestamps without timezone, so treat them as UTC+7 local clock time.
         const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
-        const normalizedWithZone = HAS_TIMEZONE_SUFFIX_REGEX.test(normalized) ? normalized : `${normalized}Z`;
+        const normalizedWithZone = HAS_TIMEZONE_SUFFIX_REGEX.test(normalized)
+            ? normalized
+            : `${normalized}+07:00`;
         const parsed = new Date(normalizedWithZone);
         return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
