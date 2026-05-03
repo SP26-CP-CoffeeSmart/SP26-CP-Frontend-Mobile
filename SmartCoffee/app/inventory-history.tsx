@@ -100,6 +100,23 @@ LocaleConfig.locales.en = {
 };
 LocaleConfig.defaultLocale = 'en';
 
+const INVENTORY_HISTORY_TIME_ZONE = 'Asia/Bangkok';
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const HAS_TIMEZONE_SUFFIX_REGEX = /(Z|[+-]\d{2}:\d{2})$/i;
+
+const getDateKeyInTimeZone = (value: Date) => {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: INVENTORY_HISTORY_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(value);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    return `${year}-${month}-${day}`;
+};
+
 const getTypeConfig = (type: HistoryType) => {
     if (type === 'import') {
         return {
@@ -149,28 +166,37 @@ export default function InventoryHistoryScreen() {
 
     const parseDate = (value?: string | null) => {
         if (!value) return null;
-        const parsed = new Date(value);
+        const raw = String(value).trim();
+        if (!raw) return null;
+
+        // Backend sometimes returns ISO-like strings without timezone.
+        // Treat those values as UTC to avoid shifting inventory history by -7 hours.
+        const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+        const normalizedWithZone = HAS_TIMEZONE_SUFFIX_REGEX.test(normalized) ? normalized : `${normalized}Z`;
+        const parsed = new Date(normalizedWithZone);
         return Number.isNaN(parsed.getTime()) ? null : parsed;
     };
 
     const formatTime = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return '--:--';
-        return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        return parsed.toLocaleTimeString('en-US', {
+            timeZone: INVENTORY_HISTORY_TIME_ZONE,
+            hour: '2-digit',
+            minute: '2-digit',
+        });
     };
 
     const formatDateLabel = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown date';
-        const today = new Date();
-        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-        const startOfYesterday = new Date(startOfToday);
-        startOfYesterday.setDate(startOfToday.getDate() - 1);
-
-        const startOfDate = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
-        if (startOfDate.getTime() === startOfToday.getTime()) return 'Today';
-        if (startOfDate.getTime() === startOfYesterday.getTime()) return 'Yesterday';
+        const todayKey = getDateKeyInTimeZone(new Date());
+        const yesterdayKey = getDateKeyInTimeZone(new Date(Date.now() - ONE_DAY_MS));
+        const parsedKey = getDateKeyInTimeZone(parsed);
+        if (parsedKey === todayKey) return 'Today';
+        if (parsedKey === yesterdayKey) return 'Yesterday';
         return parsed.toLocaleDateString('en-US', {
+            timeZone: INVENTORY_HISTORY_TIME_ZONE,
             day: '2-digit',
             month: 'long',
             year: 'numeric',
@@ -181,6 +207,7 @@ export default function InventoryHistoryScreen() {
         const parsed = parseDate(value);
         if (!parsed) return 'Unknown time';
         return parsed.toLocaleString('en-US', {
+            timeZone: INVENTORY_HISTORY_TIME_ZONE,
             day: '2-digit',
             month: 'long',
             year: 'numeric',
@@ -303,12 +330,7 @@ export default function InventoryHistoryScreen() {
     const isToday = (value?: string | null) => {
         const parsed = parseDate(value);
         if (!parsed) return false;
-        const today = new Date();
-        return (
-            parsed.getFullYear() === today.getFullYear() &&
-            parsed.getMonth() === today.getMonth() &&
-            parsed.getDate() === today.getDate()
-        );
+        return getDateKeyInTimeZone(parsed) === getDateKeyInTimeZone(new Date());
     };
 
     const loadInventoryLookup = async () => {
