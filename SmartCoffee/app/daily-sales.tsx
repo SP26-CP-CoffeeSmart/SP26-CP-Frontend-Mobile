@@ -39,6 +39,28 @@ const COLORS = {
 const DAILY_SALES_BROWN = '#6B4423';
 const MAX_CUPS_PER_SIZE = 1000;
 const NAME_WRAP_WIDTH = Math.floor(Dimensions.get('window').width * 0.4);
+const UTC_PLUS_7_HOURS = 7;
+
+const toUtcPlus7DateTimeWithoutOffset = (value: Date) => {
+    // Convert absolute timestamp to UTC+7 wall-clock time.
+    const utcPlus7 = new Date(value.getTime() + UTC_PLUS_7_HOURS * 60 * 60 * 1000);
+
+    const year = utcPlus7.getUTCFullYear();
+    const month = String(utcPlus7.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(utcPlus7.getUTCDate()).padStart(2, '0');
+    const hours = String(utcPlus7.getUTCHours()).padStart(2, '0');
+    const minutes = String(utcPlus7.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(utcPlus7.getUTCSeconds()).padStart(2, '0');
+    const milliseconds = String(utcPlus7.getUTCMilliseconds()).padStart(3, '0');
+
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+};
+
+const formatSaleDateForUtcPlus7 = (selectedDate: Date, submittedAt: Date = new Date()) => {
+    const datePart = toUtcPlus7DateTimeWithoutOffset(selectedDate).split('T')[0];
+    const timePart = toUtcPlus7DateTimeWithoutOffset(submittedAt).split('T')[1] ?? '00:00:00.000';
+    return `${datePart}T${timePart}`;
+};
 
 interface MenuItem {
     menuItemId: number;
@@ -572,9 +594,12 @@ export default function DailySalesScreen() {
                 saleDate: string;
                 totalCups: number;
                 beverageSizeId: number | undefined;
+                createdAt: string;
             }> = [];
 
-            const isoDate = selectedDate.toISOString();
+            const submittedAt = new Date();
+            const isoDate = formatSaleDateForUtcPlus7(selectedDate, submittedAt);
+            const createdAt = toUtcPlus7DateTimeWithoutOffset(submittedAt);
 
             // For each item in salesData
             salesData.forEach((sale) => {
@@ -594,6 +619,7 @@ export default function DailySalesScreen() {
                             saleDate: isoDate,
                             totalCups: quantity,
                             beverageSizeId: sizeItem.beverageSizeId,
+                            createdAt,
                         });
                     }
                 });

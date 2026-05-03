@@ -30,6 +30,23 @@ const COLORS = {
   warning: '#B91C1C',
 };
 
+const toUtcPlus7LocalDateTimeString = (value: Date = new Date()) => {
+  const utcMs = value.getTime() + value.getTimezoneOffset() * 60 * 1000;
+  // Backend normalizes incoming timestamps to UTC before storing timestamp without timezone.
+  // Shift forward by 14 hours from UTC so persisted value matches UTC+7 clock time.
+  const utcPlus14 = new Date(utcMs + 14 * 60 * 60 * 1000);
+
+  const year = utcPlus14.getUTCFullYear();
+  const month = String(utcPlus14.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(utcPlus14.getUTCDate()).padStart(2, '0');
+  const hours = String(utcPlus14.getUTCHours()).padStart(2, '0');
+  const minutes = String(utcPlus14.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(utcPlus14.getUTCSeconds()).padStart(2, '0');
+  const milliseconds = String(utcPlus14.getUTCMilliseconds()).padStart(3, '0');
+
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+};
+
 type Ingredient = {
   ingredientId: number;
   name: string;
@@ -466,7 +483,7 @@ export default function ExportRequestScreen() {
         body: JSON.stringify({
           coffeeShopId,
           title: submitDraft.noteTitle,
-          createdAt: new Date().toISOString(),
+          createdAt: toUtcPlus7LocalDateTimeString(),
         }),
       });
 
