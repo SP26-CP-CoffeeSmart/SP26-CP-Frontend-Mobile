@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     StyleSheet,
     Text,
@@ -12,6 +12,7 @@ import {
     FlatList,
     Platform,
     Modal,
+    Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +37,8 @@ const COLORS = {
 
 // Match the deep brown used in menu-staff dailySalesCard (#6B4423)
 const DAILY_SALES_BROWN = '#6B4423';
+const MAX_CUPS_PER_SIZE = 1000;
+const NAME_WRAP_WIDTH = Math.floor(Dimensions.get('window').width * 0.4);
 
 interface MenuItem {
     menuItemId: number;
@@ -149,6 +152,7 @@ export default function DailySalesScreen() {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showErrorModal, setShowErrorModal] = useState(false);
     const [errorModalMessage, setErrorModalMessage] = useState('');
+    const lastQuantityValidationToastAtRef = useRef(0);
 
     const getTodayEnd = () => {
         const today = new Date();
@@ -301,7 +305,7 @@ export default function DailySalesScreen() {
             current.sizes[sizeName] = 0;
         }
 
-        current.sizes[sizeName] = Math.max(0, quantity);
+        current.sizes[sizeName] = Math.min(MAX_CUPS_PER_SIZE, Math.max(0, quantity));
         current.total = Object.values(current.sizes).reduce(
             (sum, val) => sum + (typeof val === 'number' ? val : 0),
             0
@@ -314,6 +318,48 @@ export default function DailySalesScreen() {
             newMap.set(key, current);
         }
         setSalesData(newMap);
+    };
+
+    const handleQuantityInputChange = (
+        menuItemId: number,
+        sizeName: string,
+        rawValue: string
+    ) => {
+        const trimmedValue = rawValue.trim();
+
+        if (!trimmedValue) {
+            updateSalesQuantity(menuItemId, sizeName, 0);
+            return;
+        }
+
+        const showValidationToast = (message: string) => {
+            const now = Date.now();
+            // Throttle to avoid spamming the same toast while typing.
+            if (now - lastQuantityValidationToastAtRef.current < 1200) return;
+            lastQuantityValidationToastAtRef.current = now;
+            Toast.show({
+                type: 'error',
+                text1: 'Invalid quantity',
+                text2: message,
+            });
+        };
+
+        if (trimmedValue.includes('-')) {
+            showValidationToast('Quantity cannot be negative.');
+            return;
+        }
+
+        if (!/^\d+$/.test(trimmedValue)) {
+            showValidationToast('Please enter numbers only.');
+            return;
+        }
+
+        const parsed = Number.parseInt(trimmedValue, 10);
+        if (parsed > MAX_CUPS_PER_SIZE) {
+            showValidationToast(`Quantity cannot exceed ${MAX_CUPS_PER_SIZE}.`);
+            return;
+        }
+        updateSalesQuantity(menuItemId, sizeName, Number.isFinite(parsed) ? parsed : 0);
     };
 
     const calculateEstimatedTotals = () => {
@@ -375,7 +421,7 @@ export default function DailySalesScreen() {
                             style={styles.salesItemImage}
                             defaultSource={{ uri: fallbackMenuImage }}
                         />
-                        <Text style={styles.salesItemName} numberOfLines={2}>
+                        <Text style={[styles.salesItemName, { maxWidth: NAME_WRAP_WIDTH }]} numberOfLines={2}>
                             {item.shopRecipe.recipeName}
                         </Text>
                     </View>
@@ -436,15 +482,21 @@ export default function DailySalesScreen() {
                                             color={COLORS.accentDark}
                                         />
                                     </TouchableOpacity>
-                                    <Text
+                                    <TextInput
                                         style={[
-                                            styles.sizeQuantityValue,
+                                            styles.sizeQuantityInputField,
                                             (!size.hasPrice || quantity === 0) &&
                                             styles.sizeQuantityValueMuted,
                                         ]}
-                                    >
-                                        {quantity}
-                                    </Text>
+                                        value={String(quantity)}
+                                        keyboardType="number-pad"
+                                        editable={!isDisabled}
+                                        selectTextOnFocus={!isDisabled}
+                                        maxLength={4}
+                                        onChangeText={(value) =>
+                                            handleQuantityInputChange(item.menuItemId, size.name, value)
+                                        }
+                                    />
                                     <TouchableOpacity
                                         style={[
                                             styles.sizeStepperButton,
@@ -1074,6 +1126,20 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '700',
         color: COLORS.text,
+    },
+    sizeQuantityInputField: {
+        minWidth: 46,
+        height: 36,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        borderRadius: 10,
+        textAlign: 'center',
+        fontSize: 16,
+        fontWeight: '700',
+        color: COLORS.text,
+        backgroundColor: COLORS.white,
+        paddingHorizontal: 6,
+        paddingVertical: 0,
     },
     sizeQuantityValueMuted: {
         color: '#C2BAB2',

@@ -704,7 +704,7 @@ export default function ImportRequestScreen() {
     setOrderDetails(mockDetails);
     setOrderLoaded(true);
     if (!noteTitle.trim()) {
-      setNoteTitle(`Import from order #${orderId.trim()}`);
+      setNoteTitle(`Import materials from order #${orderId.trim()}`);
     }
     Alert.alert('Order loaded', 'Mock import details were generated from the order.');
   };
@@ -735,7 +735,7 @@ export default function ImportRequestScreen() {
     setOrderDetails(mappedDetails);
     setOrderLoaded(true);
     if (!noteTitle.trim()) {
-      setNoteTitle(`Import from order #${order.orderCode}`);
+      setNoteTitle(`Import materials from order #${order.orderCode}`);
     }
   };
 
@@ -984,6 +984,9 @@ export default function ImportRequestScreen() {
   };
 
   const confirmSubmit = async () => {
+    if (isSubmitting) {
+      return;
+    }
     if (!submitDraft) {
       return;
     }
@@ -1063,8 +1066,6 @@ export default function ImportRequestScreen() {
           throw new Error(`Request failed: ${response.status}`);
         }
 
-        const importNoteId = await createImportNote();
-        await createImportDetails(importNoteId, submitDraft.details);
         await loadOrders();
 
         Toast.show({

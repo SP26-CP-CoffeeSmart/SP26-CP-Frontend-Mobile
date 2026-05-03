@@ -46,6 +46,10 @@ interface InventoryPredictResponse {
 
 const DEFAULT_DAYS_ANALYZE = 30;
 const DEFAULT_DAYS_PREDICT = 7;
+const MIN_DAYS_ANALYZE = 1;
+const MIN_DAYS_PREDICT = 7;
+const MAX_DAYS_ANALYZE = 90;
+const MAX_DAYS_PREDICT = 90;
 
 const COLORS = {
   background: '#F7F2EE',
@@ -62,9 +66,9 @@ const COLORS = {
   dangerText: '#991B1B',
 };
 
-const parseNonNegativeNumber = (value: string, fallback: number) => {
+const parsePositiveNumber = (value: string, fallback: number) => {
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed < 1) {
     return fallback;
   }
   return parsed;
@@ -72,7 +76,11 @@ const parseNonNegativeNumber = (value: string, fallback: number) => {
 
 const sanitizeDayInput = (value: string) => value.replace(/[^\d]/g, '');
 
-const getDayInputError = (value: string, fieldLabel: string) => {
+const getDayInputError = (
+  value: string,
+  fieldLabel: string,
+  options?: { minValue?: number; maxValue?: number }
+) => {
   const trimmed = value.trim();
   if (!trimmed) {
     return `${fieldLabel} must be numeric.`;
@@ -83,8 +91,13 @@ const getDayInputError = (value: string, fieldLabel: string) => {
   }
 
   const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return `${fieldLabel} cannot be negative.`;
+  const minValue = options?.minValue ?? 1;
+  if (!Number.isFinite(parsed) || parsed < minValue) {
+    return `${fieldLabel} must be at least ${minValue}.`;
+  }
+
+  if (typeof options?.maxValue === 'number' && parsed > options.maxValue) {
+    return `${fieldLabel} cannot exceed ${options.maxValue} days.`;
   }
 
   return null;
@@ -142,8 +155,8 @@ export default function AIInventoryPredictScreen() {
 
   const requestPayload = useMemo(
     () => ({
-      daysToAnalyze: parseNonNegativeNumber(daysAnalyzeInput, DEFAULT_DAYS_ANALYZE),
-      daysToPredict: parseNonNegativeNumber(daysPredictInput, DEFAULT_DAYS_PREDICT),
+      daysToAnalyze: parsePositiveNumber(daysAnalyzeInput, DEFAULT_DAYS_ANALYZE),
+      daysToPredict: parsePositiveNumber(daysPredictInput, DEFAULT_DAYS_PREDICT),
     }),
     [daysAnalyzeInput, daysPredictInput]
   );
@@ -180,14 +193,33 @@ export default function AIInventoryPredictScreen() {
       }
     }
 
-    const analyzeValidationError = getDayInputError(daysAnalyzeInput, 'Days to Analyze');
-    const predictValidationError = getDayInputError(daysPredictInput, 'Days to Predict');
+    const analyzeValidationError = getDayInputError(daysAnalyzeInput, 'Days to Analyze', {
+      minValue: MIN_DAYS_ANALYZE,
+      maxValue: MAX_DAYS_ANALYZE,
+    });
+    const predictValidationError = getDayInputError(
+      daysPredictInput,
+      'Days to Predict',
+      {
+        minValue: MIN_DAYS_PREDICT,
+        maxValue: MAX_DAYS_PREDICT,
+      }
+    );
 
     setDaysAnalyzeError(analyzeValidationError);
     setDaysPredictError(predictValidationError);
 
     if (analyzeValidationError || predictValidationError) {
       setError(analyzeValidationError || predictValidationError || null);
+      return;
+    }
+
+    const parsedAnalyzeDays = Number.parseInt(daysAnalyzeInput, 10);
+    const parsedPredictDays = Number.parseInt(daysPredictInput, 10);
+    if (parsedPredictDays > parsedAnalyzeDays) {
+      const logicalError = 'Days to Predict cannot be greater than Days to Analyze.';
+      setDaysPredictError(logicalError);
+      setError(logicalError);
       return;
     }
 
@@ -269,7 +301,13 @@ export default function AIInventoryPredictScreen() {
               <TextInput
                 value={daysAnalyzeInput}
                 onChangeText={(value) => {
-                  setDaysAnalyzeInput(sanitizeDayInput(value));
+                  const sanitized = sanitizeDayInput(value);
+                  if (!sanitized) {
+                    setDaysAnalyzeInput('');
+                  } else {
+                    const parsed = Number.parseInt(sanitized, 10);
+                    setDaysAnalyzeInput(String(Math.min(MAX_DAYS_ANALYZE, parsed)));
+                  }
                   setDaysAnalyzeError(null);
                 }}
                 keyboardType="number-pad"
@@ -277,6 +315,7 @@ export default function AIInventoryPredictScreen() {
                 placeholder="30"
                 placeholderTextColor={COLORS.muted}
               />
+              <Text style={styles.helperText}>Range {MIN_DAYS_ANALYZE}-{MAX_DAYS_ANALYZE} days.</Text>
               {daysAnalyzeError ? <Text style={styles.fieldErrorText}>{daysAnalyzeError}</Text> : null}
             </View>
             <View style={styles.inputGroup}>
@@ -284,7 +323,13 @@ export default function AIInventoryPredictScreen() {
               <TextInput
                 value={daysPredictInput}
                 onChangeText={(value) => {
-                  setDaysPredictInput(sanitizeDayInput(value));
+                  const sanitized = sanitizeDayInput(value);
+                  if (!sanitized) {
+                    setDaysPredictInput('');
+                  } else {
+                    const parsed = Number.parseInt(sanitized, 10);
+                    setDaysPredictInput(String(Math.min(MAX_DAYS_PREDICT, parsed)));
+                  }
                   setDaysPredictError(null);
                 }}
                 keyboardType="number-pad"
@@ -292,6 +337,7 @@ export default function AIInventoryPredictScreen() {
                 placeholder="7"
                 placeholderTextColor={COLORS.muted}
               />
+              <Text style={styles.helperText}>Range {MIN_DAYS_PREDICT}-{MAX_DAYS_PREDICT} days.</Text>
               {daysPredictError ? <Text style={styles.fieldErrorText}>{daysPredictError}</Text> : null}
             </View>
           </View>
