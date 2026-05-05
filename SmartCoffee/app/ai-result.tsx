@@ -75,7 +75,6 @@ interface NormalizedIngredient {
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -323,6 +322,7 @@ export default function AiResultScreen() {
   let imageGeneration: any = null;
   let uniqueness: UniquenessInfo | null = null;
   let imagePrompt: string | null = null;
+  let initialGeneratedImageUrl: string | null = null;
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
@@ -331,13 +331,17 @@ export default function AiResultScreen() {
       imageGeneration = parsed?.imageGeneration ?? null;
       imagePrompt = parsed?.imagePrompt ?? null;
       uniqueness = parsed?.uniqueness ?? parsed?.recipe?.uniqueness ?? null;
+      initialGeneratedImageUrl = parsed?.generatedImageUrl ?? null;
     } catch {
       recipe = null;
       imageGeneration = null;
       uniqueness = null;
       imagePrompt = null;
+      initialGeneratedImageUrl = null;
     }
   }
+
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(initialGeneratedImageUrl);
 
   const resolveUniquenessStatus = (value: UniquenessInfo | null): boolean | null => {
     if (!value) return null;
@@ -656,10 +660,7 @@ export default function AiResultScreen() {
   };
 
   // Use generated image if available, otherwise use original recipe image (already normalized)
-  const displayImageUrl = useMemo(
-    () => normalizeImageUrl(generatedImageUrl ?? recipe?.image),
-    [generatedImageUrl, recipe?.image]
-  );
+  const displayImageUrl = normalizeImageUrl(generatedImageUrl ?? recipe?.image);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
