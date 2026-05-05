@@ -227,6 +227,11 @@ export default function CreateRecipeScreen() {
   const [ingredientError, setIngredientError] = useState('');
   const [showBeverageDropdown, setShowBeverageDropdown] = useState(false);
   const [showIngredientDropdown, setShowIngredientDropdown] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [showPrimaryStyleDropdown, setShowPrimaryStyleDropdown] = useState(false);
+  const [showDifficultyDropdown, setShowDifficultyDropdown] = useState(false);
+  const [showBrewingMethodDropdown, setShowBrewingMethodDropdown] = useState(false);
+  const [showSecondaryStyleDropdown, setShowSecondaryStyleDropdown] = useState(false);
 
   const [brewIndex, setBrewIndex] = useState(0);
   const [steps, setSteps] = useState<StepItem[]>([
@@ -904,11 +909,40 @@ export default function CreateRecipeScreen() {
               <Text style={styles.sectionLabel}>CATEGORY</Text>
               <Pressable
                 style={styles.selectInput}
-                onPress={() => setCategoryIndex((prev) => (prev + 1) % categories.length)}
+                onPress={() => setShowCategoryDropdown((prev) => !prev)}
               >
                 <Text style={styles.selectText}>{categories[categoryIndex]}</Text>
-                <Ionicons name="chevron-down" size={16} color={palette.muted} />
+                <Ionicons name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
               </Pressable>
+              {showCategoryDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                    {categories.map((item, index) => (
+                      <Pressable
+                        key={item}
+                        style={[
+                          styles.dropdownItem,
+                          index === categoryIndex && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setCategoryIndex(index);
+                          setShowCategoryDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            index === categoryIndex && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
             <View style={styles.flexItem}>
               <Text style={styles.sectionLabel}>BEVERAGE</Text>
@@ -963,21 +997,79 @@ export default function CreateRecipeScreen() {
               <Text style={styles.fieldLabel}>Primary Style</Text>
               <Pressable
                 style={styles.selectInput}
-                onPress={() => setPrimaryIndex((prev) => (prev + 1) % primaryStyles.length)}
+                onPress={() => setShowPrimaryStyleDropdown((prev) => !prev)}
               >
                 <Text style={styles.selectText}>{primaryStyles[primaryIndex]}</Text>
-                <Ionicons name="chevron-down" size={16} color={palette.muted} />
+                <Ionicons name={showPrimaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
               </Pressable>
+              {showPrimaryStyleDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                    {primaryStyles.map((item, index) => (
+                      <Pressable
+                        key={item}
+                        style={[
+                          styles.dropdownItem,
+                          index === primaryIndex && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setPrimaryIndex(index);
+                          setShowPrimaryStyleDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            index === primaryIndex && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
             <View style={styles.flexItem}>
               <Text style={styles.fieldLabel}>Secondary Style</Text>
               <Pressable
                 style={styles.selectInput}
-                onPress={() => setSecondaryIndex((prev) => (prev + 1) % secondaryStyles.length)}
+                onPress={() => setShowSecondaryStyleDropdown((prev) => !prev)}
               >
                 <Text style={styles.selectText}>{secondaryStyles[secondaryIndex]}</Text>
-                <Ionicons name="chevron-down" size={16} color={palette.muted} />
+                <Ionicons name={showSecondaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
               </Pressable>
+              {showSecondaryStyleDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                    {secondaryStyles.map((item, index) => (
+                      <Pressable
+                        key={item}
+                        style={[
+                          styles.dropdownItem,
+                          index === secondaryIndex && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setSecondaryIndex(index);
+                          setShowSecondaryStyleDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            index === secondaryIndex && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
           </View>
 
@@ -1126,11 +1218,40 @@ export default function CreateRecipeScreen() {
               <Text style={styles.sectionLabel}>DIFFICULTY</Text>
               <Pressable
                 style={styles.selectInput}
-                onPress={() => setDifficultyIndex((prev) => (prev + 1) % difficulties.length)}
+                onPress={() => setShowDifficultyDropdown((prev) => !prev)}
               >
                 <Text style={styles.selectText}>{difficulties[difficultyIndex]}</Text>
-                <Ionicons name="chevron-down" size={16} color={palette.muted} />
+                <Ionicons name={showDifficultyDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
               </Pressable>
+              {showDifficultyDropdown ? (
+                <View style={styles.dropdownCard}>
+                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                    {difficulties.map((item, index) => (
+                      <Pressable
+                        key={item}
+                        style={[
+                          styles.dropdownItem,
+                          index === difficultyIndex && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setDifficultyIndex(index);
+                          setShowDifficultyDropdown(false);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemText,
+                            index === difficultyIndex && styles.dropdownItemTextSelected,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
             </View>
             <View style={styles.flexItem}>
               <Text style={styles.sectionLabel}>PREP TIME (MIN)</Text>
@@ -1355,11 +1476,40 @@ export default function CreateRecipeScreen() {
           <Text style={styles.sectionLabel}>BREWING METHOD</Text>
           <Pressable
             style={styles.selectInput}
-            onPress={() => setBrewIndex((prev) => (prev + 1) % brewingMethods.length)}
+            onPress={() => setShowBrewingMethodDropdown((prev) => !prev)}
           >
             <Text style={styles.selectText}>{brewingMethods[brewIndex]}</Text>
-            <Ionicons name="chevron-down" size={16} color={palette.muted} />
+            <Ionicons name={showBrewingMethodDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
           </Pressable>
+          {showBrewingMethodDropdown ? (
+            <View style={styles.dropdownCard}>
+              <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                {brewingMethods.map((item, index) => (
+                  <Pressable
+                    key={item}
+                    style={[
+                      styles.dropdownItem,
+                      index === brewIndex && styles.dropdownItemSelected,
+                    ]}
+                    onPress={() => {
+                      setBrewIndex(index);
+                      setShowBrewingMethodDropdown(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownItemText,
+                        index === brewIndex && styles.dropdownItemTextSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {item}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
 
           <Text style={styles.sectionLabel}>STEPS</Text>
           {steps.map((step, index) => (

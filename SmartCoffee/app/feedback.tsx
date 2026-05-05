@@ -508,10 +508,11 @@ export default function FeedbackScreen() {
             multiline
             numberOfLines={5}
             value={comment}
-            onChangeText={setComment}
+            onChangeText={(value) => setComment(value.slice(0, 1000))}
             placeholder="Tell us what you liked or what should be improved..."
             placeholderTextColor={COLORS.subtext}
             textAlignVertical="top"
+            maxLength={1000}
           />
         </View>
 

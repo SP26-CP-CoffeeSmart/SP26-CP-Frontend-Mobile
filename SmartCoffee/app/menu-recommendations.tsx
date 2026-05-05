@@ -494,7 +494,8 @@ export default function MenuRecommendationsScreen() {
               placeholder="Eg Coffee Menu #1..."
               placeholderTextColor={COLORS.muted}
               value={menuTitle}
-              onChangeText={setMenuTitle}
+              onChangeText={(value) => setMenuTitle(value.slice(0, 32))}
+              maxLength={32}
             />
           </View>
 
@@ -734,7 +735,8 @@ export default function MenuRecommendationsScreen() {
                   placeholder="Menu Group name..."
                   placeholderTextColor={COLORS.muted}
                   value={menuGroupInput}
-                  onChangeText={setMenuGroupInput}
+                  onChangeText={(value) => setMenuGroupInput(value.slice(0, 32))}
+                  maxLength={32}
                 />
                 <TouchableOpacity
                   style={styles.groupInputAction}
