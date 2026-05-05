@@ -121,6 +121,8 @@ const COLORS = {
   border: '#E3D7CD',
 };
 const COMMENT_PAGE_SIZE = 3;
+const COMMENT_MAX_LENGTH = 500;
+const REPLY_MAX_LENGTH = 300;
 
 const parseJSON = (value: any) => {
   try {
@@ -503,6 +505,14 @@ export default function PostDetailScreen() {
       Toast.show({ type: 'error', text1: 'Missing comment', text2: 'Please type your message.' });
       return;
     }
+    if (content.length > COMMENT_MAX_LENGTH) {
+      Toast.show({
+        type: 'error',
+        text1: 'Comment too long',
+        text2: `Comment must be ${COMMENT_MAX_LENGTH} characters or less.`,
+      });
+      return;
+    }
 
     try {
       setSendingComment(true);
@@ -541,6 +551,14 @@ export default function PostDetailScreen() {
     const content = replyDraft.trim();
     if (!content) {
       Toast.show({ type: 'error', text1: 'Missing reply', text2: 'Please type your reply.' });
+      return;
+    }
+    if (content.length > REPLY_MAX_LENGTH) {
+      Toast.show({
+        type: 'error',
+        text1: 'Reply too long',
+        text2: `Reply must be ${REPLY_MAX_LENGTH} characters or less.`,
+      });
       return;
     }
 
@@ -1132,10 +1150,11 @@ export default function PostDetailScreen() {
             <TextInput
               style={[styles.input, styles.commentInput]}
               value={commentDraft}
-              onChangeText={setCommentDraft}
+              onChangeText={(value) => setCommentDraft(value.slice(0, COMMENT_MAX_LENGTH))}
               placeholder="Write a comment..."
               placeholderTextColor={COLORS.muted}
               multiline
+              maxLength={COMMENT_MAX_LENGTH}
             />
             <TouchableOpacity
               style={[styles.commentSubmitButton, sendingComment && styles.commentSubmitButtonDisabled]}
@@ -1208,10 +1227,11 @@ export default function PostDetailScreen() {
                       <TextInput
                         style={[styles.input, styles.commentInput]}
                         value={replyDraft}
-                        onChangeText={setReplyDraft}
+                        onChangeText={(value) => setReplyDraft(value.slice(0, REPLY_MAX_LENGTH))}
                         placeholder={`Write a reply to #${comment.commentId}...`}
                         placeholderTextColor={COLORS.muted}
                         multiline
+                        maxLength={REPLY_MAX_LENGTH}
                       />
                       <TouchableOpacity
                         style={[styles.commentSubmitButton, sendingComment && styles.commentSubmitButtonDisabled]}

@@ -56,6 +56,7 @@ interface ShopInventoryDetail {
 
 const MAX_ZOOM_SCALE = 3;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const MAX_MIN_STOCK_LEVEL = 100000;
 
 const COLORS = {
   bg: '#F7F3EF',
@@ -91,6 +92,7 @@ const parseMinStockInput = (input: string): number | null => {
 
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
+  if (parsed > MAX_MIN_STOCK_LEVEL) return null;
 
   return parsed;
 };
@@ -236,7 +238,7 @@ export default function IngredientDetailScreen() {
       Toast.show({
         type: 'error',
         text1: 'Invalid threshold',
-        text2: 'Minimum stock must be a numeric and non-empty value.',
+        text2: `Minimum stock must be numeric and between 0 and ${MAX_MIN_STOCK_LEVEL}.`,
       });
       return;
     }
@@ -420,7 +422,9 @@ export default function IngredientDetailScreen() {
         {canSetThreshold ? (
           <View style={styles.card}>
             <Text style={styles.sectionTitle}>Minimum Stock Level</Text>
-            <Text style={styles.helperText}>Set the alert threshold ({measurementUnit}).</Text>
+            <Text style={styles.helperText}>
+              Set the alert threshold ({measurementUnit}). Max {MAX_MIN_STOCK_LEVEL}.
+            </Text>
 
             <View style={styles.thresholdRow}>
               <TextInput
@@ -445,7 +449,9 @@ export default function IngredientDetailScreen() {
               </TouchableOpacity>
             </View>
             {isThresholdInvalid ? (
-              <Text style={styles.validationText}>Please enter a valid number (e.g. 5 or 5.5).</Text>
+              <Text style={styles.validationText}>
+                Please enter a valid number from 0 to {MAX_MIN_STOCK_LEVEL} (e.g. 5 or 5.5).
+              </Text>
             ) : null}
           </View>
         ) : (
