@@ -73,7 +73,6 @@ type ExportDetail = {
   ingredientId: number;
   ingredient: Ingredient;
   exportQuantity: number;
-  reason: string;
 };
 
 type ExportNoteResponse = {
@@ -92,7 +91,6 @@ type AlertModalState = {
   tone: 'warning' | 'error';
 };
 
-const REASONS = ['Daily Sales', 'Internal Use', 'Expired', 'Damaged'];
 const QUANTITY_INPUT_REGEX = /^\d*(\.\d*)?$/;
 
 export default function ExportRequestScreen() {
@@ -229,7 +227,6 @@ export default function ExportRequestScreen() {
           ingredientId: ingredient.ingredientId,
           ingredient,
           exportQuantity: 1,
-          reason: REASONS[0],
         },
       ];
     });
@@ -354,14 +351,6 @@ export default function ExportRequestScreen() {
       delete next[ingredientId];
       return next;
     });
-  };
-
-  const handleUpdateReason = (ingredientId: number, reason: string) => {
-    setDetails((prev) =>
-      prev.map((detail) =>
-        detail.ingredientId === ingredientId ? { ...detail, reason } : detail
-      )
-    );
   };
 
   const showAlertModal = (title: string, message: string, tone: AlertModalState['tone'] = 'warning') => {
@@ -707,22 +696,6 @@ export default function ExportRequestScreen() {
                   <Text style={styles.detailMeta}>
                     Remaining: {remain} {detail.ingredient.measurement}
                   </Text>
-
-                  <Text style={styles.fieldLabel}>Reason for dispatch</Text>
-                  <View style={styles.reasonRow}>
-                    {REASONS.map((reason) => {
-                      const isActive = detail.reason === reason;
-                      return (
-                        <TouchableOpacity
-                          key={reason}
-                          style={[styles.reasonChip, isActive && styles.reasonChipActive]}
-                          onPress={() => handleUpdateReason(detail.ingredientId, reason)}
-                        >
-                          <Text style={[styles.reasonText, isActive && styles.reasonTextActive]}>{reason}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
                 </View>
               );
             })
@@ -1049,40 +1022,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#B91C1C',
     marginBottom: 8,
-  },
-  fieldLabel: {
-    marginTop: 10,
-    marginBottom: 6,
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  reasonRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  reasonChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.card,
-  },
-  reasonChipActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.accent,
-  },
-  reasonText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.ink,
-  },
-  reasonTextActive: {
-    color: '#FFFFFF',
   },
   footer: {
     position: 'absolute',
