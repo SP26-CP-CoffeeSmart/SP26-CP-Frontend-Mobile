@@ -431,16 +431,6 @@ export default function AiResultScreen() {
     setIsSaved(isRecipeSaved(recipeId, recipeSaveToken));
   }, [isRecipeSaved, recipe?.recipeId, (recipe as any)?.shopRecipeId, recipeSaveToken]);
 
-  // Initialize generatedImageUrl from recipe.image if available
-  useEffect(() => {
-    if (!generatedImageUrl && recipe?.image && typeof recipe.image === 'string') {
-      const normalized = normalizeImageUrl(recipe.image);
-      if (normalized && normalized !== fallbackImage) {
-        setGeneratedImageUrl(recipe.image);
-      }
-    }
-  }, [recipe?.image, generatedImageUrl, fallbackImage]);
-
   useEffect(() => {
     let isActive = true;
     const generateImage = async () => {
