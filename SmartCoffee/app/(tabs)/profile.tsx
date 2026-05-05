@@ -33,6 +33,8 @@ const purchaseStatuses = [
 ];
 
 const TX_PAGE_SIZE = 10;
+const MAX_VOLUME = 2000;
+const MAX_ACTIVE_SIZES = 3;
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -62,6 +64,8 @@ export default function ProfileScreen() {
   const [editSizeActive, setEditSizeActive] = useState(true);
   const [editSizeError, setEditSizeError] = useState<string | null>(null);
   const [editSizeSubmitting, setEditSizeSubmitting] = useState(false);
+  const [showSizeErrorModal, setShowSizeErrorModal] = useState(false);
+  const [sizeErrorMessage, setSizeErrorMessage] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTopup, setSelectedTopup] = useState<number | null>(null);
@@ -130,6 +134,39 @@ export default function ProfileScreen() {
     }
 
     return null;
+  };
+
+  const normalizeVolumeInput = (value: string) => {
+    const digitsOnly = value.replace(/[^0-9]/g, '');
+    if (!digitsOnly) return '';
+    const parsed = Number(digitsOnly);
+    if (!Number.isFinite(parsed)) return '';
+    const clamped = Math.min(parsed, MAX_VOLUME);
+    return String(clamped);
+  };
+
+  const openSizeErrorModal = (message: string) => {
+    setSizeErrorMessage(message);
+    setShowSizeErrorModal(true);
+  };
+
+  const extractHttpErrorMessage = (error: unknown) => {
+    if (!(error instanceof Error)) {
+      return null;
+    }
+
+    const match = error.message.match(/body:\s*(\{.*\})/);
+    if (!match) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(match[1]);
+      const message = parsed?.error ?? parsed?.message;
+      return message ? String(message) : null;
+    } catch {
+      return null;
+    }
   };
 
   const profileName = getProfileField(
@@ -750,6 +787,11 @@ export default function ProfileScreen() {
       return;
     }
 
+    if (parsedVolume > MAX_VOLUME) {
+      setAddSizeError(`Volume must be ${MAX_VOLUME} ml or less.`);
+      return;
+    }
+
     if (!profileCoffeeShopId) {
       setAddSizeError('Missing coffee shop id.');
       return;
@@ -770,7 +812,12 @@ export default function ProfileScreen() {
       setNewSizeVolume('');
       setAddSizeError(null);
     } catch (error) {
-      setAddSizeError('Unable to add beverage size.');
+      const message = extractHttpErrorMessage(error);
+      if (message) {
+        openSizeErrorModal(message);
+      } else {
+        setAddSizeError('Unable to add beverage size.');
+      }
     } finally {
       setAddSizeSubmitting(false);
     }
@@ -786,7 +833,7 @@ export default function ProfileScreen() {
     setEditingSizeId(sizeId);
     setEditingSize(size);
     setEditSizeName(getSizeName(size, index));
-    setEditSizeVolume(getSizeVolumeValue(size));
+    setEditSizeVolume(normalizeVolumeInput(getSizeVolumeValue(size)));
     setEditSizeActive(isSizeActive(size));
     setEditSizeError(null);
   };
@@ -822,8 +869,20 @@ export default function ProfileScreen() {
       return;
     }
 
+    if (parsedVolume > MAX_VOLUME) {
+      setEditSizeError(`Volume must be ${MAX_VOLUME} ml or less.`);
+      return;
+    }
+
     if (!coffeeShopId) {
       setEditSizeError('Missing coffee shop id.');
+      return;
+    }
+
+    const currentlyActive = isSizeActive(editingSize);
+    const activeCount = beverageSizes.filter((size) => isSizeActive(size)).length;
+    if (!currentlyActive && editSizeActive && activeCount >= MAX_ACTIVE_SIZES) {
+      openSizeErrorModal(`You can only have up to ${MAX_ACTIVE_SIZES} active beverage sizes.`);
       return;
     }
 
@@ -859,7 +918,12 @@ export default function ProfileScreen() {
       setEditSizeError(null);
       showToast('Updated beverage size successfully.');
     } catch (error) {
-      setEditSizeError('Unable to update beverage size.');
+      const message = extractHttpErrorMessage(error);
+      if (message) {
+        openSizeErrorModal(message);
+      } else {
+        setEditSizeError('Unable to update beverage size.');
+      }
     } finally {
       setEditSizeSubmitting(false);
     }
@@ -1389,7 +1453,7 @@ export default function ProfileScreen() {
                           <TextInput
                             style={[styles.sizeEditInput, styles.sizeEditVolumeInput]}
                             value={editSizeVolume}
-                            onChangeText={setEditSizeVolume}
+                            onChangeText={(value) => setEditSizeVolume(normalizeVolumeInput(value))}
                             placeholder="Volume"
                             keyboardType="numeric"
                           />
@@ -1503,7 +1567,7 @@ export default function ProfileScreen() {
                 <Text style={styles.modalLabel}>Volume (ml)</Text>
                 <TextInput
                   value={newSizeVolume}
-                  onChangeText={setNewSizeVolume}
+                  onChangeText={(value) => setNewSizeVolume(normalizeVolumeInput(value))}
                   placeholder="e.g. 1000"
                   keyboardType="numeric"
                   style={styles.modalInput}
@@ -1528,6 +1592,37 @@ export default function ProfileScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        <Modal
+          visible={showSizeErrorModal}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowSizeErrorModal(false)}>
+          <TouchableWithoutFeedback onPress={() => setShowSizeErrorModal(false)}>
+            <View style={styles.modalBackdrop}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalCard}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Beverage size error</Text>
+                    <TouchableOpacity
+                      style={styles.modalCloseButton}
+                      onPress={() => setShowSizeErrorModal(false)}>
+                      <Ionicons name="close" size={18} color="#7A4A1B" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.modalErrorText}>{sizeErrorMessage}</Text>
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={styles.modalSubmitButton}
+                      onPress={() => setShowSizeErrorModal(false)}>
+                      <Text style={styles.modalSubmitText}>Got it</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </TouchableWithoutFeedback>
             </View>

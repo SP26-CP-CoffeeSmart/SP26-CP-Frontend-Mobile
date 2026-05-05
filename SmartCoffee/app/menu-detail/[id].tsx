@@ -1346,15 +1346,17 @@ export default function MenuDetailScreen() {
                       onPress={() => handleItemPress(item)}
                       activeOpacity={0.75}
                     >
-                      {isModified ? (
-                        <View style={styles.modifiedBadge}>
-                          <Ionicons name="sparkles" size={12} color="#FFFFFF" />
-                          <Text style={styles.modifiedBadgeText}>Updated</Text>
-                        </View>
-                      ) : null}
                       <Image source={getRecipeImage(item.shopRecipe)} style={styles.itemImage} />
                       <View style={styles.itemContent}>
-                        <Text style={styles.itemName}>{item.recipeName}</Text>
+                        <View style={styles.itemHeaderRow}>
+                          <Text style={styles.itemName}>{item.recipeName}</Text>
+                          {isModified ? (
+                            <View style={styles.modifiedBadge}>
+                              <Ionicons name="sparkles" size={12} color="#FFFFFF" />
+                              <Text style={styles.modifiedBadgeText}>Updated</Text>
+                            </View>
+                          ) : null}
+                        </View>
                         {item.description ? (
                           <Text style={styles.itemDescription} numberOfLines={2}>
                             {item.description}
@@ -1725,7 +1727,15 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     gap: 6,
   },
+  itemHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
   itemName: {
+    flex: 1,
+    minWidth: 0,
     fontSize: 16,
     fontWeight: '700',
     color: '#2C1B13',
@@ -1741,12 +1751,10 @@ const styles = StyleSheet.create({
     color: '#2C1B13',
   },
   modifiedBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    flexShrink: 0,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,

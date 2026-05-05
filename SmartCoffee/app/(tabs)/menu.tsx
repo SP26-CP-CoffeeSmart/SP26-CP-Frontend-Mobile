@@ -1008,7 +1008,7 @@ export default function MenuScreen() {
   };
 
   const handleCategoryInputChange = (value: string) => {
-    setCreateCategoryName(value);
+    setCreateCategoryName(value.slice(0, 32));
     if (value.trim()) {
       setCreateCategoryId(null);
     }
@@ -2279,10 +2279,11 @@ export default function MenuScreen() {
               <Text style={styles.modalLabel}>Name</Text>
               <TextInput
                 value={createName}
-                onChangeText={setCreateName}
+                onChangeText={(value) => setCreateName(value.slice(0, 32))}
                 placeholder="Beverage name"
                 style={styles.modalInput}
                 autoCapitalize="words"
+                maxLength={32}
               />
 
               <Text style={styles.modalLabel}>Category</Text>
@@ -2359,6 +2360,7 @@ export default function MenuScreen() {
                   createCategoryId ? styles.modalInputDisabled : null,
                 ]}
                 editable={!createCategoryId}
+                maxLength={32}
               />
 
               <Text style={styles.modalLabel}>Image</Text>

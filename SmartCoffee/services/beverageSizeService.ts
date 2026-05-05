@@ -115,7 +115,9 @@ class BeverageSizeService {
         } as BeverageSize;
       }
     } catch (error) {
-      console.error('Error creating beverage size:', error);
+      if (!(error instanceof Error) || !error.message.includes('status: 400')) {
+        console.error('Error creating beverage size:', error);
+      }
       throw error;
     }
   }
@@ -173,7 +175,9 @@ class BeverageSizeService {
         } as BeverageSize;
       }
     } catch (error) {
-      console.error('Error updating beverage size:', error);
+      if (!(error instanceof Error) || !error.message.includes('status: 400')) {
+        console.error('Error updating beverage size:', error);
+      }
       throw error;
     }
   }

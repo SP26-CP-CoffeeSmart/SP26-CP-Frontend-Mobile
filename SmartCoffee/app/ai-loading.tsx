@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Image, StyleSheet, View } from 'react-native';
+import { Animated, Image, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
+import AiWarningModal from '@/components/ai-warning-modal';
 import { Fonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { API_ENDPOINTS } from '@/services/api';
@@ -54,6 +55,8 @@ export default function AiLoadingScreen() {
   const { coffeeShopId } = useAuth();
   const { setItems, clear } = useSuggestions();
   const [messageIndex, setMessageIndex] = useState(0);
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitModalMessage, setLimitModalMessage] = useState('');
   const textOpacity = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
   const isForecastErrorMode = params.mode === 'forecast-error';
@@ -189,14 +192,8 @@ export default function AiLoadingScreen() {
       const showErrorAndGoBack = (message: string) => {
         if (errorModalShownRef.current) return;
         errorModalShownRef.current = true;
-        Alert.alert('AI Order Suggestions', message, [
-          {
-            text: 'OK',
-            onPress: () => {
-              router.replace('/product-page');
-            },
-          },
-        ]);
+        setLimitModalMessage(message);
+        setShowLimitModal(true);
       };
 
       if (!coffeeShopId) {
@@ -379,6 +376,15 @@ export default function AiLoadingScreen() {
           </View>
         </View>
       </View>
+      <AiWarningModal
+        visible={showLimitModal}
+        title="AI Order Suggestions"
+        message={limitModalMessage}
+        onClose={() => {
+          setShowLimitModal(false);
+          router.replace('/product-page');
+        }}
+      />
     </View>
   );
 }

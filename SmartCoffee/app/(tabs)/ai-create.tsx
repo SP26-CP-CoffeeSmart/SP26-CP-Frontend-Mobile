@@ -28,6 +28,7 @@ import { Platform } from 'react-native';
 import { useAuth } from '@/context/auth-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import AiWarningModal from '@/components/ai-warning-modal';
 
 const TAGS = ['Bold', 'Smooth', 'Fruity', 'Nutty', 'Caramel', 'Smoky', 'Floral', 'Chocolatey'];
 const COFFEE_TYPES = ['Moka', 'Exelsa', 'Culi', 'Liberica', 'Robusta', 'Arabica'];
@@ -135,11 +136,46 @@ export default function AiCreateScreen() {
   const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
     'The shop does not have an active subscription.'
   );
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitModalTitle, setLimitModalTitle] = useState('Generate failed');
+  const [limitModalMessage, setLimitModalMessage] = useState('');
   const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [showUniqueModal, setShowUniqueModal] = useState(false);
   const [numberOption, setNumberOption] = useState(3);
   const [pricingStrategy, setPricingStrategy] = useState(2);
   const [isLoading, setIsLoading] = useState(false);
+
+  const extractErrorMessage = (raw: unknown) => {
+    if (raw instanceof Error) {
+      const text = raw.message.trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const parsedMessage = parsed?.error ?? parsed?.message;
+          if (parsedMessage) return String(parsedMessage);
+        } catch {
+          // ignore JSON parse error
+        }
+      }
+      return text || 'Request failed.';
+    }
+
+    if (typeof raw === 'string') {
+      return raw.trim();
+    }
+
+    return 'Request failed.';
+  };
+
+  const isUsageLimitError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('usage limit') ||
+      normalized.includes('limit exceeded') ||
+      /used\s+\d+\s*\/\s*\d+/i.test(message)
+    );
+  };
 
   const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
 
@@ -488,8 +524,14 @@ export default function AiCreateScreen() {
         },
       });
     } catch (error) {
-      // TODO: handle error UI
-      console.error(error);
+      const message = extractErrorMessage(error);
+      if (isUsageLimitError(message)) {
+        setLimitModalTitle('Generate failed');
+        setLimitModalMessage(message);
+        setShowLimitModal(true);
+      } else {
+        console.error(error);
+      }
       router.back();
     } finally {
       setIsLoading(false);
@@ -1097,6 +1139,12 @@ export default function AiCreateScreen() {
         visible={showSubscriptionModal}
         message={subscriptionModalMessage}
         onClose={() => setShowSubscriptionModal(false)}
+      />
+      <AiWarningModal
+        visible={showLimitModal}
+        title={limitModalTitle}
+        message={limitModalMessage}
+        onClose={() => setShowLimitModal(false)}
       />
     </View>
   );
