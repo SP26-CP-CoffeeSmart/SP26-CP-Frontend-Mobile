@@ -643,6 +643,12 @@ export default function CheckoutPage() {
                 return;
             }
 
+            try {
+                await refreshProfile();
+            } catch (refreshError) {
+                console.log('[Checkout] Failed to refresh wallet balance before payment modal:', refreshError);
+            }
+
             // Show payment method selection
             setShowPaymentMethodModal(true);
         } catch (error) {
