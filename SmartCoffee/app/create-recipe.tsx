@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -34,6 +36,14 @@ const palette = {
   green: '#E6F6EA',
   greenText: '#2F7D4A',
 };
+
+const MAX_RECIPE_NAME_LENGTH = 32;
+const MAX_PRICE_VALUE = 10000000;
+const MAX_PREP_MINUTES = 60;
+const MAX_SUGGESTED_OCCASIONS_LENGTH = 32;
+const MAX_STEP_TITLE_LENGTH = 32;
+const MAX_STEP_BODY_LENGTH = 1000;
+const MAX_INGREDIENT_QUANTITY = 9999;
 
 type IngredientItem = {
   ingredientId: number;
@@ -175,6 +185,7 @@ const parseCreatedRecipeId = (payload: any) => {
 export default function CreateRecipeScreen() {
   const router = useRouter();
   const { coffeeShopId } = useAuth();
+  const scrollRef = React.useRef<ScrollView | null>(null);
 
   const [coverImageUri, setCoverImageUri] = useState('');
   const [recipeName, setRecipeName] = useState('');
@@ -199,6 +210,7 @@ export default function CreateRecipeScreen() {
   const [difficultyIndex, setDifficultyIndex] = useState(0);
   const [prepMin, setPrepMin] = useState('');
   const [prepMax, setPrepMax] = useState('');
+  const [prepTimeError, setPrepTimeError] = useState('');
   const [suggestedOccasions, setSuggestedOccasions] = useState('');
 
   const [ingredientOptions, setIngredientOptions] = useState<IngredientOption[]>([]);
@@ -212,6 +224,7 @@ export default function CreateRecipeScreen() {
   const [showIngredientInput, setShowIngredientInput] = useState(false);
   const [selectedIngredientId, setSelectedIngredientId] = useState<number | null>(null);
   const [ingredientDraft, setIngredientDraft] = useState({ quantity: '', measurement: 'g' });
+  const [ingredientError, setIngredientError] = useState('');
   const [showBeverageDropdown, setShowBeverageDropdown] = useState(false);
   const [showIngredientDropdown, setShowIngredientDropdown] = useState(false);
 
@@ -227,6 +240,51 @@ export default function CreateRecipeScreen() {
 
   const [loadingInit, setLoadingInit] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const clampNumberInput = (value: string, maxValue: number) => {
+    const digits = value.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    const parsed = Number(digits);
+    if (!Number.isFinite(parsed)) return '';
+    return String(Math.min(parsed, maxValue));
+  };
+
+  const clampPrepInput = (value: string) => {
+    const digits = value.replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    let parsed = Number(digits);
+    if (!Number.isFinite(parsed)) return '';
+    parsed = Math.min(parsed, MAX_PREP_MINUTES);
+    return String(parsed);
+  };
+
+  const validatePrepTime = () => {
+    if (!prepMin.trim() || !prepMax.trim()) {
+      setPrepTimeError('');
+      return true;
+    }
+
+    const minValue = Number(prepMin);
+    const maxValue = Number(prepMax);
+    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+      setPrepTimeError('Prep time must be a number.');
+      return false;
+    }
+
+    if (minValue >= maxValue) {
+      setPrepTimeError('Prep time min must be less than max.');
+      return false;
+    }
+
+    setPrepTimeError('');
+    return true;
+  };
+
+  const handleStepInputFocus = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 150);
+  };
 
   const strengthLabel = useMemo(() => {
     if (strength < 0.33) return 'Decaf';
@@ -481,13 +539,20 @@ export default function CreateRecipeScreen() {
 
   const handleAddIngredient = async () => {
     if (!selectedIngredientId) {
+      setIngredientError('Please select an ingredient.');
       Toast.show({ type: 'error', text1: 'Ingredient required' });
       return;
     }
 
     const quantity = Number(ingredientDraft.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) {
+      setIngredientError('Quantity must be greater than 0.');
       Toast.show({ type: 'error', text1: 'Quantity must be greater than 0' });
+      return;
+    }
+    if (quantity > MAX_INGREDIENT_QUANTITY) {
+      setIngredientError(`Quantity must not exceed ${MAX_INGREDIENT_QUANTITY}.`);
+      Toast.show({ type: 'error', text1: `Quantity must not exceed ${MAX_INGREDIENT_QUANTITY}` });
       return;
     }
 
@@ -571,6 +636,7 @@ export default function CreateRecipeScreen() {
     });
 
     setIngredientDraft({ quantity: '', measurement: 'g' });
+    setIngredientError('');
     setShowIngredientInput(false);
   };
 
@@ -652,6 +718,11 @@ export default function CreateRecipeScreen() {
     if (ingredients.length === 0) {
       console.log('[Create Recipe] validation failed: no ingredients selected');
       Toast.show({ type: 'error', text1: 'Please add at least one ingredient' });
+      return;
+    }
+
+    if (!validatePrepTime()) {
+      Toast.show({ type: 'error', text1: 'Prep time is invalid' });
       return;
     }
 
@@ -772,7 +843,17 @@ export default function CreateRecipeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={styles.safeArea}
+        behavior={Platform.select({ ios: 'padding', android: 'height' })}
+        keyboardVerticalOffset={Platform.select({ ios: 90, android: 80 })}
+      >
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={styles.container}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
         <View style={styles.headerRow}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={18} color={palette.accentDeep} />
@@ -814,7 +895,8 @@ export default function CreateRecipeScreen() {
             placeholder="e.g. Honey Lavender Latte"
             placeholderTextColor={palette.muted}
             value={recipeName}
-            onChangeText={setRecipeName}
+            onChangeText={(value) => setRecipeName(value.slice(0, MAX_RECIPE_NAME_LENGTH))}
+            maxLength={MAX_RECIPE_NAME_LENGTH}
           />
 
           <View style={styles.rowSplit}>
@@ -1024,7 +1106,8 @@ export default function CreateRecipeScreen() {
                   placeholderTextColor={palette.muted}
                   keyboardType="numeric"
                   value={price}
-                  onChangeText={setPrice}
+                  onChangeText={(value) => setPrice(clampNumberInput(value, MAX_PRICE_VALUE))}
+                  maxLength={8}
                 />
                 <Text style={styles.inputSuffix}>VND</Text>
               </View>
@@ -1058,7 +1141,12 @@ export default function CreateRecipeScreen() {
                   placeholderTextColor={palette.muted}
                   keyboardType="numeric"
                   value={prepMin}
-                  onChangeText={setPrepMin}
+                  onChangeText={(value) => {
+                    setPrepMin(clampPrepInput(value));
+                    if (prepTimeError) setPrepTimeError('');
+                  }}
+                  onBlur={validatePrepTime}
+                  maxLength={2}
                 />
                 <Text style={styles.timeDash}>-</Text>
                 <TextInput
@@ -1067,9 +1155,17 @@ export default function CreateRecipeScreen() {
                   placeholderTextColor={palette.muted}
                   keyboardType="numeric"
                   value={prepMax}
-                  onChangeText={setPrepMax}
+                  onChangeText={(value) => {
+                    setPrepMax(clampPrepInput(value));
+                    if (prepTimeError) setPrepTimeError('');
+                  }}
+                  onBlur={validatePrepTime}
+                  maxLength={2}
                 />
               </View>
+              {prepTimeError ? (
+                <Text style={styles.prepErrorText}>{prepTimeError}</Text>
+              ) : null}
             </View>
           </View>
 
@@ -1079,7 +1175,10 @@ export default function CreateRecipeScreen() {
             placeholder="Morning rush, weekend brunch, date night..."
             placeholderTextColor={palette.muted}
             value={suggestedOccasions}
-            onChangeText={setSuggestedOccasions}
+            onChangeText={(value) =>
+              setSuggestedOccasions(value.slice(0, MAX_SUGGESTED_OCCASIONS_LENGTH))
+            }
+            maxLength={MAX_SUGGESTED_OCCASIONS_LENGTH}
           />
         </View>
 
@@ -1186,10 +1285,22 @@ export default function CreateRecipeScreen() {
                   placeholderTextColor={palette.muted}
                   keyboardType="numeric"
                   value={ingredientDraft.quantity}
-                  onChangeText={(text) => setIngredientDraft((prev) => ({ ...prev, quantity: text }))}
+                  onChangeText={(value) => {
+                    setIngredientDraft((prev) => ({ ...prev, quantity: clampNumberInput(value, MAX_INGREDIENT_QUANTITY) }));
+                    if (ingredientError) setIngredientError('');
+                  }}
+                  maxLength={4}
                 />
-                <View style={styles.measurementPickerWrap}>
+                <View
+                  style={[
+                    styles.measurementPickerWrap,
+                    ingredientError ? styles.measurementPickerError : null,
+                  ]}
+                >
                   <Text style={styles.measurementLabel}>Measurement</Text>
+                  {ingredientError ? (
+                    <Text style={styles.ingredientErrorText}>{ingredientError}</Text>
+                  ) : null}
                   <View style={styles.measurementOptions}>
                     {measurementOptions.map((unit) => {
                       const disabled = !allowedMeasurementOptions.includes(unit);
@@ -1203,7 +1314,10 @@ export default function CreateRecipeScreen() {
                             disabled && styles.measureChipDisabled,
                           ]}
                           disabled={disabled}
-                          onPress={() => setIngredientDraft((prev) => ({ ...prev, measurement: unit }))}
+                          onPress={() => {
+                            setIngredientDraft((prev) => ({ ...prev, measurement: unit }));
+                            if (ingredientError) setIngredientError('');
+                          }}
                         >
                           <Text
                             style={[
@@ -1279,15 +1393,29 @@ export default function CreateRecipeScreen() {
                 placeholder="Step title"
                 placeholderTextColor={palette.muted}
                 value={stepDraft.title}
-                onChangeText={(text) => setStepDraft((prev) => ({ ...prev, title: text }))}
+                onChangeText={(text) =>
+                  setStepDraft((prev) => ({
+                    ...prev,
+                    title: text.slice(0, MAX_STEP_TITLE_LENGTH),
+                  }))
+                }
+                maxLength={MAX_STEP_TITLE_LENGTH}
+                onFocus={handleStepInputFocus}
               />
               <TextInput
                 style={[styles.input, styles.stepInput]}
                 placeholder="Step description"
                 placeholderTextColor={palette.muted}
                 value={stepDraft.body}
-                onChangeText={(text) => setStepDraft((prev) => ({ ...prev, body: text }))}
+                onChangeText={(text) =>
+                  setStepDraft((prev) => ({
+                    ...prev,
+                    body: text.slice(0, MAX_STEP_BODY_LENGTH),
+                  }))
+                }
                 multiline
+                maxLength={MAX_STEP_BODY_LENGTH}
+                onFocus={handleStepInputFocus}
               />
               <View style={styles.inlineActions}>
                 <Pressable style={styles.primaryAction} onPress={handleAddStep}>
@@ -1314,7 +1442,8 @@ export default function CreateRecipeScreen() {
             <Text style={styles.saveButtonText}>Save Recipe</Text>
           )}
         </Pressable>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -1326,7 +1455,7 @@ const styles = StyleSheet.create({
   },
   container: {
     paddingHorizontal: 24,
-    paddingBottom: 40,
+    paddingBottom: 16,
   },
   headerRow: {
     flexDirection: 'row',
@@ -1530,6 +1659,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  prepErrorText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#C0392B',
+    fontWeight: '600',
   },
   flexItem: {
     flex: 1,

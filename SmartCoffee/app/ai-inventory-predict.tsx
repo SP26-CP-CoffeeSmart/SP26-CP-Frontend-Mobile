@@ -18,6 +18,7 @@ import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import AiWarningModal from '@/components/ai-warning-modal';
 import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 type UrgencyLevel = 'Cao' | 'Trung binh' | 'Thap' | string;
@@ -150,8 +151,43 @@ export default function AIInventoryPredictScreen() {
   const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
     'The shop does not have an active subscription.'
   );
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitModalTitle, setLimitModalTitle] = useState('Request failed');
+  const [limitModalMessage, setLimitModalMessage] = useState('');
   const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
+
+  const extractErrorMessage = (raw: unknown) => {
+    if (raw instanceof Error) {
+      const text = raw.message.trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const parsedMessage = parsed?.error ?? parsed?.message;
+          if (parsedMessage) return String(parsedMessage);
+        } catch {
+          // ignore JSON parse error
+        }
+      }
+      return text || 'Request failed.';
+    }
+
+    if (typeof raw === 'string') {
+      return raw.trim();
+    }
+
+    return 'Request failed.';
+  };
+
+  const isUsageLimitError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('usage limit') ||
+      normalized.includes('limit exceeded') ||
+      /used\s+\d+\s*\/\s*\d+/i.test(message)
+    );
+  };
 
   const requestPayload = useMemo(
     () => ({
@@ -245,11 +281,16 @@ export default function AIInventoryPredictScreen() {
       let payload: InventoryPredictResponse | null = null;
 
       if (text) {
-        payload = JSON.parse(text) as InventoryPredictResponse;
+        try {
+          payload = JSON.parse(text) as InventoryPredictResponse;
+        } catch {
+          payload = null;
+        }
       }
 
       if (!response.ok) {
-        throw new Error((payload as any)?.message || `Request failed (${response.status}).`);
+        const backendMessage = (payload as any)?.error ?? (payload as any)?.message ?? text;
+        throw new Error(backendMessage || `Request failed (${response.status}).`);
       }
 
       if (!payload) {
@@ -257,12 +298,18 @@ export default function AIInventoryPredictScreen() {
       }
 
       if (payload.success === false) {
-        throw new Error('AI inventory prediction failed.');
+        const backendMessage = (payload as any)?.error ?? (payload as any)?.message;
+        throw new Error(backendMessage || 'AI inventory prediction failed.');
       }
 
       setResult(payload);
     } catch (predictError) {
-      const message = predictError instanceof Error ? predictError.message : 'Failed to predict inventory.';
+      const message = extractErrorMessage(predictError);
+      if (isUsageLimitError(message)) {
+        setLimitModalTitle('Request failed');
+        setLimitModalMessage(message);
+        setShowLimitModal(true);
+      }
       setError(message);
       setResult(null);
     } finally {
@@ -439,6 +486,12 @@ export default function AIInventoryPredictScreen() {
         visible={showSubscriptionModal}
         message={subscriptionModalMessage}
         onClose={() => setShowSubscriptionModal(false)}
+      />
+      <AiWarningModal
+        visible={showLimitModal}
+        title={limitModalTitle}
+        message={limitModalMessage}
+        onClose={() => setShowLimitModal(false)}
       />
     </SafeAreaView>
   );
