@@ -140,7 +140,7 @@ export default function ProductDetail() {
         setError(null);
 
         let match: SupplierProductApiItem | null = null;
-        
+
         // 1. First try standard REST endpoint for a single item
         const singleResponse = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct/${productId}`, {
           headers: {
@@ -162,7 +162,7 @@ export default function ProductDetail() {
               `${AUTH_BASE_URL}/SupplierProduct?page=${currentPage}&pageSize=${pageSize}`,
               { headers: { Accept: '*/*' } }
             );
-            
+
             if (!listResponse.ok) break;
 
             const listData = await listResponse.json();

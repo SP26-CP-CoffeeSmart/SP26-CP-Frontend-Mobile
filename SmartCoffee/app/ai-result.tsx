@@ -7,8 +7,9 @@ import { ActivityIndicator, Alert, Image as RNImage, Pressable, ScrollView, Styl
 import { ThemedText } from '@/components/themed-text';
 import { Colors, Fonts } from '@/constants/theme';
 import { useAiSavedRecipe } from '@/context/ai-saved-recipe-context';
+import { useAuth } from '@/context/auth-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { AUTH_BASE_URL } from '@/services/api';
+import { AUTH_BASE_URL, API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 
 interface Recipe {
@@ -68,6 +69,7 @@ interface NormalizedIngredient {
   measurement: string;
   ingredientName?: string;
   category?: string;
+  image?: string | null;
 }
 
 export default function AiResultScreen() {
@@ -77,9 +79,12 @@ export default function AiResultScreen() {
   const [isSaved, setIsSaved] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
+  const [ingredientImageByName, setIngredientImageByName] = useState<Record<string, string>>({});
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const { coffeeShopId } = useAuth();
   const { isRecipeSaved, markRecipeSaved } = useAiSavedRecipe();
   const { data, beverageId, beverage } = useLocalSearchParams<{
     data?: string;
@@ -252,9 +257,16 @@ export default function AiResultScreen() {
             item?.ingredient?.name ?? item?.ingredientName ?? item?.name ?? ''
           ).trim(),
           category,
+          image: item?.image ?? item?.imageUrl ?? item?.ingredient?.image ?? null,
         } as NormalizedIngredient;
       })
       .filter((item) => Number.isFinite(item.ingredientId) && item.ingredientId > 0);
+  };
+
+  const resolveIngredientImageUrl = (raw?: string | null): string | null => {
+    if (!raw || raw === 'null' || raw === 'undefined') return null;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    return `${AUTH_BASE_URL}${raw.startsWith('/') ? raw : `/images/${raw}`}`;
   };
 
   const resolveGeneratedImageUrl = (payload: any): string | null => {
@@ -349,6 +361,58 @@ export default function AiResultScreen() {
   };
 
   const recipeSaveToken = useMemo(() => buildRecipeSaveToken(recipe), [recipe]);
+
+  useEffect(() => {
+    const fetchInventoryImages = async () => {
+      if (!Number.isFinite(coffeeShopId) || Number(coffeeShopId) <= 0) {
+        setIngredientImageById({});
+        return;
+      }
+
+      try {
+        const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(Number(coffeeShopId)));
+        if (!response.ok) return;
+
+        const payload = await response.json();
+        const items = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.items)
+            ? payload.items
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : [];
+
+        const nextMap: Record<number, string> = {};
+        const nextNameMap: Record<string, string> = {};
+        items.forEach((entry: any) => {
+          const ingredientId = Number(
+            entry?.ingredientId ?? entry?.ingredient?.ingredientId ?? entry?.IngredientId ?? 0
+          );
+          if (!Number.isFinite(ingredientId) || ingredientId <= 0) return;
+
+          const image = resolveIngredientImageUrl(
+            entry?.image ?? entry?.imageUrl ?? entry?.ingredient?.image ?? null
+          );
+          if (image) {
+            nextMap[ingredientId] = image;
+            const nameKey = String(entry?.ingredient?.name ?? entry?.name ?? '')
+              .trim()
+              .toLowerCase();
+            if (nameKey) {
+              nextNameMap[nameKey] = image;
+            }
+          }
+        });
+
+        setIngredientImageById(nextMap);
+        setIngredientImageByName(nextNameMap);
+      } catch {
+        // Ignore inventory image lookup failures.
+      }
+    };
+
+    fetchInventoryImages();
+  }, [coffeeShopId]);
 
   useEffect(() => {
     const recipeId = resolveValidRecipeId((recipe as any)?.shopRecipeId ?? recipe?.recipeId);
@@ -869,20 +933,33 @@ export default function AiResultScreen() {
             <ThemedText style={styles.sectionTitle}>Ingredients</ThemedText>
           </View>
           {normalizedIngredientList.length > 0 ? (
-            <View style={styles.ingredientsList}>
+            <View style={styles.ingredientsGrid}>
               {normalizedIngredientList.map((item, index) => (
                 <View
                   key={`${item.ingredientId}-${index}`}
-                  style={styles.ingredientRow}>
-                  <View style={styles.ingredientInfo}>
-                    <ThemedText style={styles.ingredientName}>
-                      {item.ingredientName || `Ingredient #${item.ingredientId}`}
-                    </ThemedText>
-                    <ThemedText style={styles.ingredientDetail}>
-                      ID {item.ingredientId} • {item.quantity} {item.measurement}
-                      {item.cost ? ` • ${item.cost.toLocaleString()} ₫` : ''}
-                    </ThemedText>
+                  style={styles.ingredientCard}>
+                  <View style={styles.ingredientImageWrap}>
+                    <Image
+                      source={{
+                        uri:
+                          resolveIngredientImageUrl(item.image ?? null) ||
+                          ingredientImageById[item.ingredientId] ||
+                          ingredientImageByName[String(item.ingredientName ?? '').trim().toLowerCase()] ||
+                          fallbackImage,
+                      }}
+                      style={styles.ingredientImage}
+                      contentFit="cover"
+                    />
                   </View>
+                  <ThemedText style={styles.ingredientCardName} numberOfLines={2}>
+                    {item.ingredientName || `Ingredient #${item.ingredientId}`}
+                  </ThemedText>
+                  <ThemedText style={styles.ingredientCardMeta}>
+                    {item.quantity} {item.measurement}
+                  </ThemedText>
+                  <ThemedText style={styles.ingredientCardCost}>
+                    {item.cost ? `${item.cost.toLocaleString()} ₫` : '-'}
+                  </ThemedText>
                 </View>
               ))}
             </View>
@@ -1173,6 +1250,12 @@ const styles = StyleSheet.create({
   ingredientsList: {
     gap: 10,
   },
+  ingredientsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1182,6 +1265,46 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#F0E5D8',
+  },
+  ingredientCard: {
+    width: '48%',
+    backgroundColor: '#FAF6F0',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F0E5D8',
+    padding: 10,
+    alignItems: 'center',
+  },
+  ingredientImageWrap: {
+    width: '100%',
+    height: 90,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#EFE9E1',
+    marginBottom: 8,
+  },
+  ingredientImage: {
+    width: '100%',
+    height: '100%',
+  },
+  ingredientCardName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1F2937',
+    textAlign: 'center',
+  },
+  ingredientCardMeta: {
+    fontSize: 11,
+    color: '#7C7C7C',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  ingredientCardCost: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#C87C2A',
+    marginTop: 6,
+    textAlign: 'center',
   },
   ingredientInfo: {
     flex: 1,

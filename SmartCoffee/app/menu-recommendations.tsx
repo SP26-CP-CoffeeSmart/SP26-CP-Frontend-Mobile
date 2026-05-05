@@ -21,6 +21,7 @@ import { API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
 import { useAuth } from '@/context/auth-context';
 import SubscriptionGateModal from '@/components/subscription-gate-modal';
+import AiWarningModal from '@/components/ai-warning-modal';
 import { isSubscriptionActive, resolveCurrentSubscription } from '@/services/subscriptionResolver';
 
 const COLORS = {
@@ -124,6 +125,9 @@ export default function MenuRecommendationsScreen() {
   const [subscriptionModalMessage, setSubscriptionModalMessage] = useState(
     'The shop does not have an active subscription.'
   );
+  const [showLimitModal, setShowLimitModal] = useState(false);
+  const [limitModalTitle, setLimitModalTitle] = useState('Create menu failed');
+  const [limitModalMessage, setLimitModalMessage] = useState('');
   const [checkingSubscription, setCheckingSubscription] = useState(false);
   const [hasActiveSubscription, setHasActiveSubscription] = useState<boolean | null>(null);
   const [categories, setCategories] = useState<BeverageCategory[]>([]);
@@ -133,6 +137,38 @@ export default function MenuRecommendationsScreen() {
   const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [useExistingShopItems, setUseExistingShopItems] = useState(true);
+
+  const extractErrorMessage = (raw: unknown) => {
+    if (raw instanceof Error) {
+      const text = raw.message.trim();
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          const parsedMessage = parsed?.error ?? parsed?.message;
+          if (parsedMessage) return String(parsedMessage);
+        } catch {
+          // ignore JSON parse error
+        }
+      }
+      return text || 'Request failed.';
+    }
+
+    if (typeof raw === 'string') {
+      return raw.trim();
+    }
+
+    return 'Request failed.';
+  };
+
+  const isUsageLimitError = (message: string) => {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('usage limit') ||
+      normalized.includes('limit exceeded') ||
+      /used\s+\d+\s*\/\s*\d+/i.test(message)
+    );
+  };
 
   const getCategoryId = (category: BeverageCategory) =>
     typeof category.id === 'number'
@@ -412,10 +448,16 @@ export default function MenuRecommendationsScreen() {
         },
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to create menu skeleton.';
+      const message = extractErrorMessage(error);
       router.back();
-      Toast.show({ type: 'error', text1: 'Create menu failed', text2: message });
-      console.log('Error creating menu skeleton:', message);
+      if (isUsageLimitError(message)) {
+        setLimitModalTitle('Create menu failed');
+        setLimitModalMessage(message);
+        setShowLimitModal(true);
+      } else {
+        Toast.show({ type: 'error', text1: 'Create menu failed', text2: message });
+        console.log('Error creating menu skeleton:', message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -452,7 +494,8 @@ export default function MenuRecommendationsScreen() {
               placeholder="Eg Coffee Menu #1..."
               placeholderTextColor={COLORS.muted}
               value={menuTitle}
-              onChangeText={setMenuTitle}
+              onChangeText={(value) => setMenuTitle(value.slice(0, 32))}
+              maxLength={32}
             />
           </View>
 
@@ -692,7 +735,8 @@ export default function MenuRecommendationsScreen() {
                   placeholder="Menu Group name..."
                   placeholderTextColor={COLORS.muted}
                   value={menuGroupInput}
-                  onChangeText={setMenuGroupInput}
+                  onChangeText={(value) => setMenuGroupInput(value.slice(0, 32))}
+                  maxLength={32}
                 />
                 <TouchableOpacity
                   style={styles.groupInputAction}
@@ -830,6 +874,12 @@ export default function MenuRecommendationsScreen() {
         visible={showSubscriptionModal}
         message={subscriptionModalMessage}
         onClose={() => setShowSubscriptionModal(false)}
+      />
+      <AiWarningModal
+        visible={showLimitModal}
+        title={limitModalTitle}
+        message={limitModalMessage}
+        onClose={() => setShowLimitModal(false)}
       />
     </SafeAreaView>
   );

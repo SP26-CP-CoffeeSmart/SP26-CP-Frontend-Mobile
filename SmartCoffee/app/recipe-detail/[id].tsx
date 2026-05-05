@@ -14,8 +14,9 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { AUTH_BASE_URL } from '@/services/api';
+import { AUTH_BASE_URL, API_ENDPOINTS } from '@/services/api';
 import { authorizedFetch } from '@/services/authService';
+import { useAuth } from '@/context/auth-context';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -68,10 +69,14 @@ interface RecipeData {
 
 interface Ingredient {
     id: number;
+    ingredientId?: number;
+    inventoryDetailId?: number;
     quantity: number;
     cost: number;
     measurement?: string | null;
     meassurement?: string | null;
+    image?: string | null;
+    imageUrl?: string | null;
     ingredient_id?: number;
     shopRecipe: null;
     ingredient?: {
@@ -96,15 +101,6 @@ interface MenuItemSize {
         volume?: number;
     } | null;
     scaledIngredients?: Ingredient[];
-}
-
-interface SupplierProductApiItem {
-    ingredientId?: number;
-    image?: string | null;
-    ingredient?: {
-        ingredientId?: number;
-        image?: string | null;
-    };
 }
 
 const fallbackIngredientImage =
@@ -133,6 +129,7 @@ export default function RecipeDetailScreen() {
         flow: flowParam,
     } = useLocalSearchParams();
     const router = useRouter();
+    const { coffeeShopId } = useAuth();
     const returnTo = Array.isArray(returnToParam) ? returnToParam[0] : returnToParam;
     const resolvedFlow = Array.isArray(flowParam) ? flowParam[0] : flowParam;
     const isRecommendationMenuItem =
@@ -177,34 +174,35 @@ export default function RecipeDetailScreen() {
     };
 
     useEffect(() => {
-        const fetchSupplierProductImages = async () => {
+        const fetchInventoryImages = async () => {
+            if (!Number.isFinite(coffeeShopId) || Number(coffeeShopId) <= 0) {
+                setIngredientImageById({});
+                return;
+            }
+
             try {
-                const response = await authorizedFetch(`${AUTH_BASE_URL}/SupplierProduct`, {
-                    headers: {
-                        Accept: '*/*',
-                    },
-                });
+                const response = await authorizedFetch(API_ENDPOINTS.shopInventory.getByShop(Number(coffeeShopId)));
+                if (!response.ok) return;
 
-                if (!response.ok) {
-                    return;
-                }
-
-                const payload = (await response.json()) as
-                    | SupplierProductApiItem[]
-                    | { items?: SupplierProductApiItem[] };
-
+                const payload = await response.json();
                 const items = Array.isArray(payload)
                     ? payload
                     : Array.isArray(payload?.items)
                         ? payload.items
-                        : [];
+                        : Array.isArray(payload?.data)
+                            ? payload.data
+                            : [];
 
                 const nextMap: Record<number, string> = {};
-                items.forEach((product) => {
-                    const ingredientId = Number(product?.ingredientId ?? product?.ingredient?.ingredientId ?? 0);
+                items.forEach((entry: any) => {
+                    const ingredientId = Number(
+                        entry?.ingredientId ?? entry?.ingredient?.ingredientId ?? entry?.IngredientId ?? 0
+                    );
                     if (!Number.isFinite(ingredientId) || ingredientId <= 0) return;
 
-                    const image = resolveRemoteImageUrl(product?.image ?? product?.ingredient?.image ?? null);
+                    const image = resolveRemoteImageUrl(
+                        entry?.image ?? entry?.imageUrl ?? entry?.ingredient?.image ?? null
+                    );
                     if (image) {
                         nextMap[ingredientId] = image;
                     }
@@ -212,12 +210,12 @@ export default function RecipeDetailScreen() {
 
                 setIngredientImageById(nextMap);
             } catch {
-                // Keep fallback rendering when supplier product image lookup fails.
+                // Ignore inventory image lookup failures.
             }
         };
 
-        fetchSupplierProductImages();
-    }, []);
+        fetchInventoryImages();
+    }, [coffeeShopId]);
 
     const safeParseJson = (value?: string) => {
         if (!value) return null;
@@ -957,14 +955,16 @@ export default function RecipeDetailScreen() {
     };
 
     const getIngredientImageSource = (item: Ingredient) => {
-        const ingredientId = Number(item?.ingredient?.ingredientId ?? item?.ingredient_id ?? 0);
-        const imageFromProduct =
-            Number.isFinite(ingredientId) && ingredientId > 0
-                ? ingredientImageById[ingredientId]
-                : null;
-
+        const ingredientId = Number(
+            item?.ingredient?.ingredientId ?? item?.ingredient_id ?? item?.ingredientId ?? 0
+        );
+        const inventoryImage =
+            Number.isFinite(ingredientId) && ingredientId > 0 ? ingredientImageById[ingredientId] : null;
         const resolved =
-            imageFromProduct ?? resolveRemoteImageUrl(item?.ingredient?.image ?? null) ?? fallbackIngredientImage;
+            resolveRemoteImageUrl(
+                item?.image ?? item?.imageUrl ?? item?.ingredient?.image ?? inventoryImage ?? null
+            ) ??
+            fallbackIngredientImage;
 
         return { uri: resolved };
     };
