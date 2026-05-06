@@ -6,7 +6,6 @@ import { useEffect } from 'react';
 import 'react-native-reanimated';
 import "../global.css";
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import Toast from 'react-native-toast-message';
 import { BaseToast, ErrorToast } from 'react-native-toast-message';
@@ -155,19 +154,17 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <AuthProvider>
-          <CartProvider>
-            <BeverageCategoryProvider>
-              <AiSavedRecipeProvider>
-                <SuggestionProvider>
-                  <RootLayoutNav />
-                </SuggestionProvider>
-              </AiSavedRecipeProvider>
-            </BeverageCategoryProvider>
-          </CartProvider>
-        </AuthProvider>
-      </SafeAreaProvider>
+      <AuthProvider>
+        <CartProvider>
+          <BeverageCategoryProvider>
+            <AiSavedRecipeProvider>
+              <SuggestionProvider>
+                <RootLayoutNav />
+              </SuggestionProvider>
+            </AiSavedRecipeProvider>
+          </BeverageCategoryProvider>
+        </CartProvider>
+      </AuthProvider>
     </GestureHandlerRootView>
   );
 }
