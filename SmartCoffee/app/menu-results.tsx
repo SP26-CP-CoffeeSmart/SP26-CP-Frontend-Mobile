@@ -663,6 +663,7 @@ export default function MenuResultsScreen() {
             const canRenderFeedbackImage = flow === 'menu-version-feedback' && getNormalizedMenuId(hydratedMenu) > 0;
             const imagePatchKey = getMenuImagePatchKey(hydratedMenu, index);
             const isRenderingImage = renderingImageMenuKey === imagePatchKey;
+            const hasGeneratedFeedbackImage = Boolean(renderedImagePatchMap[imagePatchKey]?.imageUrl);
             const hasMenuImage = Boolean(normalizeMenuImageUrl(hydratedMenu));
 
             const menuWithConfig = {
@@ -773,7 +774,7 @@ export default function MenuResultsScreen() {
                       </View>
                     )}
 
-                    {canRenderFeedbackImage ? (
+                    {canRenderFeedbackImage && !hasGeneratedFeedbackImage ? (
                       <TouchableOpacity
                         style={[
                           styles.renderImageButton,
