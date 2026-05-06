@@ -238,6 +238,7 @@ export default function AIRecommendationsScreen() {
                     imageGeneration: item.imageGeneration,
                     imagePrompt: item.imagePrompt,
                     uniqueness: item.uniqueness,
+                    generatedImageUrl: item.generatedImageUrl,
                   }),
                   beverageId,
                   beverage,

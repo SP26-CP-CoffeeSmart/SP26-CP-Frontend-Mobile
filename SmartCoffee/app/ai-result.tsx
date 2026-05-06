@@ -75,7 +75,6 @@ interface NormalizedIngredient {
 export default function AiResultScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -265,7 +264,19 @@ export default function AiResultScreen() {
 
   const resolveIngredientImageUrl = (raw?: string | null): string | null => {
     if (!raw || raw === 'null' || raw === 'undefined') return null;
-    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      // Encode Firebase URLs properly
+      if (raw.includes('firebasestorage.googleapis.com')) {
+        const oIndex = raw.indexOf('/o/');
+        if (oIndex !== -1) {
+          const baseUrl = raw.substring(0, oIndex + 3);
+          const path = raw.substring(oIndex + 3);
+          const encodedPath = path.replace(/\//g, '%2F');
+          return baseUrl + encodedPath;
+        }
+      }
+      return raw;
+    }
     return `${AUTH_BASE_URL}${raw.startsWith('/') ? raw : `/images/${raw}`}`;
   };
 
@@ -311,6 +322,7 @@ export default function AiResultScreen() {
   let imageGeneration: any = null;
   let uniqueness: UniquenessInfo | null = null;
   let imagePrompt: string | null = null;
+  let initialGeneratedImageUrl: string | null = null;
   if (data) {
     try {
       const parsed = JSON.parse(String(data));
@@ -319,24 +331,28 @@ export default function AiResultScreen() {
       imageGeneration = parsed?.imageGeneration ?? null;
       imagePrompt = parsed?.imagePrompt ?? null;
       uniqueness = parsed?.uniqueness ?? parsed?.recipe?.uniqueness ?? null;
+      initialGeneratedImageUrl = parsed?.generatedImageUrl ?? null;
     } catch {
       recipe = null;
       imageGeneration = null;
       uniqueness = null;
       imagePrompt = null;
+      initialGeneratedImageUrl = null;
     }
   }
 
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(initialGeneratedImageUrl);
+
   const resolveUniquenessStatus = (value: UniquenessInfo | null): boolean | null => {
     if (!value) return null;
-     if (typeof value.uniquenessScore === 'number') {
+    if (typeof value.uniquenessScore === 'number') {
       return value.uniquenessScore >= 0.6;
     }
     if (typeof value.isUnique === 'boolean') return value.isUnique;
     if (typeof value.maxJaccardSimilarity === 'number') {
       return value.maxJaccardSimilarity === 0;
     }
-   
+
     return null;
   };
 
@@ -643,6 +659,7 @@ export default function AiResultScreen() {
     }
   };
 
+  // Use generated image if available, otherwise use original recipe image (already normalized)
   const displayImageUrl = normalizeImageUrl(generatedImageUrl ?? recipe?.image);
 
   return (
@@ -816,8 +833,7 @@ export default function AiResultScreen() {
                 </View>
                 <ThemedText style={styles.value}>
                   {uniqueness.mostSimilarRecipeName
-                    ? `${uniqueness.mostSimilarRecipeName}${
-                      uniqueness.mostSimilarRecipeId ? ` (#${uniqueness.mostSimilarRecipeId})` : ''
+                    ? `${uniqueness.mostSimilarRecipeName}${uniqueness.mostSimilarRecipeId ? ` (#${uniqueness.mostSimilarRecipeId})` : ''
                     }`
                     : 'None'}
                 </ThemedText>
@@ -942,10 +958,12 @@ export default function AiResultScreen() {
                     <Image
                       source={{
                         uri:
-                          resolveIngredientImageUrl(item.image ?? null) ||
-                          ingredientImageById[item.ingredientId] ||
-                          ingredientImageByName[String(item.ingredientName ?? '').trim().toLowerCase()] ||
-                          fallbackImage,
+                          resolveIngredientImageUrl(
+                            item.image ??
+                            ingredientImageById[item.ingredientId] ??
+                            ingredientImageByName[String(item.ingredientName ?? '').trim().toLowerCase()] ??
+                            null
+                          ) || fallbackImage,
                       }}
                       style={styles.ingredientImage}
                       contentFit="cover"
@@ -976,7 +994,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Caffeine Strength</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-                {recipe?.caffeineStrength ?? '-'}
+              {recipe?.caffeineStrength ?? '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -985,7 +1003,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Proposed Price</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-                {recipe?.proposedSellingPrice ?? '-'}
+              {recipe?.proposedSellingPrice ?? '-'}
             </ThemedText>
           </View>
           <View style={styles.row}>
@@ -994,7 +1012,7 @@ export default function AiResultScreen() {
               <ThemedText style={styles.label}>Profit Margin</ThemedText>
             </View>
             <ThemedText style={styles.value}>
-                {recipe?.profitMarginPercent != null ? `${recipe.profitMarginPercent}%` : '-'}
+              {recipe?.profitMarginPercent != null ? `${recipe.profitMarginPercent}%` : '-'}
             </ThemedText>
           </View>
 

@@ -17,12 +17,12 @@ const getAuthBaseUrl = () => {
 
   if (hostUri) {
     const host = hostUri.split(':')[0];
-    return normalizeApiBaseUrl(`http://${host}:5080`);
+    return normalizeApiBaseUrl(`https://sp26-cp-backend-production.up.railway.app`);
   }
 
   return Platform.select({
-    android: normalizeApiBaseUrl('http://10.0.2.2:sp26-cp-backend-production.up.railway.app'),
-    ios: normalizeApiBaseUrl('http://192.168.2.2:5080'),
+    android: normalizeApiBaseUrl('https://sp26-cp-backend-production.up.railway.app'),
+    ios: normalizeApiBaseUrl('https://sp26-cp-backend-production.up.railway.app'),
     default: normalizeApiBaseUrl('https://sp26-cp-backend-production.up.railway.app'),
   });
 };
