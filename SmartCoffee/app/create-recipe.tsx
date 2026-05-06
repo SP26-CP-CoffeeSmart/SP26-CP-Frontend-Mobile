@@ -203,7 +203,6 @@ export default function CreateRecipeScreen() {
   const [isIce, setIsIce] = useState(false);
   const [isCold, setIsCold] = useState(false);
   const [isMilk, setIsMilk] = useState(false);
-  const [isUnique, setIsUnique] = useState(false);
 
   const [strength, setStrength] = useState(0.72);
   const [price, setPrice] = useState('');
@@ -665,6 +664,11 @@ export default function CreateRecipeScreen() {
   };
 
   const handleToggleCold = (next: boolean) => {
+    if (!next && isIce) {
+      setIsCold(true);
+      return;
+    }
+
     setIsCold(next);
     if (next) {
       setIsHot(false);
@@ -675,6 +679,7 @@ export default function CreateRecipeScreen() {
     setIsIce(next);
     if (next) {
       setIsHot(false);
+      setIsCold(true);
     }
   };
 
@@ -770,9 +775,9 @@ export default function CreateRecipeScreen() {
         flavorNote: notes.join(', '),
         suggestedOccasions: suggestedOccasions.trim(),
       }),
-      isPublic: true,
-      isUnique,
-      status: 'ACTIVE',
+      isPublic: false,
+      isUnique: false,
+      status: 'Active',
       beverageId: selectedBeverageId,
       ingredients: ingredients.map((item) => ({
         ingredient_id: item.ingredientId,
@@ -1153,11 +1158,7 @@ export default function CreateRecipeScreen() {
               <Text style={styles.toggleLabel}>Milk</Text>
               <Switch value={isMilk} onValueChange={setIsMilk} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
             </View>
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleLabel}>Unique</Text>
-              <Switch value={isUnique} onValueChange={setIsUnique} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
-              <View style={styles.toggleSpacer} />
-            </View>
+          
           </View>
 
           <View style={styles.sliderHeader}>

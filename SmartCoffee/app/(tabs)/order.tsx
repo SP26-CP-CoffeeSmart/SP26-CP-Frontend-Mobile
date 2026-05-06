@@ -1355,6 +1355,7 @@ const styles = StyleSheet.create({
   },
   feedbackModalCard: {
     width: '88%',
+    height: '80%',
     maxHeight: '82%',
     backgroundColor: COLORS.white,
     borderRadius: 16,

@@ -703,10 +703,7 @@ export default function ProductPage() {
                     ) : null}
                     <Text style={styles.cardPrice}>{priceText}</Text>
                     <View style={styles.metaRow}>
-                      <View style={styles.metaItem}>
-                        <Ionicons name="cube-outline" size={12} color={COLORS.textSecondary} />
-                        <Text style={styles.metaText}>{stockText}</Text>
-                      </View>
+                    
                       <View style={[styles.metaItem, styles.metaItemStatus]}>
                         <Ionicons name="checkmark-circle" size={12} color={COLORS.accent} />
                         <Text style={styles.metaText}>{item.status}</Text>
@@ -1167,7 +1164,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   metaItemStatus: {
-    marginLeft: 8,
+    marginLeft: 0,
   },
   metaItemRating: {
     marginLeft: 8,
