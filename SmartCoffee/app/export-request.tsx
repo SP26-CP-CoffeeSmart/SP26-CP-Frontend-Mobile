@@ -29,6 +29,8 @@ const COLORS = {
   surface: '#FBF7F2',
   warning: '#B91C1C',
 };
+const NOTE_TITLE_MIN_LENGTH = 3;
+const NOTE_TITLE_MAX_LENGTH = 100;
 
 const toUtcPlus7LocalDateTimeString = (value: Date = new Date()) => {
   const utcMs = value.getTime() + value.getTimezoneOffset() * 60 * 1000;
@@ -45,6 +47,19 @@ const toUtcPlus7LocalDateTimeString = (value: Date = new Date()) => {
   const milliseconds = String(utcPlus14.getUTCMilliseconds()).padStart(3, '0');
 
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${milliseconds}`;
+};
+const validateNoteTitle = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Please enter an export note title.';
+  }
+  if (trimmed.length < NOTE_TITLE_MIN_LENGTH) {
+    return `Title must be at least ${NOTE_TITLE_MIN_LENGTH} characters.`;
+  }
+  if (trimmed.length > NOTE_TITLE_MAX_LENGTH) {
+    return `Title must be ${NOTE_TITLE_MAX_LENGTH} characters or less.`;
+  }
+  return null;
 };
 
 type Ingredient = {
@@ -389,8 +404,9 @@ export default function ExportRequestScreen() {
     }
 
     const titleToUse = noteTitle.trim();
-    if (!titleToUse) {
-      showAlertModal('Missing title', 'Please enter an export note title.');
+    const titleError = validateNoteTitle(titleToUse);
+    if (titleError) {
+      showAlertModal('Invalid title', titleError);
       return;
     }
 
@@ -428,6 +444,12 @@ export default function ExportRequestScreen() {
     if (!submitDraft.details.length) {
       setConfirmVisible(false);
       showAlertModal('Missing items', 'Please add at least one ingredient to export.');
+      return;
+    }
+    const titleError = validateNoteTitle(submitDraft.noteTitle ?? '');
+    if (titleError) {
+      setConfirmVisible(false);
+      showAlertModal('Invalid title', titleError);
       return;
     }
 
@@ -564,8 +586,11 @@ export default function ExportRequestScreen() {
             placeholder="Daily stock dispatch"
             placeholderTextColor={COLORS.muted}
             style={styles.input}
+            maxLength={NOTE_TITLE_MAX_LENGTH}
           />
-          <Text style={styles.helperText}>Created today - staff can update later.</Text>
+          <Text style={styles.helperText}>
+            {NOTE_TITLE_MIN_LENGTH}-{NOTE_TITLE_MAX_LENGTH} characters.
+          </Text>
         </View>
 
         <View style={styles.card}>

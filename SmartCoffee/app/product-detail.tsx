@@ -5,6 +5,7 @@ import {
   Text,
   StyleSheet,
   Image,
+  TextInput,
   TouchableOpacity,
   Animated,
 } from 'react-native';
@@ -66,8 +67,9 @@ export default function ProductDetail() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const productId = Number(params.productId);
-  const { addItem } = useCart();
+  const { items, addItem } = useCart();
   const [quantity, setQuantity] = useState(1);
+  const [quantityInput, setQuantityInput] = useState('1');
   const addScale = useRef(new Animated.Value(1)).current;
   const [product, setProduct] = useState<SupplierProductApiItem | null>(null);
   const [loading, setLoading] = useState(true);
@@ -79,6 +81,63 @@ export default function ProductDetail() {
     const holdStock = Number(product.holdStock ?? 0);
     return Math.max(0, stock - holdStock);
   }, [product]);
+
+  useEffect(() => {
+    const clamped = availableQuantity > 0 ? Math.min(Math.max(1, quantity), availableQuantity) : 1;
+    if (clamped !== quantity) {
+      setQuantity(clamped);
+    }
+    setQuantityInput(String(clamped));
+  }, [availableQuantity, quantity]);
+
+  const handleQuantityInputChange = (rawValue: string) => {
+    const normalized = rawValue.replace(/[^0-9]/g, '');
+    setQuantityInput(normalized);
+
+    if (!normalized) {
+      return;
+    }
+
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+
+    if (parsed <= 0) {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid quantity',
+        text2: 'Quantity must be greater than 0.',
+      });
+      setQuantity(1);
+      setQuantityInput('1');
+      return;
+    }
+
+    const clamped = availableQuantity > 0 ? Math.min(parsed, availableQuantity) : parsed;
+    if (availableQuantity > 0 && parsed > availableQuantity) {
+      Toast.show({
+        type: 'info',
+        text1: 'Stock limit',
+        text2: `Maximum available quantity is ${availableQuantity}.`,
+      });
+    }
+    setQuantity(clamped);
+    setQuantityInput(String(clamped));
+  };
+
+  const handleQuantityInputBlur = () => {
+    const parsed = Number(quantityInput);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setQuantity(1);
+      setQuantityInput('1');
+      return;
+    }
+
+    const clamped = availableQuantity > 0 ? Math.min(parsed, availableQuantity) : parsed;
+    setQuantity(clamped);
+    setQuantityInput(String(clamped));
+  };
 
   const onAddToCart = () => {
     Animated.sequence([
@@ -106,7 +165,21 @@ export default function ProductDetail() {
         return;
       }
 
-      const safeQuantity = Math.min(quantity, availableQuantity);
+      const quantityInCart = items
+        .filter((item) => item.productId === product.productId)
+        .reduce((sum, item) => sum + Math.max(0, Number(item.quantity ?? 0)), 0);
+      const remainingAvailable = Math.max(availableQuantity - quantityInCart, 0);
+
+      if (remainingAvailable <= 0) {
+        Toast.show({
+          type: 'error',
+          text1: 'Stock limit reached',
+          text2: 'This product already reached its available stock in your cart.',
+        });
+        return;
+      }
+
+      const safeQuantity = Math.min(quantity, remainingAvailable);
 
       addItem({
         productId: product.productId,
@@ -127,7 +200,7 @@ export default function ProductDetail() {
         text1: 'Added to cart',
         text2:
           safeQuantity < quantity
-            ? `Quantity adjusted to ${safeQuantity} due to stock limit.`
+            ? `Only ${remainingAvailable} item(s) left. Added ${safeQuantity}.`
             : 'Your order has been added to the cart.',
       });
     }
@@ -261,11 +334,25 @@ export default function ProductDetail() {
               <View style={styles.quantityRow}>
                 <TouchableOpacity
                   style={styles.qtyButton}
-                  onPress={() => setQuantity((prev) => Math.max(1, prev - 1))}
+                  onPress={() =>
+                    setQuantity((prev) => {
+                      const next = Math.max(1, prev - 1);
+                      setQuantityInput(String(next));
+                      return next;
+                    })
+                  }
                 >
                   <Ionicons name="remove" size={16} color={COLORS.text} />
                 </TouchableOpacity>
-                <Text style={styles.qtyValue}>{quantity}</Text>
+                <TextInput
+                  value={quantityInput}
+                  onChangeText={handleQuantityInputChange}
+                  onBlur={handleQuantityInputBlur}
+                  keyboardType="number-pad"
+                  style={styles.qtyInput}
+                  placeholder="1"
+                  placeholderTextColor={COLORS.textSecondary}
+                />
                 <TouchableOpacity
                   style={styles.qtyButton}
                   onPress={() =>
@@ -273,7 +360,17 @@ export default function ProductDetail() {
                       if (availableQuantity <= 0) {
                         return 1;
                       }
-                      return Math.min(availableQuantity, prev + 1);
+                      if (prev >= availableQuantity) {
+                        Toast.show({
+                          type: 'info',
+                          text1: 'Stock limit',
+                          text2: `Maximum available quantity is ${availableQuantity}.`,
+                        });
+                        return prev;
+                      }
+                      const next = Math.min(availableQuantity, prev + 1);
+                      setQuantityInput(String(next));
+                      return next;
                     })
                   }
                 >
@@ -400,12 +497,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  qtyValue: {
+  qtyInput: {
+    minWidth: 46,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.white,
+    textAlign: 'center',
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.text,
-    minWidth: 20,
-    textAlign: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 0,
   },
   stockHint: {
     fontSize: 12,

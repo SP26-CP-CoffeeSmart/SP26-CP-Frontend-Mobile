@@ -213,6 +213,25 @@ const MOCK_INGREDIENTS: Ingredient[] = [
 
 const CATEGORY_OPTIONS = ['All', 'Coffee Beans', 'Milk', 'Syrup', 'Supplies'];
 const QUANTITY_INPUT_REGEX = /^\d*(\.\d*)?$/;
+const MAX_MANUAL_IMPORT_QUANTITY = 100000;
+const NOTE_TITLE_MIN_LENGTH = 3;
+const NOTE_TITLE_MAX_LENGTH = 100;
+
+const clampManualImportQuantity = (value: number) =>
+  Math.min(Math.max(value, 0), MAX_MANUAL_IMPORT_QUANTITY);
+const validateNoteTitle = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'Please enter an import note title.';
+  }
+  if (trimmed.length < NOTE_TITLE_MIN_LENGTH) {
+    return `Title must be at least ${NOTE_TITLE_MIN_LENGTH} characters.`;
+  }
+  if (trimmed.length > NOTE_TITLE_MAX_LENGTH) {
+    return `Title must be ${NOTE_TITLE_MAX_LENGTH} characters or less.`;
+  }
+  return null;
+};
 
 const formatOrderDate = (value?: string) => {
   if (!value) {
@@ -542,7 +561,10 @@ export default function ImportRequestScreen() {
       if (existing) {
         const nextDetails = prev.map((detail) =>
           detail.ingredientId === ingredient.ingredientId
-            ? { ...detail, importQuantity: detail.importQuantity + 1 }
+            ? {
+                ...detail,
+                importQuantity: clampManualImportQuantity(detail.importQuantity + 1),
+              }
             : detail
         );
         const updated = nextDetails.find((detail) => detail.ingredientId === ingredient.ingredientId);
@@ -552,9 +574,13 @@ export default function ImportRequestScreen() {
             [ingredient.ingredientId]: String(updated.importQuantity),
           }));
           setManualQuantityErrors((current) => {
-            if (!current[ingredient.ingredientId]) {
-              return current;
+            if (updated.importQuantity >= MAX_MANUAL_IMPORT_QUANTITY) {
+              return {
+                ...current,
+                [ingredient.ingredientId]: `Maximum import quantity is ${MAX_MANUAL_IMPORT_QUANTITY}.`,
+              };
             }
+            if (!current[ingredient.ingredientId]) return current;
             const next = { ...current };
             delete next[ingredient.ingredientId];
             return next;
@@ -584,7 +610,7 @@ export default function ImportRequestScreen() {
         if (detail.ingredientId !== ingredientId) {
           return detail;
         }
-        return { ...detail, importQuantity: quantity };
+        return { ...detail, importQuantity: clampManualImportQuantity(quantity) };
       })
     );
   };
@@ -596,7 +622,7 @@ export default function ImportRequestScreen() {
         if (detail.ingredientId !== ingredientId) {
           return detail;
         }
-        nextQuantity = Math.max(detail.importQuantity + delta, 0);
+        nextQuantity = clampManualImportQuantity(detail.importQuantity + delta);
         return { ...detail, importQuantity: nextQuantity };
       })
     );
@@ -605,9 +631,13 @@ export default function ImportRequestScreen() {
       [ingredientId]: String(nextQuantity),
     }));
     setManualQuantityErrors((current) => {
-      if (!current[ingredientId]) {
-        return current;
+      if (nextQuantity >= MAX_MANUAL_IMPORT_QUANTITY) {
+        return {
+          ...current,
+          [ingredientId]: `Maximum import quantity is ${MAX_MANUAL_IMPORT_QUANTITY}.`,
+        };
       }
+      if (!current[ingredientId]) return current;
       const next = { ...current };
       delete next[ingredientId];
       return next;
@@ -652,7 +682,23 @@ export default function ImportRequestScreen() {
     }
 
     const parsed = Number(normalizedValue);
-    updateManualQuantity(ingredientId, Number.isFinite(parsed) && parsed >= 0 ? parsed : 0);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      const clamped = clampManualImportQuantity(parsed);
+      if (clamped !== parsed) {
+        setManualQuantityInputs((current) => ({
+          ...current,
+          [ingredientId]: String(clamped),
+        }));
+        setManualQuantityErrors((current) => ({
+          ...current,
+          [ingredientId]: `Maximum import quantity is ${MAX_MANUAL_IMPORT_QUANTITY}.`,
+        }));
+      }
+      updateManualQuantity(ingredientId, clamped);
+      return;
+    }
+
+    updateManualQuantity(ingredientId, 0);
   };
 
   const handleManualQuantityBlur = (ingredientId: number) => {
@@ -671,11 +717,24 @@ export default function ImportRequestScreen() {
     }
 
     const parsed = Number(inputValue);
-    const normalized = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    const normalized =
+      Number.isFinite(parsed) && parsed >= 0 ? clampManualImportQuantity(parsed) : 0;
     setManualQuantityInputs((current) => ({
       ...current,
       [ingredientId]: String(normalized),
     }));
+    setManualQuantityErrors((current) => {
+      if (normalized >= MAX_MANUAL_IMPORT_QUANTITY) {
+        return {
+          ...current,
+          [ingredientId]: `Maximum import quantity is ${MAX_MANUAL_IMPORT_QUANTITY}.`,
+        };
+      }
+      if (!current[ingredientId]) return current;
+      const next = { ...current };
+      delete next[ingredientId];
+      return next;
+    });
     updateManualQuantity(ingredientId, normalized);
   };
 
@@ -721,7 +780,7 @@ export default function ImportRequestScreen() {
     setOrderDetails(mockDetails);
     setOrderLoaded(true);
     if (!noteTitle.trim()) {
-      setNoteTitle(`Import materials from order #${orderId.trim()}`);
+      setNoteTitle(`Import materials from order #${orderId.trim()}`.slice(0, NOTE_TITLE_MAX_LENGTH));
     }
     Alert.alert('Order loaded', 'Mock import details were generated from the order.');
   };
@@ -752,7 +811,7 @@ export default function ImportRequestScreen() {
     setOrderDetails(mappedDetails);
     setOrderLoaded(true);
     if (!noteTitle.trim()) {
-      setNoteTitle(`Import materials from order #${order.orderCode}`);
+      setNoteTitle(`Import materials from order #${order.orderCode}`.slice(0, NOTE_TITLE_MAX_LENGTH));
     }
   };
 
@@ -987,6 +1046,21 @@ export default function ImportRequestScreen() {
       );
       return;
     }
+    if (
+      activeTab === 'manual' &&
+      details.some((detail) => detail.importQuantity > MAX_MANUAL_IMPORT_QUANTITY)
+    ) {
+      showAlertModal(
+        'Invalid quantity',
+        `Import quantity cannot exceed ${MAX_MANUAL_IMPORT_QUANTITY}.`
+      );
+      return;
+    }
+    const noteTitleError = validateNoteTitle(noteTitle);
+    if (noteTitleError) {
+      showAlertModal('Invalid title', noteTitleError);
+      return;
+    }
 
     setSubmitDraft({
       tab: activeTab,
@@ -1005,6 +1079,12 @@ export default function ImportRequestScreen() {
       return;
     }
     if (!submitDraft) {
+      return;
+    }
+    const noteTitleError = validateNoteTitle(submitDraft.noteTitle ?? '');
+    if (noteTitleError) {
+      setConfirmVisible(false);
+      showAlertModal('Invalid title', noteTitleError);
       return;
     }
 
@@ -1110,6 +1190,14 @@ export default function ImportRequestScreen() {
           showAlertModal(
             'Invalid quantity',
             'All selected ingredients must have import quantity greater than 0.'
+          );
+          return;
+        }
+        if (submitDraft.details.some((detail) => detail.importQuantity > MAX_MANUAL_IMPORT_QUANTITY)) {
+          setConfirmVisible(false);
+          showAlertModal(
+            'Invalid quantity',
+            `Import quantity cannot exceed ${MAX_MANUAL_IMPORT_QUANTITY}.`
           );
           return;
         }
@@ -1224,8 +1312,11 @@ export default function ImportRequestScreen() {
             placeholder="Morning beans restock"
             placeholderTextColor={COLORS.muted}
             style={styles.input}
+            maxLength={NOTE_TITLE_MAX_LENGTH}
           />
-          <Text style={styles.helperText}>Created today - staff can update later.</Text>
+          <Text style={styles.helperText}>
+            {NOTE_TITLE_MIN_LENGTH}-{NOTE_TITLE_MAX_LENGTH} characters.
+          </Text>
         </View>
 
         {activeTab === 'order' ? (
