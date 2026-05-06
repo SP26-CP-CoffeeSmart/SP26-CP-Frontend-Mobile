@@ -91,12 +91,6 @@ type PagedOrderResponse = {
 
 const ORDER_PAGE_SIZE = 10;
 
-const getOrderId = (order: OrderResponse | null | undefined): number => {
-  const orderAny = order as any;
-  const id = Number(orderAny?.orderId ?? orderAny?.OrderId ?? orderAny?.id ?? 0);
-  return Number.isFinite(id) && id > 0 ? id : 0;
-};
-
 const toApiOrderStatus = (key: string): string => {
   const found = statuses.find((s) => s.key === key);
   return found?.label ?? key;
@@ -136,7 +130,7 @@ export default function OrderScreen() {
   };
 
   const canFeedbackStatus = (status?: string) => {
-    const normalized = String(status ?? '').trim().toLowerCase();
+    const normalized = String(status ?? '').toLowerCase();
     return normalized === 'delivered' || normalized === 'completed';
   };
 
@@ -151,45 +145,17 @@ export default function OrderScreen() {
     return { done, total: detailIds.length };
   };
 
-  const openFeedbackModal = useCallback(async (order: OrderResponse, e?: any) => {
+  const openFeedbackModal = (order: OrderResponse, e?: any) => {
     if (e?.stopPropagation) e.stopPropagation();
-
-    let targetOrder = order;
-    let details = targetOrder.orderDetails ?? [];
-
-    // Delivered/Completed list payloads can miss orderDetails; fetch full detail before opening feedback.
-    if (details.length === 0) {
-      const orderId = getOrderId(order);
-      if (orderId > 0) {
-        try {
-          const response = await authorizedFetch(API_ENDPOINTS.order.byId(orderId), {
-            headers: {
-              Accept: '*/*',
-            },
-          });
-          if (response.ok) {
-            const detailPayload = (await response.json()) as OrderResponse;
-            if (detailPayload) {
-              targetOrder = detailPayload;
-              details = detailPayload.orderDetails ?? [];
-            }
-          } else {
-            console.log('[Order Feedback] Failed to fetch full order detail:', response.status);
-          }
-        } catch (error) {
-          console.log('[Order Feedback] Error fetching full order detail:', error);
-        }
-      }
-    }
-
+    const details = order.orderDetails ?? [];
     const firstSelectable = details
       .map((detail) => getOrderDetailId(detail))
       .find((id) => id > 0 && !feedbackSubmittedDetailIds.includes(id));
 
-    setFeedbackOrder(targetOrder);
+    setFeedbackOrder(order);
     setSelectedFeedbackDetailId(firstSelectable ?? null);
     setFeedbackForm({ type: 'Quality', content: '', rating: 5 });
-  }, [feedbackSubmittedDetailIds]);
+  };
 
   const handleSubmitFeedback = async () => {
     const orderId = Number(feedbackOrder?.orderId ?? 0);
@@ -488,8 +454,7 @@ export default function OrderScreen() {
     } catch (err) {
       Toast.show({ type: 'error', text1: 'Reorder failed', text2: 'Unable to process reorder at this time.' });
     } finally {
-      setSelectedOrderId(null);
-      setSelectedOrderDetail(null);
+      setSelectedOrder(null);
       setLoading(false);
     }
   };
@@ -505,7 +470,6 @@ export default function OrderScreen() {
   };
 
   const hasMore = useMemo(() => currentPage < totalPages, [currentPage, totalPages]);
-  const isFeedbackStatusTab = selectedStatus === 'delivered' || selectedStatus === 'completed';
 
   const handleLoadMore = () => {
     if (loadingMore || !hasMore) return;
@@ -586,20 +550,19 @@ export default function OrderScreen() {
           ) : (
             orders.map((order) => (
               <TouchableOpacity
-                key={String(getOrderId(order) || Math.random())}
+                key={String(order.orderId ?? Math.random())}
                 style={styles.orderCard}
                 activeOpacity={0.7}
                 onPress={() => {
-                  const orderId = getOrderId(order);
-                  if (orderId > 0) {
-                    setSelectedOrderId(orderId);
+                  if (order.orderId) {
+                    setSelectedOrderId(order.orderId);
                   }
                 }}
               >
                 <View style={styles.orderCardMain}>
                   <Image source={{ uri: fallbackOrderImage }} style={styles.orderImage} />
                   <View style={styles.orderInfo}>
-                    <Text style={styles.orderName}>Order #{getOrderId(order) || '-'}</Text>
+                    <Text style={styles.orderName}>Order #{order.orderId ?? '-'}</Text>
                     {order.orderDetails && order.orderDetails.length > 0 ? (
                       <Text style={styles.orderDesc} numberOfLines={1}>
                         {order.orderDetails
@@ -617,7 +580,7 @@ export default function OrderScreen() {
                 </View>
 
                 {/* Bottom row for Feedback when Delivered */}
-                {(canFeedbackStatus(order.status) || isFeedbackStatusTab) && (
+                {canFeedbackStatus(order.status) && (
                   <View style={styles.feedbackRow}>
                     <TouchableOpacity
                       style={styles.feedbackTouchable}
@@ -805,26 +768,13 @@ export default function OrderScreen() {
               </View>
             </ScrollView>
             <View style={styles.modalFooter}>
-              {(canFeedbackStatus(selectedOrderDetail?.status) || isFeedbackStatusTab) && selectedOrderDetail && (
-                <TouchableOpacity
-                  style={[styles.modalCancelButton, { backgroundColor: COLORS.accent }]}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    openFeedbackModal(selectedOrderDetail);
-                  }}
-                >
-                  <Text style={styles.modalCancelText}>Feedback</Text>
-                </TouchableOpacity>
-              )}
-
               {String(selectedOrderDetail?.status ?? '').toLowerCase() === 'pending' && (
                 <TouchableOpacity
                   style={styles.modalCancelButton}
                   activeOpacity={0.7}
                   onPress={() => {
-                    const orderId = getOrderId(selectedOrderDetail);
-                    if (orderId > 0) {
-                      handleCancelOrder(orderId);
+                    if (selectedOrderDetail?.orderId) {
+                      handleCancelOrder(selectedOrderDetail.orderId);
                     }
                   }}
                 >
