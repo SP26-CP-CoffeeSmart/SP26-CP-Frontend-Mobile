@@ -25,7 +25,9 @@ import { authorizedFetch } from '../services/authService';
 export default function WalletManagementScreen() {
   const router = useRouter();
   const { walletBalance, refreshProfile } = useAuth();
-  
+
+  const MAX_TOPUP = 10000000000;
+  const MAX_WITHDRAW = 10000000;
 
   
   const [tab, setTab] = useState<'topup' | 'withdraw'>('topup');
@@ -33,9 +35,14 @@ export default function WalletManagementScreen() {
   // Amounts
   const [amountStr, setAmountStr] = useState('');
   const [isFocused, setIsFocused] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [footerHeight, setFooterHeight] = useState(0);
   
   const amount = Number(amountStr.replace(/[^0-9]/g, ''));
-  const isError = amount > 0 && amount < 10000;
+  const maxAmount = tab === 'topup' ? MAX_TOPUP : MAX_WITHDRAW;
+  const isBelowMin = amount > 0 && amount < 10000;
+  const isAboveMax = amount > maxAmount;
+  const isError = isBelowMin || isAboveMax;
   
   const [submitting, setSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -68,7 +75,8 @@ export default function WalletManagementScreen() {
       return;
     }
     const num = parseInt(raw, 10);
-    setAmountStr(num.toLocaleString('en-US'));
+    const capped = Math.min(num, maxAmount);
+    setAmountStr(capped.toLocaleString('en-US'));
   };
 
   const clearInput = () => {
@@ -76,13 +84,18 @@ export default function WalletManagementScreen() {
   };
 
   const handleSelectPreset = (val: number) => {
-    setAmountStr(val.toLocaleString('en-US'));
+    const capped = Math.min(val, maxAmount);
+    setAmountStr(capped.toLocaleString('en-US'));
   };
 
   const handleTopupSubmit = async () => {
     if (submitting) return;
     if (amount < 10000) {
       showToast('Minimum top-up amount is 10,000 VND.');
+      return;
+    }
+    if (amount > MAX_TOPUP) {
+      showToast('Maximum top-up amount is 10,000,000,000 VND.');
       return;
     }
 
@@ -119,6 +132,10 @@ export default function WalletManagementScreen() {
     if (submitting) return;
     if (amount < 10000) {
       showToast('Minimum withdraw amount is 10,000 VND.');
+      return;
+    }
+    if (amount > MAX_WITHDRAW) {
+      showToast('Maximum withdraw amount is 10,000,000 VND.');
       return;
     }
 
@@ -213,14 +230,23 @@ export default function WalletManagementScreen() {
   };
 
   useEffect(() => {
+    const showListener = Keyboard.addListener('keyboardDidShow', event => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      showListener.remove();
+      hideListener.remove();
     };
   }, []);
 
   const presets = tab === 'topup' ? [50000, 100000, 200000] : [100000, 500000, 1000000];
-  const isActionDisabled = amount < 10000 || submitting;
+  const isActionDisabled = amount < 10000 || amount > maxAmount || submitting;
 
   return (
     <>
@@ -228,10 +254,10 @@ export default function WalletManagementScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: '#F6EFE6' }} edges={['top']}>
         <KeyboardAvoidingView
           style={styles.container}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <View style={styles.content}>
+          <View style={[styles.content, { paddingBottom: footerHeight + 16 }]}>
             
             <View style={styles.headerBackground} />
             <View style={styles.safeArea}>
@@ -327,7 +353,11 @@ export default function WalletManagementScreen() {
                   </View>
                   
                   {isError && (
-                    <Text style={styles.errorHint}>Please enter a minimum of 10,000 VND.</Text>
+                    <Text style={styles.errorHint}>
+                      {isAboveMax
+                        ? `Please enter a maximum of ${maxAmount.toLocaleString('en-US')} VND.`
+                        : 'Please enter a minimum of 10,000 VND.'}
+                    </Text>
                   )}
 
                   {tab === 'topup' ? (
@@ -387,7 +417,10 @@ export default function WalletManagementScreen() {
         </TouchableWithoutFeedback>
 
         {/* Footer Fixed Action */}
-        <View style={styles.footer}>
+        <View
+          style={[styles.footer, { transform: [{ translateY: -keyboardHeight }] }]}
+          onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}
+        >
           <View style={styles.presetsRow}>
             {presets.map(val => (
               <TouchableOpacity 
