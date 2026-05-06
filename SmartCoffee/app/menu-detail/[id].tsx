@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  BackHandler,
   Dimensions,
   Image,
   ImageBackground,
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import {
   Gesture,
@@ -482,6 +484,15 @@ export default function MenuDetailScreen() {
   const isCreateMenuFlow = flow === 'create-menu';
   const hasRenderedResult = renderedMenuUrls.length > 0;
   const isBottomActionsLocked = regeneratingMenu || detailsLoading || renderingMenu || savingMenuVersion;
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isBottomActionsLocked) return;
+      const onBackPress = () => true;
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [isBottomActionsLocked])
+  );
 
   useEffect(() => {
     if (!isImageZoomOpen) {
@@ -1287,14 +1298,16 @@ export default function MenuDetailScreen() {
         <View style={styles.headerOverlay} />
         <View style={styles.headerContent}>
           <TouchableOpacity
-            style={styles.backButton}
+            style={[styles.backButton, isBottomActionsLocked && styles.buttonDisabled]}
             onPress={() => {
+              if (isBottomActionsLocked) return;
               if (isCreateMenuFlow && hasRenderedResult) {
                 router.replace('/(tabs)/menu');
                 return;
               }
               router.back();
             }}
+            disabled={isBottomActionsLocked}
           >
             <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -1369,7 +1382,7 @@ export default function MenuDetailScreen() {
                     </TouchableOpacity>
                   );
 
-                  if (!isCreateMenuFlow || hasRenderedResult) {
+                  if (!isCreateMenuFlow || hasRenderedResult || isBottomActionsLocked) {
                     return card;
                   }
 

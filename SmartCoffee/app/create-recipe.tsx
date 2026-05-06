@@ -301,6 +301,33 @@ export default function CreateRecipeScreen() {
     return target?.name ?? 'No beverage available';
   }, [beverageOptions, selectedBeverageId]);
 
+  const normalizeBeverageName = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const beverageNameFlags = useMemo(() => {
+    const normalized = normalizeBeverageName(currentBeverageName || '');
+    return {
+      hotOnly: normalized.includes('nong'),
+      coldAllowed: normalized.includes('lanh'),
+    };
+  }, [currentBeverageName]);
+
+  useEffect(() => {
+    if (beverageNameFlags.hotOnly) {
+      setIsHot(true);
+      setIsCold(false);
+      setIsIce(false);
+      return;
+    }
+
+    if (beverageNameFlags.coldAllowed && isHot) {
+      setIsHot(false);
+    }
+  }, [beverageNameFlags, isHot]);
+
   const currentIngredientName = useMemo(() => {
     const target = ingredientOptions.find((item) => item.id === selectedIngredientId);
     return target?.name ?? 'No ingredient available';
@@ -1133,7 +1160,7 @@ export default function CreateRecipeScreen() {
               <Switch
                 value={isHot}
                 onValueChange={handleToggleHot}
-                disabled={isCold || isIce}
+                disabled={isCold || isIce || beverageNameFlags.coldAllowed}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />
@@ -1141,7 +1168,7 @@ export default function CreateRecipeScreen() {
               <Switch
                 value={isCold}
                 onValueChange={handleToggleCold}
-                disabled={isHot}
+                disabled={isHot || beverageNameFlags.hotOnly}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />
@@ -1151,7 +1178,7 @@ export default function CreateRecipeScreen() {
               <Switch
                 value={isIce}
                 onValueChange={handleToggleIce}
-                disabled={isHot}
+                disabled={isHot || beverageNameFlags.hotOnly}
                 trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
                 thumbColor="#FFFFFF"
               />

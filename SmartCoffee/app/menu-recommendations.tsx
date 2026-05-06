@@ -139,12 +139,26 @@ export default function MenuRecommendationsScreen() {
   const [useExistingShopItems, setUseExistingShopItems] = useState(true);
 
   const extractErrorMessage = (raw: unknown) => {
+    const extractValidationMessage = (value: any) => {
+      const errors = value?.errors;
+      if (!errors || typeof errors !== 'object') return null;
+      const groups = Array.isArray(errors.Groups) ? errors.Groups : null;
+      if (groups && groups.length > 0) return String(groups[0]);
+      const firstKey = Object.keys(errors)[0];
+      const firstValue = firstKey ? errors[firstKey] : null;
+      if (Array.isArray(firstValue) && firstValue.length > 0) return String(firstValue[0]);
+      if (typeof firstValue === 'string' && firstValue.trim()) return firstValue.trim();
+      return null;
+    };
+
     if (raw instanceof Error) {
       const text = raw.message.trim();
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
+          const validationMessage = extractValidationMessage(parsed);
+          if (validationMessage) return validationMessage;
           const parsedMessage = parsed?.error ?? parsed?.message;
           if (parsedMessage) return String(parsedMessage);
         } catch {
@@ -155,7 +169,18 @@ export default function MenuRecommendationsScreen() {
     }
 
     if (typeof raw === 'string') {
-      return raw.trim();
+      const trimmed = raw.trim();
+      if (!trimmed) return 'Request failed.';
+      try {
+        const parsed = JSON.parse(trimmed);
+        const validationMessage = extractValidationMessage(parsed);
+        if (validationMessage) return validationMessage;
+        const parsedMessage = parsed?.error ?? parsed?.message;
+        if (parsedMessage) return String(parsedMessage);
+      } catch {
+        // ignore JSON parse error
+      }
+      return trimmed;
     }
 
     return 'Request failed.';

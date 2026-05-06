@@ -180,7 +180,46 @@ export default function AiCreateScreen() {
 
   const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
 
+  const currentBeverageName = useMemo(() => {
+    if (selectedBeverage?.name) return String(selectedBeverage.name);
+    if (selectedBeverage?.beverageName) return String(selectedBeverage.beverageName);
+    const match = beveragesList.find((item) => item.id === selectedBeverageId);
+    return match?.name ?? '';
+  }, [beveragesList, selectedBeverage, selectedBeverageId]);
+
+  const normalizeBeverageName = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const beverageNameFlags = useMemo(() => {
+    const normalized = normalizeBeverageName(currentBeverageName);
+    return {
+      hotOnly: normalized.includes('nong'),
+      coldAllowed: normalized.includes('lanh'),
+    };
+  }, [currentBeverageName]);
+
+  useEffect(() => {
+    if (beverageNameFlags.hotOnly) {
+      setIsHot(true);
+      setIsCold(false);
+      setHasIce(false);
+      return;
+    }
+
+    if (beverageNameFlags.coldAllowed && isHot) {
+      setIsHot(false);
+    }
+  }, [beverageNameFlags, isHot]);
+
   const handleToggleHot = (next: boolean) => {
+    if (beverageNameFlags.coldAllowed) {
+      setIsHot(false);
+      return;
+    }
+
     if (!next && !isCold && !hasIce) {
       setIsHot(true);
       return;
@@ -194,6 +233,11 @@ export default function AiCreateScreen() {
   };
 
   const handleToggleCold = (next: boolean) => {
+    if (beverageNameFlags.hotOnly) {
+      setIsCold(false);
+      return;
+    }
+
     if (!next && hasIce) {
       setIsCold(true);
       return;
@@ -211,6 +255,11 @@ export default function AiCreateScreen() {
   };
 
   const handleToggleIce = (next: boolean) => {
+    if (beverageNameFlags.hotOnly) {
+      setHasIce(false);
+      return;
+    }
+
     if (!next && !isHot && !isCold) {
       setHasIce(true);
       return;
@@ -848,6 +897,7 @@ export default function AiCreateScreen() {
                   <Switch
                     value={isHot}
                     onValueChange={handleToggleHot}
+                    disabled={beverageNameFlags.coldAllowed}
                     trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
                     thumbColor={isHot ? '#6B3E1F' : '#A3A3A3'}
                   />
@@ -857,6 +907,7 @@ export default function AiCreateScreen() {
                   <Switch
                     value={isCold}
                     onValueChange={handleToggleCold}
+                    disabled={beverageNameFlags.hotOnly}
                     trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
                     thumbColor={isCold ? '#6B3E1F' : '#A3A3A3'}
                   />
@@ -866,6 +917,7 @@ export default function AiCreateScreen() {
                   <Switch
                     value={hasIce}
                     onValueChange={handleToggleIce}
+                    disabled={beverageNameFlags.hotOnly}
                     trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
                     thumbColor={hasIce ? '#6B3E1F' : '#A3A3A3'}
                   />
