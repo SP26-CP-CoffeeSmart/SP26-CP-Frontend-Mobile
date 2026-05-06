@@ -262,12 +262,11 @@ export default function AIOrderSuggestionsScreen() {
     return getSafeQty(item.qtyNeeded);
   };
 
-  const totalVnd = suggestions.reduce(
-    (sum, item) => {
-      return sum + calcItemPrice(item);
-    },
-    0
-  );
+  const totalVnd = suggestions.reduce((sum, item) => {
+    const unitPrice = Number(item.priceVnd ?? 0);
+    const safeUnitPrice = Number.isFinite(unitPrice) ? unitPrice : 0;
+    return sum + safeUnitPrice * getDisplayQty(item);
+  }, 0);
 
   const formattedVnd = (value: number) =>
     value.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
@@ -613,19 +612,9 @@ export default function AIOrderSuggestionsScreen() {
                     <Text style={styles.itemQty}>Available quantity package: {getItemLimit(item)}</Text>
                   )}
                   {/* Actual calculated price — only shown in review mode */}
-                  {isReviewing && (() => {
-                    const actualPrice = calcItemPrice(item);
-                    return (
-                      <Text style={[styles.itemQty, { color: '#B23B3B', fontWeight: '700', marginTop: 4 }]}>
-                        Estimated cost: {formattedVnd(Math.round(actualPrice))} VND
-                      </Text>
-                    );
-                  })()}
+
                   <View style={styles.itemMetaRow}>
-                    <View style={styles.itemMetaBadge}>
-                      <Ionicons name="time-outline" size={12} color="#9B8B7B" />
-                      <Text style={styles.itemMetaText}>{item.timeRange}</Text>
-                    </View>
+
                     <View style={styles.itemMetaBadge}>
                       <Ionicons name="star" size={12} color="#D0A45C" />
                       <Text style={styles.itemMetaText}>
