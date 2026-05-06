@@ -554,6 +554,12 @@ export default function DailySalesScreen() {
     };
 
     const handleDatePickerChange = (event: any, date?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowDatePicker(false);
+        }
+        if (event.type === 'dismissed') {
+            return;
+        }
         if (date) {
             if (isFutureDate(date)) {
                 Toast.show({
@@ -898,36 +904,46 @@ export default function DailySalesScreen() {
             </Modal>
 
             {showDatePicker && (
-                <Modal
-                    visible={showDatePicker}
-                    transparent={true}
-                    animationType="slide"
-                    onRequestClose={() => setShowDatePicker(false)}
-                >
-                    <View style={styles.datePickerContainer}>
-                        <View style={styles.datePickerSheet}>
-                            <View style={styles.datePickerHeader}>
-                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                    <Text style={styles.datePickerCancelBtn}>Cancel</Text>
-                                </TouchableOpacity>
-                                <Text style={styles.datePickerTitle}>Select Date</Text>
-                                <TouchableOpacity onPress={() => setShowDatePicker(false)}>
-                                    <Text style={styles.datePickerConfirmBtn}>Done</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <View style={styles.datePickerBody}>
-                                <DateTimePicker
-                                    value={selectedDate}
-                                    mode="date"
-                                    display="spinner"
-                                    onChange={handleDatePickerChange}
-                                    maximumDate={getTodayEnd()}
-                                    textColor={COLORS.text}
-                                />
+                Platform.OS === 'ios' ? (
+                    <Modal
+                        visible={showDatePicker}
+                        transparent={true}
+                        animationType="slide"
+                        onRequestClose={() => setShowDatePicker(false)}
+                    >
+                        <View style={styles.datePickerContainer}>
+                            <View style={styles.datePickerSheet}>
+                                <View style={styles.datePickerHeader}>
+                                    <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                        <Text style={styles.datePickerCancelBtn}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <Text style={styles.datePickerTitle}>Select Date</Text>
+                                    <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                                        <Text style={styles.datePickerConfirmBtn}>Done</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.datePickerBody}>
+                                    <DateTimePicker
+                                        value={selectedDate}
+                                        mode="date"
+                                        display="spinner"
+                                        onChange={handleDatePickerChange}
+                                        maximumDate={getTodayEnd()}
+                                        textColor={COLORS.text}
+                                    />
+                                </View>
                             </View>
                         </View>
-                    </View>
-                </Modal>
+                    </Modal>
+                ) : (
+                    <DateTimePicker
+                        value={selectedDate}
+                        mode="date"
+                        display="default"
+                        onChange={handleDatePickerChange}
+                        maximumDate={getTodayEnd()}
+                    />
+                )
             )}
         </>
     );
