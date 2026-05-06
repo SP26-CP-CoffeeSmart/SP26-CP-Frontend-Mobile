@@ -185,12 +185,6 @@ const MENU_PAGE_SIZE = 10;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const MAX_MENU_ITEM_SIZE_PRICE = 1000000;
 const STRICT_PRICE_PATTERN = /^\d+(\.\d+)?$/;
-const PRICE_ROUNDING_UNIT = 1000;
-
-const roundUpMenuPrice = (value: number) => {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.ceil(value / PRICE_ROUNDING_UNIT) * PRICE_ROUNDING_UNIT;
-};
 
 const getAnchorSizeDraftId = (drafts: SizePriceDraft[]) => {
   if (!Array.isArray(drafts) || drafts.length === 0) return null;
@@ -506,7 +500,7 @@ export default function MenuInsightsScreen() {
     const normalized = value.trim();
     if (!normalized || !STRICT_PRICE_PATTERN.test(normalized)) return fallback;
     const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? roundUpMenuPrice(parsed) : fallback;
+    return Number.isFinite(parsed) ? parsed : fallback;
   };
 
   const parsePriceInputValue = (value: string): number | null => {
@@ -514,7 +508,7 @@ export default function MenuInsightsScreen() {
     if (!normalized || !STRICT_PRICE_PATTERN.test(normalized)) return null;
     const parsed = Number(normalized);
     if (!Number.isFinite(parsed) || parsed <= 0) return null;
-    return roundUpMenuPrice(parsed);
+    return parsed;
   };
 
   const normalizeDescriptionInput = (value: string) => {
@@ -808,7 +802,7 @@ export default function MenuInsightsScreen() {
             const draftVolume = Number(draft.volume ?? 0);
             const hasDraftVolume = Number.isFinite(draftVolume) && draftVolume > 0;
             const ratio = hasAnchorVolume && hasDraftVolume ? draftVolume / anchorVolume : 1;
-            const autoPrice = roundUpMenuPrice(Math.max(anchorPrice, anchorPrice * ratio));
+            const autoPrice = Math.max(anchorPrice, Math.round(anchorPrice * ratio));
 
             return {
               ...draft,
@@ -877,7 +871,7 @@ export default function MenuInsightsScreen() {
 
     if (!isMultiSizeEditing) {
       const priceValue = editSellingPrice.trim();
-      const parsedPrice = roundUpMenuPrice(Number(priceValue));
+      const parsedPrice = Number(priceValue);
       if (!priceValue || !STRICT_PRICE_PATTERN.test(priceValue) || !Number.isFinite(parsedPrice)) {
         errors.sellingPrice = 'Price must be numeric.';
       } else if (parsedPrice <= 0) {
@@ -893,7 +887,7 @@ export default function MenuInsightsScreen() {
       const sizeErrors: Record<number, string> = {};
       editSizePrices.forEach((size, index) => {
         const sizeValue = size.sellingPrice.trim();
-        const parsedSize = roundUpMenuPrice(Number(sizeValue));
+        const parsedSize = Number(sizeValue);
         if (!sizeValue || !STRICT_PRICE_PATTERN.test(sizeValue) || !Number.isFinite(parsedSize)) {
           sizeErrors[size.itemSizeId] = 'Price must be numeric.';
         } else if (parsedSize <= 0) {
@@ -919,12 +913,8 @@ export default function MenuInsightsScreen() {
         const curr = sizesSortedByVolume[i];
         const prevPriceRaw = prev.sellingPrice.trim();
         const currPriceRaw = curr.sellingPrice.trim();
-        const prevPrice = STRICT_PRICE_PATTERN.test(prevPriceRaw)
-          ? roundUpMenuPrice(Number(prevPriceRaw))
-          : NaN;
-        const currPrice = STRICT_PRICE_PATTERN.test(currPriceRaw)
-          ? roundUpMenuPrice(Number(currPriceRaw))
-          : NaN;
+        const prevPrice = STRICT_PRICE_PATTERN.test(prevPriceRaw) ? Number(prevPriceRaw) : NaN;
+        const currPrice = STRICT_PRICE_PATTERN.test(currPriceRaw) ? Number(currPriceRaw) : NaN;
 
         if (
           Number.isFinite(prevPrice) &&
@@ -1461,9 +1451,9 @@ export default function MenuInsightsScreen() {
 
       const candidateSPrice =
         Number.isFinite(defaultPrice) && defaultPrice > 0
-          ? roundUpMenuPrice(defaultPrice)
+          ? defaultPrice
           : costFloorPrice > 0
-            ? roundUpMenuPrice(costFloorPrice)
+            ? costFloorPrice
             : 10000;
 
       const sizeOptions = [...shopSizes]
@@ -1483,10 +1473,7 @@ export default function MenuInsightsScreen() {
       const basePrice =
         costFloorPrice > MAX_MENU_ITEM_SIZE_PRICE
           ? MAX_MENU_ITEM_SIZE_PRICE
-          : Math.min(
-              MAX_MENU_ITEM_SIZE_PRICE,
-              roundUpMenuPrice(Math.max(costFloorPrice, candidateSPrice))
-            );
+          : Math.min(MAX_MENU_ITEM_SIZE_PRICE, Math.max(costFloorPrice, candidateSPrice));
 
       const generatedSizeViewModels =
         sizeOptions.length > 0
@@ -1503,7 +1490,7 @@ export default function MenuInsightsScreen() {
 
               const suggestedPrice = isSSize
                 ? basePrice
-                : roundUpMenuPrice(Math.max(basePrice, basePrice * ratio));
+                : Math.max(basePrice, Math.round(basePrice * ratio));
               return {
                 itemSizeId: -(Math.abs(nextTempId) + index + 1),
                 beverageSizeId: size.beverageSizeId,
