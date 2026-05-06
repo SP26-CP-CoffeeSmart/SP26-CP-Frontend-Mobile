@@ -284,6 +284,14 @@ export default function ProfileScreen() {
     return getProfileField(name, `Package ${index + 1}`);
   };
 
+  const getPlanKey = (value: string) => {
+    const normalized = value.toLowerCase();
+    if (normalized.includes('pro')) return 'pro';
+    if (normalized.includes('starter')) return 'starter';
+    if (normalized.includes('trial')) return 'trial';
+    return 'other';
+  };
+
   const getPackageId = (value: any) => {
     const raw = value?.packageId ?? value?.id ?? value?.subscriptionPackageId;
     return getNumericId(raw);
@@ -1350,6 +1358,19 @@ export default function ProfileScreen() {
                       const selectedPackageId = getPackageId(selectedPackage);
                       const isCurrentPackage =
                         subscriptionPackageId !== null && selectedPackageId === subscriptionPackageId;
+                      const currentPlanKey = getPlanKey(subscriptionName);
+                      const selectedPlanKey = getPlanKey(
+                        getPackageName(selectedPackage, selectedPackageIndex)
+                      );
+                      const canUpgrade =
+                        !isCurrentPackage &&
+                        (currentPlanKey === 'pro'
+                          ? false
+                          : currentPlanKey === 'starter'
+                            ? selectedPlanKey === 'pro'
+                            : currentPlanKey === 'trial'
+                              ? selectedPlanKey === 'starter' || selectedPlanKey === 'pro'
+                              : true);
 
                       return (
                         <View style={styles.packageCard}>
@@ -1383,7 +1404,7 @@ export default function ProfileScreen() {
                                 </Text>
                               </View>
                             ) : null
-                          ) : (
+                          ) : canUpgrade ? (
                             <TouchableOpacity
                               style={styles.packageUpgradeButton}
                               activeOpacity={0.85}
@@ -1400,7 +1421,7 @@ export default function ProfileScreen() {
                                   : `Upgrade to ${getPackageName(selectedPackage, selectedPackageIndex)}`}
                               </Text>
                             </TouchableOpacity>
-                          )}
+                          ) : null}
                         </View>
                       );
                     })()}
