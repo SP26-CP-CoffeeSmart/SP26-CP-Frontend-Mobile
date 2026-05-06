@@ -1,11 +1,13 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
 
 export default function StaffTabLayout() {
+    const insets = useSafeAreaInsets();
+
     return (
         <Tabs
             screenOptions={{
@@ -17,8 +19,8 @@ export default function StaffTabLayout() {
                     backgroundColor: '#FFF',
                     borderTopWidth: 1,
                     borderTopColor: '#E5E5E5',
-                    height: 65,
-                    paddingBottom: 8,
+                    height: 57 + insets.bottom,
+                    paddingBottom: Math.max(insets.bottom, 8),
                     paddingTop: 8,
                 },
                 tabBarLabelStyle: {
@@ -65,14 +67,3 @@ export default function StaffTabLayout() {
         </Tabs>
     );
 }
-
-const styles = StyleSheet.create({
-    centerButton: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: '#8B6835',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-});
