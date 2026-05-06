@@ -173,11 +173,11 @@ const getUploadFileInfo = (uri: string) => {
 const parseCreatedRecipeId = (payload: any) => {
   const candidate = Number(
     payload?.recipeId ??
-      payload?.id ??
-      payload?.shopRecipeId ??
-      payload?.data?.recipeId ??
-      payload?.data?.id ??
-      0
+    payload?.id ??
+    payload?.shopRecipeId ??
+    payload?.data?.recipeId ??
+    payload?.data?.id ??
+    0
   );
   return Number.isFinite(candidate) && candidate > 0 ? candidate : null;
 };
@@ -746,6 +746,12 @@ export default function CreateRecipeScreen() {
       return;
     }
 
+    if (!coverImageUri) {
+      console.log('[Create Recipe] validation failed: missing cover image');
+      Toast.show({ type: 'error', text1: 'Please upload a cover photo' });
+      return;
+    }
+
     if (!selectedBeverageId) {
       console.log('[Create Recipe] validation failed: missing beverageId');
       Toast.show({ type: 'error', text1: 'Please select a beverage' });
@@ -758,8 +764,35 @@ export default function CreateRecipeScreen() {
       return;
     }
 
+    const trimmedPrice = price.trim();
+    if (!trimmedPrice) {
+      console.log('[Create Recipe] validation failed: missing price');
+      Toast.show({ type: 'error', text1: 'Price is required' });
+      return;
+    }
+
+    const parsedPrice = Number(trimmedPrice);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      console.log('[Create Recipe] validation failed: invalid price');
+      Toast.show({ type: 'error', text1: 'Price must be a valid number' });
+      return;
+    }
+
     if (!validatePrepTime()) {
       Toast.show({ type: 'error', text1: 'Prep time is invalid' });
+      return;
+    }
+
+    const trimmedOccasions = suggestedOccasions.trim();
+    if (!trimmedOccasions) {
+      console.log('[Create Recipe] validation failed: missing suggested occasions');
+      Toast.show({ type: 'error', text1: 'Suggested occasions is required' });
+      return;
+    }
+
+    if (!isHot && !isCold) {
+      console.log('[Create Recipe] validation failed: must select Hot or Cold');
+      Toast.show({ type: 'error', text1: 'Please select at least Hot or Cold' });
       return;
     }
 
@@ -891,735 +924,735 @@ export default function CreateRecipeScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-        <View style={styles.headerRow}>
-          <Pressable style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={18} color={palette.accentDeep} />
-          </Pressable>
-          <Text style={styles.headerTitle}>Create Recipe</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-
-        <Pressable
-          style={[styles.coverCard, coverImageUri && styles.coverCardSelected]}
-          onPress={handlePickCoverImage}
-        >
-          {coverImageUri ? (
-            <Image source={{ uri: coverImageUri }} style={styles.coverPreview} />
-          ) : (
-            <View style={styles.coverIconWrap}>
-              <Ionicons name="camera" size={20} color={palette.accent} />
-              <View style={styles.coverPlus}>
-                <Ionicons name="add" size={10} color={palette.accent} />
-              </View>
-            </View>
-          )}
-          <Text style={styles.coverText}>
-            {coverImageUri ? 'Cover Photo Selected (Tap to change)' : 'Upload Cover Photo'}
-          </Text>
-        </Pressable>
-
-        {loadingInit ? (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator size="small" color={palette.accentDeep} />
-            <Text style={styles.loadingText}>Loading beverages and ingredients...</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.formBlock}>
-          <Text style={styles.sectionLabel}>RECIPE NAME</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g. Honey Lavender Latte"
-            placeholderTextColor={palette.muted}
-            value={recipeName}
-            onChangeText={(value) => setRecipeName(value.slice(0, MAX_RECIPE_NAME_LENGTH))}
-            maxLength={MAX_RECIPE_NAME_LENGTH}
-          />
-
-          <View style={styles.rowSplit}>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>CATEGORY</Text>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowCategoryDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText}>{categories[categoryIndex]}</Text>
-                <Ionicons name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showCategoryDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                    {categories.map((item, index) => (
-                      <Pressable
-                        key={item}
-                        style={[
-                          styles.dropdownItem,
-                          index === categoryIndex && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setCategoryIndex(index);
-                          setShowCategoryDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            index === categoryIndex && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>BEVERAGE</Text>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowBeverageDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText} numberOfLines={1}>{currentBeverageName}</Text>
-                <Ionicons name={showBeverageDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showBeverageDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                    {beverageOptions.map((item) => (
-                      <Pressable
-                        key={item.id}
-                        style={[
-                          styles.dropdownItem,
-                          item.id === selectedBeverageId && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setSelectedBeverageId(item.id);
-                          setShowBeverageDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            item.id === selectedBeverageId && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Ionicons name="color-palette" size={18} color={palette.accent} />
-            <Text style={styles.cardTitle}>Flavor Profile</Text>
+          <View style={styles.headerRow}>
+            <Pressable style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={18} color={palette.accentDeep} />
+            </Pressable>
+            <Text style={styles.headerTitle}>Create Recipe</Text>
+            <View style={styles.headerSpacer} />
           </View>
 
-          <View style={styles.rowSplit}>
-            <View style={styles.flexItem}>
-              <Text style={styles.fieldLabel}>Primary Style</Text>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowPrimaryStyleDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText}>{primaryStyles[primaryIndex]}</Text>
-                <Ionicons name={showPrimaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showPrimaryStyleDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                    {primaryStyles.map((item, index) => (
-                      <Pressable
-                        key={item}
-                        style={[
-                          styles.dropdownItem,
-                          index === primaryIndex && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setPrimaryIndex(index);
-                          setShowPrimaryStyleDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            index === primaryIndex && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.flexItem}>
-              <Text style={styles.fieldLabel}>Secondary Style</Text>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowSecondaryStyleDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText}>{secondaryStyles[secondaryIndex]}</Text>
-                <Ionicons name={showSecondaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showSecondaryStyleDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                    {secondaryStyles.map((item, index) => (
-                      <Pressable
-                        key={item}
-                        style={[
-                          styles.dropdownItem,
-                          index === secondaryIndex && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setSecondaryIndex(index);
-                          setShowSecondaryStyleDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            index === secondaryIndex && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-            </View>
-          </View>
-
-          <Text style={styles.fieldLabel}>Flavor Notes</Text>
-          <View style={styles.chipRow}>
-            {notes.map((note, index) => (
-              <View key={`${note}-${index}`} style={styles.chip}>
-                <Text style={styles.chipText}>{note}</Text>
-                <Pressable
-                  onPress={() => setNotes((prev) => prev.filter((_, i) => i !== index))}
-                  hitSlop={8}
-                >
-                  <Ionicons name="close" size={12} color={palette.accentDeep} />
-                </Pressable>
-              </View>
-            ))}
-            {!showNoteInput ? (
-              <Pressable style={styles.chipGhost} onPress={() => setShowNoteInput(true)}>
-                <Text style={styles.chipGhostText}>+ Add Note</Text>
-              </Pressable>
+          <Pressable
+            style={[styles.coverCard, coverImageUri && styles.coverCardSelected]}
+            onPress={handlePickCoverImage}
+          >
+            {coverImageUri ? (
+              <Image source={{ uri: coverImageUri }} style={styles.coverPreview} />
             ) : (
-              <View style={styles.noteInputRow}>
-                <TextInput
-                  style={[styles.input, styles.noteInput]}
-                  placeholder="New note"
-                  placeholderTextColor={palette.muted}
-                  value={noteDraft}
-                  onChangeText={setNoteDraft}
-                />
-                <Pressable style={styles.noteButton} onPress={handleAddNote}>
-                  <Text style={styles.noteButtonText}>Add</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.noteButton, styles.noteCancelButton]}
-                  onPress={() => {
-                    setNoteDraft('');
-                    setShowNoteInput(false);
-                  }}
-                >
-                  <Text style={styles.noteCancelText}>Cancel</Text>
-                </Pressable>
+              <View style={styles.coverIconWrap}>
+                <Ionicons name="camera" size={20} color={palette.accent} />
+                <View style={styles.coverPlus}>
+                  <Ionicons name="add" size={10} color={palette.accent} />
+                </View>
               </View>
             )}
-          </View>
-        </View>
+            <Text style={styles.coverText}>
+              {coverImageUri ? 'Cover Photo Selected (Tap to change)' : 'Upload Cover Photo'}
+            </Text>
+          </Pressable>
 
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <Ionicons name="options" size={18} color={palette.accent} />
-            <Text style={styles.cardTitle}>Attributes</Text>
-          </View>
-
-          <View style={styles.toggleGrid}>
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleLabel}>Hot</Text>
-              <Switch
-                value={isHot}
-                onValueChange={handleToggleHot}
-                disabled={isCold || isIce || beverageNameFlags.coldAllowed}
-                trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
-                thumbColor="#FFFFFF"
-              />
-              <Text style={styles.toggleLabel}>Cold</Text>
-              <Switch
-                value={isCold}
-                onValueChange={handleToggleCold}
-                disabled={isHot || beverageNameFlags.hotOnly}
-                trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
-                thumbColor="#FFFFFF"
-              />
+          {loadingInit ? (
+            <View style={styles.loadingRow}>
+              <ActivityIndicator size="small" color={palette.accentDeep} />
+              <Text style={styles.loadingText}>Loading beverages and ingredients...</Text>
             </View>
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleLabel}>Ice</Text>
-              <Switch
-                value={isIce}
-                onValueChange={handleToggleIce}
-                disabled={isHot || beverageNameFlags.hotOnly}
-                trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
-                thumbColor="#FFFFFF"
-              />
-              <Text style={styles.toggleLabel}>Milk</Text>
-              <Switch value={isMilk} onValueChange={setIsMilk} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
-            </View>
-          
-          </View>
+          ) : null}
 
-          <View style={styles.sliderHeader}>
-            <Text style={styles.fieldLabel}>Caffeine Strength</Text>
-            <View style={styles.strengthPill}>
-              <Text style={styles.strengthText}>{strengthLabel}</Text>
-            </View>
-          </View>
-          <Slider
-            value={strength}
-            onValueChange={setStrength}
-            minimumValue={0}
-            maximumValue={1}
-            minimumTrackTintColor={palette.accentDeep}
-            maximumTrackTintColor={palette.line}
-            thumbTintColor={palette.accentDeep}
-            style={styles.slider}
-          />
-          <View style={styles.sliderScale}>
-            <Text style={styles.sliderHint}>DECAF</Text>
-            <Text style={styles.sliderHint}>REGULAR</Text>
-            <Text style={styles.sliderHint}>EXTRA</Text>
-          </View>
-        </View>
+          <View style={styles.formBlock}>
+            <Text style={styles.sectionLabel}>RECIPE NAME</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. Honey Lavender Latte"
+              placeholderTextColor={palette.muted}
+              value={recipeName}
+              onChangeText={(value) => setRecipeName(value.slice(0, MAX_RECIPE_NAME_LENGTH))}
+              maxLength={MAX_RECIPE_NAME_LENGTH}
+            />
 
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Ionicons name="briefcase" size={18} color={palette.accent} />
-            <Text style={styles.sectionTitle}>Business Details</Text>
-          </View>
-          <View style={styles.rowSplit}>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>PRICE (VND)</Text>
-              <View style={styles.inputWithSuffix}>
-                <TextInput
-                  style={styles.input}
-                  placeholder="55000"
-                  placeholderTextColor={palette.muted}
-                  keyboardType="numeric"
-                  value={price}
-                  onChangeText={(value) => setPrice(clampNumberInput(value, MAX_PRICE_VALUE))}
-                  maxLength={8}
-                />
-                <Text style={styles.inputSuffix}>VND</Text>
-              </View>
-            </View>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>EST. MARGIN (%)</Text>
-              <View style={styles.marginPill}>
-                <Text style={styles.marginText}>{calculatedProfitMarginLabel}</Text>
-                <Ionicons name="trending-up" size={14} color={palette.greenText} />
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.rowSplit}>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>DIFFICULTY</Text>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowDifficultyDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText}>{difficulties[difficultyIndex]}</Text>
-                <Ionicons name={showDifficultyDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showDifficultyDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                    {difficulties.map((item, index) => (
-                      <Pressable
-                        key={item}
-                        style={[
-                          styles.dropdownItem,
-                          index === difficultyIndex && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setDifficultyIndex(index);
-                          setShowDifficultyDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            index === difficultyIndex && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.flexItem}>
-              <Text style={styles.sectionLabel}>PREP TIME (MIN)</Text>
-              <View style={styles.rowSplitTight}>
-                <TextInput
-                  style={[styles.input, styles.timeInput]}
-                  placeholder="3"
-                  placeholderTextColor={palette.muted}
-                  keyboardType="numeric"
-                  value={prepMin}
-                  onChangeText={(value) => {
-                    setPrepMin(clampPrepInput(value));
-                    if (prepTimeError) setPrepTimeError('');
-                  }}
-                  onBlur={validatePrepTime}
-                  maxLength={2}
-                />
-                <Text style={styles.timeDash}>-</Text>
-                <TextInput
-                  style={[styles.input, styles.timeInput]}
-                  placeholder="5"
-                  placeholderTextColor={palette.muted}
-                  keyboardType="numeric"
-                  value={prepMax}
-                  onChangeText={(value) => {
-                    setPrepMax(clampPrepInput(value));
-                    if (prepTimeError) setPrepTimeError('');
-                  }}
-                  onBlur={validatePrepTime}
-                  maxLength={2}
-                />
-              </View>
-              {prepTimeError ? (
-                <Text style={styles.prepErrorText}>{prepTimeError}</Text>
-              ) : null}
-            </View>
-          </View>
-
-          <Text style={styles.sectionLabel}>SUGGESTED OCCASIONS</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Morning rush, weekend brunch, date night..."
-            placeholderTextColor={palette.muted}
-            value={suggestedOccasions}
-            onChangeText={(value) =>
-              setSuggestedOccasions(value.slice(0, MAX_SUGGESTED_OCCASIONS_LENGTH))
-            }
-            maxLength={MAX_SUGGESTED_OCCASIONS_LENGTH}
-          />
-        </View>
-
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionHeaderRow}>
-            <Ionicons name="clipboard" size={18} color={palette.accent} />
-            <Text style={styles.sectionTitle}>Preparation</Text>
-          </View>
-
-          <Text style={styles.sectionLabel}>INGREDIENTS LIST</Text>
-          {ingredients.map((item, index) => (
-            <View key={`${item.ingredientId}-${index}`} style={styles.ingredientCard}>
-              <View style={[styles.ingredientIcon, { backgroundColor: item.tint }]}
-              >
-                <Ionicons name={item.icon} size={16} color={item.iconColor} />
-              </View>
-              <View style={styles.ingredientInfo}>
-                <Text style={styles.ingredientName}>{item.name}</Text>
-                <Text style={styles.ingredientNote}>{item.note}</Text>
-              </View>
-              <View style={styles.ingredientAmount}>
-                <Text style={styles.ingredientAmountText}>{item.amount} {item.measurement}</Text>
-              </View>
-              <Pressable onPress={() => setIngredients((prev) => prev.filter((row) => row.ingredientId !== item.ingredientId))}>
-                <Ionicons name="trash-outline" size={16} color={palette.accentDeep} />
-              </Pressable>
-            </View>
-          ))}
-
-          {!showIngredientInput ? (
-            <Pressable
-              style={styles.addRow}
-              onPress={() => {
-                setIngredientSearchKeyword('');
-                setShowIngredientInput(true);
-              }}
-            >
-              <Ionicons name="add" size={16} color={palette.accentDeep} />
-              <Text style={styles.addRowText}>Add Ingredient</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.inlineForm}>
-              <Pressable
-                style={styles.selectInput}
-                onPress={() => setShowIngredientDropdown((prev) => !prev)}
-              >
-                <Text style={styles.selectText} numberOfLines={1}>{currentIngredientName}</Text>
-                <Ionicons name={showIngredientDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-              </Pressable>
-              {showIngredientDropdown ? (
-                <View style={styles.dropdownCard}>
-                  <View style={styles.dropdownSearchWrap}>
-                    <Ionicons name="search" size={14} color={palette.muted} />
-                    <TextInput
-                      style={styles.dropdownSearchInput}
-                      placeholder="Search ingredient name..."
-                      placeholderTextColor={palette.muted}
-                      value={ingredientSearchKeyword}
-                      onChangeText={setIngredientSearchKeyword}
-                    />
-                  </View>
-                  <ScrollView
-                    nestedScrollEnabled
-                    style={styles.dropdownList}
-                    onScroll={handleIngredientDropdownScroll}
-                    scrollEventThrottle={16}
-                  >
-                    {ingredientOptions.map((item) => (
-                      <Pressable
-                        key={item.id}
-                        style={[
-                          styles.dropdownItem,
-                          item.id === selectedIngredientId && styles.dropdownItemSelected,
-                        ]}
-                        onPress={() => {
-                          setSelectedIngredientId(item.id);
-                          setShowIngredientDropdown(false);
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.dropdownItemText,
-                            item.id === selectedIngredientId && styles.dropdownItemTextSelected,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {item.name}
-                        </Text>
-                      </Pressable>
-                    ))}
-                    {loadingIngredientMore ? (
-                      <View style={styles.dropdownLoadingRow}>
-                        <ActivityIndicator size="small" color={palette.accentDeep} />
-                      </View>
-                    ) : null}
-                  </ScrollView>
-                </View>
-              ) : null}
-
-              <View style={styles.rowSplit}>
-                <TextInput
-                  style={[styles.input, styles.flexInput]}
-                  placeholder="Quantity"
-                  placeholderTextColor={palette.muted}
-                  keyboardType="numeric"
-                  value={ingredientDraft.quantity}
-                  onChangeText={(value) => {
-                    setIngredientDraft((prev) => ({ ...prev, quantity: clampNumberInput(value, MAX_INGREDIENT_QUANTITY) }));
-                    if (ingredientError) setIngredientError('');
-                  }}
-                  maxLength={4}
-                />
-                <View
-                  style={[
-                    styles.measurementPickerWrap,
-                    ingredientError ? styles.measurementPickerError : null,
-                  ]}
+            <View style={styles.rowSplit}>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>CATEGORY</Text>
+                <Pressable
+                  style={styles.selectInput}
+                  onPress={() => setShowCategoryDropdown((prev) => !prev)}
                 >
-                  <Text style={styles.measurementLabel}>Measurement</Text>
-                  {ingredientError ? (
-                    <Text style={styles.ingredientErrorText}>{ingredientError}</Text>
-                  ) : null}
-                  <View style={styles.measurementOptions}>
-                    {measurementOptions.map((unit) => {
-                      const disabled = !allowedMeasurementOptions.includes(unit);
-                      const selected = ingredientDraft.measurement === unit;
-                      return (
+                  <Text style={styles.selectText}>{categories[categoryIndex]}</Text>
+                  <Ionicons name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+                </Pressable>
+                {showCategoryDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                      {categories.map((item, index) => (
                         <Pressable
-                          key={unit}
+                          key={item}
                           style={[
-                            styles.measureChip,
-                            selected && styles.measureChipSelected,
-                            disabled && styles.measureChipDisabled,
+                            styles.dropdownItem,
+                            index === categoryIndex && styles.dropdownItemSelected,
                           ]}
-                          disabled={disabled}
                           onPress={() => {
-                            setIngredientDraft((prev) => ({ ...prev, measurement: unit }));
-                            if (ingredientError) setIngredientError('');
+                            setCategoryIndex(index);
+                            setShowCategoryDropdown(false);
                           }}
                         >
                           <Text
                             style={[
-                              styles.measureChipText,
-                              selected && styles.measureChipTextSelected,
-                              disabled && styles.measureChipTextDisabled,
+                              styles.dropdownItemText,
+                              index === categoryIndex && styles.dropdownItemTextSelected,
                             ]}
+                            numberOfLines={1}
                           >
-                            {unit}
+                            {item}
                           </Text>
                         </Pressable>
-                      );
-                    })}
+                      ))}
+                    </ScrollView>
                   </View>
-                </View>
+                ) : null}
               </View>
-
-              <View style={styles.inlineActions}>
-                <Pressable style={styles.primaryAction} onPress={handleAddIngredient}>
-                  <Text style={styles.primaryActionText}>Add</Text>
-                </Pressable>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>BEVERAGE</Text>
                 <Pressable
-                  style={styles.ghostAction}
-                  onPress={() => {
-                    setIngredientDraft({ quantity: '', measurement: 'g' });
-                    setShowIngredientInput(false);
-                  }}
+                  style={styles.selectInput}
+                  onPress={() => setShowBeverageDropdown((prev) => !prev)}
                 >
-                  <Text style={styles.ghostActionText}>Cancel</Text>
+                  <Text style={styles.selectText} numberOfLines={1}>{currentBeverageName}</Text>
+                  <Ionicons name={showBeverageDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
                 </Pressable>
+                {showBeverageDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                      {beverageOptions.map((item) => (
+                        <Pressable
+                          key={item.id}
+                          style={[
+                            styles.dropdownItem,
+                            item.id === selectedBeverageId && styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setSelectedBeverageId(item.id);
+                            setShowBeverageDropdown(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              item.id === selectedBeverageId && styles.dropdownItemTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
               </View>
             </View>
-          )}
+          </View>
 
-          <Text style={styles.sectionLabel}>BREWING METHOD</Text>
-          <Pressable
-            style={styles.selectInput}
-            onPress={() => setShowBrewingMethodDropdown((prev) => !prev)}
-          >
-            <Text style={styles.selectText}>{brewingMethods[brewIndex]}</Text>
-            <Ionicons name={showBrewingMethodDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
-          </Pressable>
-          {showBrewingMethodDropdown ? (
-            <View style={styles.dropdownCard}>
-              <ScrollView nestedScrollEnabled style={styles.dropdownList}>
-                {brewingMethods.map((item, index) => (
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Ionicons name="color-palette" size={18} color={palette.accent} />
+              <Text style={styles.cardTitle}>Flavor Profile</Text>
+            </View>
+
+            <View style={styles.rowSplit}>
+              <View style={styles.flexItem}>
+                <Text style={styles.fieldLabel}>Primary Style</Text>
+                <Pressable
+                  style={styles.selectInput}
+                  onPress={() => setShowPrimaryStyleDropdown((prev) => !prev)}
+                >
+                  <Text style={styles.selectText}>{primaryStyles[primaryIndex]}</Text>
+                  <Ionicons name={showPrimaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+                </Pressable>
+                {showPrimaryStyleDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                      {primaryStyles.map((item, index) => (
+                        <Pressable
+                          key={item}
+                          style={[
+                            styles.dropdownItem,
+                            index === primaryIndex && styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setPrimaryIndex(index);
+                            setShowPrimaryStyleDropdown(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              index === primaryIndex && styles.dropdownItemTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+              <View style={styles.flexItem}>
+                <Text style={styles.fieldLabel}>Secondary Style</Text>
+                <Pressable
+                  style={styles.selectInput}
+                  onPress={() => setShowSecondaryStyleDropdown((prev) => !prev)}
+                >
+                  <Text style={styles.selectText}>{secondaryStyles[secondaryIndex]}</Text>
+                  <Ionicons name={showSecondaryStyleDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+                </Pressable>
+                {showSecondaryStyleDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                      {secondaryStyles.map((item, index) => (
+                        <Pressable
+                          key={item}
+                          style={[
+                            styles.dropdownItem,
+                            index === secondaryIndex && styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setSecondaryIndex(index);
+                            setShowSecondaryStyleDropdown(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              index === secondaryIndex && styles.dropdownItemTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <Text style={styles.fieldLabel}>Flavor Notes</Text>
+            <View style={styles.chipRow}>
+              {notes.map((note, index) => (
+                <View key={`${note}-${index}`} style={styles.chip}>
+                  <Text style={styles.chipText}>{note}</Text>
                   <Pressable
-                    key={item}
-                    style={[
-                      styles.dropdownItem,
-                      index === brewIndex && styles.dropdownItemSelected,
-                    ]}
+                    onPress={() => setNotes((prev) => prev.filter((_, i) => i !== index))}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="close" size={12} color={palette.accentDeep} />
+                  </Pressable>
+                </View>
+              ))}
+              {!showNoteInput ? (
+                <Pressable style={styles.chipGhost} onPress={() => setShowNoteInput(true)}>
+                  <Text style={styles.chipGhostText}>+ Add Note</Text>
+                </Pressable>
+              ) : (
+                <View style={styles.noteInputRow}>
+                  <TextInput
+                    style={[styles.input, styles.noteInput]}
+                    placeholder="New note"
+                    placeholderTextColor={palette.muted}
+                    value={noteDraft}
+                    onChangeText={setNoteDraft}
+                  />
+                  <Pressable style={styles.noteButton} onPress={handleAddNote}>
+                    <Text style={styles.noteButtonText}>Add</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.noteButton, styles.noteCancelButton]}
                     onPress={() => {
-                      setBrewIndex(index);
-                      setShowBrewingMethodDropdown(false);
+                      setNoteDraft('');
+                      setShowNoteInput(false);
                     }}
                   >
-                    <Text
-                      style={[
-                        styles.dropdownItemText,
-                        index === brewIndex && styles.dropdownItemTextSelected,
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {item}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
-
-          <Text style={styles.sectionLabel}>STEPS</Text>
-          {steps.map((step, index) => (
-            <View key={`${step.title}-${index}`} style={styles.stepRow}>
-              <View style={styles.stepIndicator}>
-                <Text style={styles.stepNumber}>{index + 1}</Text>
-              </View>
-              <View style={styles.stepCard}>
-                <View style={styles.stepCardHeader}>
-                  <Text style={styles.stepTitle}>{step.title}</Text>
-                  <Pressable style={styles.stepRemoveButton} onPress={() => handleRemoveStep(index)}>
-                    <Ionicons name="trash-outline" size={14} color={palette.accentDeep} />
+                    <Text style={styles.noteCancelText}>Cancel</Text>
                   </Pressable>
                 </View>
-                <Text style={styles.stepBody}>{step.body}</Text>
+              )}
+            </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.cardHeaderRow}>
+              <Ionicons name="options" size={18} color={palette.accent} />
+              <Text style={styles.cardTitle}>Attributes</Text>
+            </View>
+
+            <View style={styles.toggleGrid}>
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Hot</Text>
+                <Switch
+                  value={isHot}
+                  onValueChange={handleToggleHot}
+                  disabled={isCold || isIce || beverageNameFlags.coldAllowed}
+                  trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
+                  thumbColor="#FFFFFF"
+                />
+                <Text style={styles.toggleLabel}>Cold</Text>
+                <Switch
+                  value={isCold}
+                  onValueChange={handleToggleCold}
+                  disabled={isHot || beverageNameFlags.hotOnly}
+                  trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Ice</Text>
+                <Switch
+                  value={isIce}
+                  onValueChange={handleToggleIce}
+                  disabled={isHot || beverageNameFlags.hotOnly}
+                  trackColor={{ false: '#E0D7CF', true: palette.accentDeep }}
+                  thumbColor="#FFFFFF"
+                />
+                <Text style={styles.toggleLabel}>Milk</Text>
+                <Switch value={isMilk} onValueChange={setIsMilk} trackColor={{ false: '#E0D7CF', true: palette.accentDeep }} thumbColor="#FFFFFF" />
+              </View>
+
+            </View>
+
+            <View style={styles.sliderHeader}>
+              <Text style={styles.fieldLabel}>Caffeine Strength</Text>
+              <View style={styles.strengthPill}>
+                <Text style={styles.strengthText}>{strengthLabel}</Text>
               </View>
             </View>
-          ))}
+            <Slider
+              value={strength}
+              onValueChange={setStrength}
+              minimumValue={0}
+              maximumValue={1}
+              minimumTrackTintColor={palette.accentDeep}
+              maximumTrackTintColor={palette.line}
+              thumbTintColor={palette.accentDeep}
+              style={styles.slider}
+            />
+            <View style={styles.sliderScale}>
+              <Text style={styles.sliderHint}>DECAF</Text>
+              <Text style={styles.sliderHint}>REGULAR</Text>
+              <Text style={styles.sliderHint}>EXTRA</Text>
+            </View>
+          </View>
 
-          {!showStepInput ? (
-            <Pressable style={styles.addStepRow} onPress={() => setShowStepInput(true)}>
-              <View style={styles.addStepCircle}>
-                <Ionicons name="add" size={14} color={palette.accentDeep} />
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="briefcase" size={18} color={palette.accent} />
+              <Text style={styles.sectionTitle}>Business Details</Text>
+            </View>
+            <View style={styles.rowSplit}>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>PRICE (VND)</Text>
+                <View style={styles.inputWithSuffix}>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="55000"
+                    placeholderTextColor={palette.muted}
+                    keyboardType="numeric"
+                    value={price}
+                    onChangeText={(value) => setPrice(clampNumberInput(value, MAX_PRICE_VALUE))}
+                    maxLength={8}
+                  />
+                  <Text style={styles.inputSuffix}>VND</Text>
+                </View>
               </View>
-              <Text style={styles.addStepText}>Add Next Step</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.inlineForm}>
-              <TextInput
-                style={styles.input}
-                placeholder="Step title"
-                placeholderTextColor={palette.muted}
-                value={stepDraft.title}
-                onChangeText={(text) =>
-                  setStepDraft((prev) => ({
-                    ...prev,
-                    title: text.slice(0, MAX_STEP_TITLE_LENGTH),
-                  }))
-                }
-                maxLength={MAX_STEP_TITLE_LENGTH}
-                onFocus={handleStepInputFocus}
-              />
-              <TextInput
-                style={[styles.input, styles.stepInput]}
-                placeholder="Step description"
-                placeholderTextColor={palette.muted}
-                value={stepDraft.body}
-                onChangeText={(text) =>
-                  setStepDraft((prev) => ({
-                    ...prev,
-                    body: text.slice(0, MAX_STEP_BODY_LENGTH),
-                  }))
-                }
-                multiline
-                maxLength={MAX_STEP_BODY_LENGTH}
-                onFocus={handleStepInputFocus}
-              />
-              <View style={styles.inlineActions}>
-                <Pressable style={styles.primaryAction} onPress={handleAddStep}>
-                  <Text style={styles.primaryActionText}>Add Step</Text>
-                </Pressable>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>EST. MARGIN (%)</Text>
+                <View style={styles.marginPill}>
+                  <Text style={styles.marginText}>{calculatedProfitMarginLabel}</Text>
+                  <Ionicons name="trending-up" size={14} color={palette.greenText} />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.rowSplit}>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>DIFFICULTY</Text>
                 <Pressable
-                  style={styles.ghostAction}
-                  onPress={() => {
-                    setStepDraft({ title: '', body: '' });
-                    setShowStepInput(false);
-                  }}
+                  style={styles.selectInput}
+                  onPress={() => setShowDifficultyDropdown((prev) => !prev)}
                 >
-                  <Text style={styles.ghostActionText}>Cancel</Text>
+                  <Text style={styles.selectText}>{difficulties[difficultyIndex]}</Text>
+                  <Ionicons name={showDifficultyDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
                 </Pressable>
+                {showDifficultyDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                      {difficulties.map((item, index) => (
+                        <Pressable
+                          key={item}
+                          style={[
+                            styles.dropdownItem,
+                            index === difficultyIndex && styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setDifficultyIndex(index);
+                            setShowDifficultyDropdown(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              index === difficultyIndex && styles.dropdownItemTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
+              </View>
+              <View style={styles.flexItem}>
+                <Text style={styles.sectionLabel}>PREP TIME (MIN)</Text>
+                <View style={styles.rowSplitTight}>
+                  <TextInput
+                    style={[styles.input, styles.timeInput]}
+                    placeholder="3"
+                    placeholderTextColor={palette.muted}
+                    keyboardType="numeric"
+                    value={prepMin}
+                    onChangeText={(value) => {
+                      setPrepMin(clampPrepInput(value));
+                      if (prepTimeError) setPrepTimeError('');
+                    }}
+                    onBlur={validatePrepTime}
+                    maxLength={2}
+                  />
+                  <Text style={styles.timeDash}>-</Text>
+                  <TextInput
+                    style={[styles.input, styles.timeInput]}
+                    placeholder="5"
+                    placeholderTextColor={palette.muted}
+                    keyboardType="numeric"
+                    value={prepMax}
+                    onChangeText={(value) => {
+                      setPrepMax(clampPrepInput(value));
+                      if (prepTimeError) setPrepTimeError('');
+                    }}
+                    onBlur={validatePrepTime}
+                    maxLength={2}
+                  />
+                </View>
+                {prepTimeError ? (
+                  <Text style={styles.prepErrorText}>{prepTimeError}</Text>
+                ) : null}
               </View>
             </View>
-          )}
-        </View>
 
-        <Pressable style={[styles.saveButton, submitting && styles.saveButtonDisabled]} onPress={handleSaveRecipe} disabled={submitting || loadingInit}>
-          {submitting ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <Text style={styles.saveButtonText}>Save Recipe</Text>
-          )}
-        </Pressable>
+            <Text style={styles.sectionLabel}>SUGGESTED OCCASIONS</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Morning rush, weekend brunch, date night..."
+              placeholderTextColor={palette.muted}
+              value={suggestedOccasions}
+              onChangeText={(value) =>
+                setSuggestedOccasions(value.slice(0, MAX_SUGGESTED_OCCASIONS_LENGTH))
+              }
+              maxLength={MAX_SUGGESTED_OCCASIONS_LENGTH}
+            />
+          </View>
+
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="clipboard" size={18} color={palette.accent} />
+              <Text style={styles.sectionTitle}>Preparation</Text>
+            </View>
+
+            <Text style={styles.sectionLabel}>INGREDIENTS LIST</Text>
+            {ingredients.map((item, index) => (
+              <View key={`${item.ingredientId}-${index}`} style={styles.ingredientCard}>
+                <View style={[styles.ingredientIcon, { backgroundColor: item.tint }]}
+                >
+                  <Ionicons name={item.icon} size={16} color={item.iconColor} />
+                </View>
+                <View style={styles.ingredientInfo}>
+                  <Text style={styles.ingredientName}>{item.name}</Text>
+                  <Text style={styles.ingredientNote}>{item.note}</Text>
+                </View>
+                <View style={styles.ingredientAmount}>
+                  <Text style={styles.ingredientAmountText}>{item.amount} {item.measurement}</Text>
+                </View>
+                <Pressable onPress={() => setIngredients((prev) => prev.filter((row) => row.ingredientId !== item.ingredientId))}>
+                  <Ionicons name="trash-outline" size={16} color={palette.accentDeep} />
+                </Pressable>
+              </View>
+            ))}
+
+            {!showIngredientInput ? (
+              <Pressable
+                style={styles.addRow}
+                onPress={() => {
+                  setIngredientSearchKeyword('');
+                  setShowIngredientInput(true);
+                }}
+              >
+                <Ionicons name="add" size={16} color={palette.accentDeep} />
+                <Text style={styles.addRowText}>Add Ingredient</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.inlineForm}>
+                <Pressable
+                  style={styles.selectInput}
+                  onPress={() => setShowIngredientDropdown((prev) => !prev)}
+                >
+                  <Text style={styles.selectText} numberOfLines={1}>{currentIngredientName}</Text>
+                  <Ionicons name={showIngredientDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+                </Pressable>
+                {showIngredientDropdown ? (
+                  <View style={styles.dropdownCard}>
+                    <View style={styles.dropdownSearchWrap}>
+                      <Ionicons name="search" size={14} color={palette.muted} />
+                      <TextInput
+                        style={styles.dropdownSearchInput}
+                        placeholder="Search ingredient name..."
+                        placeholderTextColor={palette.muted}
+                        value={ingredientSearchKeyword}
+                        onChangeText={setIngredientSearchKeyword}
+                      />
+                    </View>
+                    <ScrollView
+                      nestedScrollEnabled
+                      style={styles.dropdownList}
+                      onScroll={handleIngredientDropdownScroll}
+                      scrollEventThrottle={16}
+                    >
+                      {ingredientOptions.map((item) => (
+                        <Pressable
+                          key={item.id}
+                          style={[
+                            styles.dropdownItem,
+                            item.id === selectedIngredientId && styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setSelectedIngredientId(item.id);
+                            setShowIngredientDropdown(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              item.id === selectedIngredientId && styles.dropdownItemTextSelected,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {item.name}
+                          </Text>
+                        </Pressable>
+                      ))}
+                      {loadingIngredientMore ? (
+                        <View style={styles.dropdownLoadingRow}>
+                          <ActivityIndicator size="small" color={palette.accentDeep} />
+                        </View>
+                      ) : null}
+                    </ScrollView>
+                  </View>
+                ) : null}
+
+                <View style={styles.rowSplit}>
+                  <TextInput
+                    style={[styles.input, styles.flexInput]}
+                    placeholder="Quantity"
+                    placeholderTextColor={palette.muted}
+                    keyboardType="numeric"
+                    value={ingredientDraft.quantity}
+                    onChangeText={(value) => {
+                      setIngredientDraft((prev) => ({ ...prev, quantity: clampNumberInput(value, MAX_INGREDIENT_QUANTITY) }));
+                      if (ingredientError) setIngredientError('');
+                    }}
+                    maxLength={4}
+                  />
+                  <View
+                    style={[
+                      styles.measurementPickerWrap,
+                      ingredientError ? styles.measurementPickerError : null,
+                    ]}
+                  >
+                    <Text style={styles.measurementLabel}>Measurement</Text>
+                    {ingredientError ? (
+                      <Text style={styles.ingredientErrorText}>{ingredientError}</Text>
+                    ) : null}
+                    <View style={styles.measurementOptions}>
+                      {measurementOptions.map((unit) => {
+                        const disabled = !allowedMeasurementOptions.includes(unit);
+                        const selected = ingredientDraft.measurement === unit;
+                        return (
+                          <Pressable
+                            key={unit}
+                            style={[
+                              styles.measureChip,
+                              selected && styles.measureChipSelected,
+                              disabled && styles.measureChipDisabled,
+                            ]}
+                            disabled={disabled}
+                            onPress={() => {
+                              setIngredientDraft((prev) => ({ ...prev, measurement: unit }));
+                              if (ingredientError) setIngredientError('');
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.measureChipText,
+                                selected && styles.measureChipTextSelected,
+                                disabled && styles.measureChipTextDisabled,
+                              ]}
+                            >
+                              {unit}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.inlineActions}>
+                  <Pressable style={styles.primaryAction} onPress={handleAddIngredient}>
+                    <Text style={styles.primaryActionText}>Add</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.ghostAction}
+                    onPress={() => {
+                      setIngredientDraft({ quantity: '', measurement: 'g' });
+                      setShowIngredientInput(false);
+                    }}
+                  >
+                    <Text style={styles.ghostActionText}>Cancel</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+
+            <Text style={styles.sectionLabel}>BREWING METHOD</Text>
+            <Pressable
+              style={styles.selectInput}
+              onPress={() => setShowBrewingMethodDropdown((prev) => !prev)}
+            >
+              <Text style={styles.selectText}>{brewingMethods[brewIndex]}</Text>
+              <Ionicons name={showBrewingMethodDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={palette.muted} />
+            </Pressable>
+            {showBrewingMethodDropdown ? (
+              <View style={styles.dropdownCard}>
+                <ScrollView nestedScrollEnabled style={styles.dropdownList}>
+                  {brewingMethods.map((item, index) => (
+                    <Pressable
+                      key={item}
+                      style={[
+                        styles.dropdownItem,
+                        index === brewIndex && styles.dropdownItemSelected,
+                      ]}
+                      onPress={() => {
+                        setBrewIndex(index);
+                        setShowBrewingMethodDropdown(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.dropdownItemText,
+                          index === brewIndex && styles.dropdownItemTextSelected,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {item}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <Text style={styles.sectionLabel}>STEPS</Text>
+            {steps.map((step, index) => (
+              <View key={`${step.title}-${index}`} style={styles.stepRow}>
+                <View style={styles.stepIndicator}>
+                  <Text style={styles.stepNumber}>{index + 1}</Text>
+                </View>
+                <View style={styles.stepCard}>
+                  <View style={styles.stepCardHeader}>
+                    <Text style={styles.stepTitle}>{step.title}</Text>
+                    <Pressable style={styles.stepRemoveButton} onPress={() => handleRemoveStep(index)}>
+                      <Ionicons name="trash-outline" size={14} color={palette.accentDeep} />
+                    </Pressable>
+                  </View>
+                  <Text style={styles.stepBody}>{step.body}</Text>
+                </View>
+              </View>
+            ))}
+
+            {!showStepInput ? (
+              <Pressable style={styles.addStepRow} onPress={() => setShowStepInput(true)}>
+                <View style={styles.addStepCircle}>
+                  <Ionicons name="add" size={14} color={palette.accentDeep} />
+                </View>
+                <Text style={styles.addStepText}>Add Next Step</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.inlineForm}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Step title"
+                  placeholderTextColor={palette.muted}
+                  value={stepDraft.title}
+                  onChangeText={(text) =>
+                    setStepDraft((prev) => ({
+                      ...prev,
+                      title: text.slice(0, MAX_STEP_TITLE_LENGTH),
+                    }))
+                  }
+                  maxLength={MAX_STEP_TITLE_LENGTH}
+                  onFocus={handleStepInputFocus}
+                />
+                <TextInput
+                  style={[styles.input, styles.stepInput]}
+                  placeholder="Step description"
+                  placeholderTextColor={palette.muted}
+                  value={stepDraft.body}
+                  onChangeText={(text) =>
+                    setStepDraft((prev) => ({
+                      ...prev,
+                      body: text.slice(0, MAX_STEP_BODY_LENGTH),
+                    }))
+                  }
+                  multiline
+                  maxLength={MAX_STEP_BODY_LENGTH}
+                  onFocus={handleStepInputFocus}
+                />
+                <View style={styles.inlineActions}>
+                  <Pressable style={styles.primaryAction} onPress={handleAddStep}>
+                    <Text style={styles.primaryActionText}>Add Step</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.ghostAction}
+                    onPress={() => {
+                      setStepDraft({ title: '', body: '' });
+                      setShowStepInput(false);
+                    }}
+                  >
+                    <Text style={styles.ghostActionText}>Cancel</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </View>
+
+          <Pressable style={[styles.saveButton, submitting && styles.saveButtonDisabled]} onPress={handleSaveRecipe} disabled={submitting || loadingInit}>
+            {submitting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Recipe</Text>
+            )}
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
