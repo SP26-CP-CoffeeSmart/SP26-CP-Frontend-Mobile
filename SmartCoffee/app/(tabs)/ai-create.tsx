@@ -48,7 +48,6 @@ const TOPPINGS = [
   'Orange Peel',
 ];
 const BREW_METHODS = ['Espresso', 'Pour-over', 'Cold Brew', 'Phin Vietnam', 'Shaker Mix'];
-const ICE_RATIOS = ['30%', '50%', '70%'];
 const FROTHING_LEVELS = [
   { label: 'Micro-foam', icon: 'local-cafe' },
   { label: 'Airy-foam', icon: 'grain' },
@@ -119,7 +118,9 @@ export default function AiCreateScreen() {
   const [topping, setTopping] = useState('Pink-salt');
   const [brewMethod, setBrewMethod] = useState('Espresso');
   const [brewTime, setBrewTime] = useState(3);
-  const [iceRatio, setIceRatio] = useState('30%');
+  const [isHot, setIsHot] = useState(false);
+  const [isCold, setIsCold] = useState(true);
+  const [hasIce, setHasIce] = useState(false);
   const [frothingLevel, setFrothingLevel] = useState('Micro-foam');
   const [difficulty, setDifficulty] = useState('Easy');
   const [selectedEquipments, setSelectedEquipments] = useState<string[]>(
@@ -178,6 +179,98 @@ export default function AiCreateScreen() {
   };
 
   const isProPlan = subscriptionPackageName?.toLowerCase() === 'pro';
+
+  const currentBeverageName = useMemo(() => {
+    if (selectedBeverage?.name) return String(selectedBeverage.name);
+    if (selectedBeverage?.beverageName) return String(selectedBeverage.beverageName);
+    const match = beveragesList.find((item) => item.id === selectedBeverageId);
+    return match?.name ?? '';
+  }, [beveragesList, selectedBeverage, selectedBeverageId]);
+
+  const normalizeBeverageName = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+  const beverageNameFlags = useMemo(() => {
+    const normalized = normalizeBeverageName(currentBeverageName);
+    return {
+      hotOnly: normalized.includes('nong'),
+      coldAllowed: normalized.includes('lanh'),
+    };
+  }, [currentBeverageName]);
+
+  useEffect(() => {
+    if (beverageNameFlags.hotOnly) {
+      setIsHot(true);
+      setIsCold(false);
+      setHasIce(false);
+      return;
+    }
+
+    if (beverageNameFlags.coldAllowed && isHot) {
+      setIsHot(false);
+    }
+  }, [beverageNameFlags, isHot]);
+
+  const handleToggleHot = (next: boolean) => {
+    if (beverageNameFlags.coldAllowed) {
+      setIsHot(false);
+      return;
+    }
+
+    if (!next && !isCold && !hasIce) {
+      setIsHot(true);
+      return;
+    }
+
+    setIsHot(next);
+    if (next) {
+      setIsCold(false);
+      setHasIce(false);
+    }
+  };
+
+  const handleToggleCold = (next: boolean) => {
+    if (beverageNameFlags.hotOnly) {
+      setIsCold(false);
+      return;
+    }
+
+    if (!next && hasIce) {
+      setIsCold(true);
+      return;
+    }
+
+    if (!next && !isHot) {
+      setIsCold(true);
+      return;
+    }
+
+    setIsCold(next);
+    if (next) {
+      setIsHot(false);
+    }
+  };
+
+  const handleToggleIce = (next: boolean) => {
+    if (beverageNameFlags.hotOnly) {
+      setHasIce(false);
+      return;
+    }
+
+    if (!next && !isHot && !isCold) {
+      setHasIce(true);
+      return;
+    }
+
+    setHasIce(next);
+    if (next) {
+      setIsHot(false);
+      setIsCold(true);
+    }
+  };
 
   const fetchBeverages = useCallback(async (isLoadMore = false, page = 1, search = '') => {
     if (!coffeeShopId) return;
@@ -421,7 +514,9 @@ export default function AiCreateScreen() {
       brewing: {
         selectedMethodId: '',
         brewingTimeMinutes: brewTime,
-        selectedIceRatio: Number.parseInt(iceRatio.replace('%', ''), 10) || 0,
+        isHot,
+        isCold,
+        hasIce,
         selectedFrothingId: frothingLevel,
         selectedDifficultyId: difficulty,
         selectedEquipmentId: selectedEquipments.length > 0 ? selectedEquipments.join(', ') : '',
@@ -794,24 +889,39 @@ export default function AiCreateScreen() {
 
               <View style={styles.sectionSpacing} />
 
-              <View style={styles.groupHeader}>
-                <ThemedText style={styles.subSectionTitle}>Ice Ratio</ThemedText>
-                <ThemedText style={styles.groupValue}>{iceRatio}</ThemedText>
-              </View>
-              <View style={styles.tags}>
-                {ICE_RATIOS.map((item) => {
-                  const isSelected = item === iceRatio;
-                  return (
-                    <Pressable
-                      key={item}
-                      onPress={() => setIceRatio(item)}
-                      style={[styles.tag, isSelected && styles.tagSelected]}>
-                      <ThemedText style={[styles.tagText, isSelected && styles.tagTextSelected]}>
-                        {item}
-                      </ThemedText>
-                    </Pressable>
-                  );
-                })}
+              <ThemedText style={styles.subSectionTitle}>Attributes</ThemedText>
+              <ThemedText style={styles.helperText}>Toggle to mark hot, cold, or ice.</ThemedText>
+              <View style={styles.attributesCard}>
+                <View style={styles.attributeRow}>
+                  <ThemedText style={styles.attributeLabel}>Hot</ThemedText>
+                  <Switch
+                    value={isHot}
+                    onValueChange={handleToggleHot}
+                    disabled={beverageNameFlags.coldAllowed}
+                    trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
+                    thumbColor={isHot ? '#6B3E1F' : '#A3A3A3'}
+                  />
+                </View>
+                <View style={styles.attributeRow}>
+                  <ThemedText style={styles.attributeLabel}>Cold</ThemedText>
+                  <Switch
+                    value={isCold}
+                    onValueChange={handleToggleCold}
+                    disabled={beverageNameFlags.hotOnly}
+                    trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
+                    thumbColor={isCold ? '#6B3E1F' : '#A3A3A3'}
+                  />
+                </View>
+                <View style={styles.attributeRow}>
+                  <ThemedText style={styles.attributeLabel}>Ice</ThemedText>
+                  <Switch
+                    value={hasIce}
+                    onValueChange={handleToggleIce}
+                    disabled={beverageNameFlags.hotOnly}
+                    trackColor={{ false: '#E5E5E5', true: '#D9B08C' }}
+                    thumbColor={hasIce ? '#6B3E1F' : '#A3A3A3'}
+                  />
+                </View>
               </View>
 
               <View style={styles.sectionSpacing} />
@@ -1473,6 +1583,23 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 12,
+  },
+  attributesCard: {
+
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
+    marginBottom: 12,
+  },
+  attributeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  attributeLabel: {
+    fontSize: 13,
+    color: '#2D2D2D',
+    fontFamily: Fonts.rounded,
   },
   pricingRow: {
     flexDirection: 'row',

@@ -43,6 +43,8 @@ interface RecipeData {
     recipeId: number;
     recipeName: string;
     image: string;
+    isHot?: boolean;
+    isCold?: boolean;
     beverageName?: string;
     beverage?: {
         name?: string;
@@ -145,6 +147,7 @@ export default function RecipeDetailScreen() {
     const [itemSizes, setItemSizes] = useState<MenuItemSize[]>([]);
     const [activeSizeId, setActiveSizeId] = useState<number | null>(null);
     const [ingredientImageById, setIngredientImageById] = useState<Record<number, string>>({});
+    const [ingredientCatalogImageById, setIngredientCatalogImageById] = useState<Record<number, string>>({});
     const [uploadingRecipeImage, setUploadingRecipeImage] = useState(false);
 
     const resolvedRecipeEntityId = useMemo(() => {
@@ -216,6 +219,59 @@ export default function RecipeDetailScreen() {
 
         fetchInventoryImages();
     }, [coffeeShopId]);
+
+    useEffect(() => {
+        const fetchIngredientCatalogImages = async () => {
+            try {
+                const nextMap: Record<number, string> = {};
+                let page = 1;
+                const pageSize = 500;
+                let totalPages = 1;
+
+                while (page <= totalPages) {
+                    const response = await authorizedFetch(
+                        `${API_ENDPOINTS.ingredient.getAll()}?page=${page}&pageSize=${pageSize}`
+                    );
+                    if (!response.ok) {
+                        break;
+                    }
+
+                    const payload = await response.json();
+                    const items = Array.isArray(payload?.items)
+                        ? payload.items
+                        : Array.isArray(payload?.data)
+                            ? payload.data
+                            : Array.isArray(payload)
+                                ? payload
+                                : [];
+
+                    totalPages = Number(payload?.totalPages ?? totalPages);
+
+                    items.forEach((entry: any) => {
+                        const ingredientId = Number(entry?.ingredientId ?? entry?.IngredientId ?? 0);
+                        if (!Number.isFinite(ingredientId) || ingredientId <= 0) return;
+
+                        const image = resolveRemoteImageUrl(entry?.image ?? entry?.imageUrl ?? null);
+                        if (image) {
+                            nextMap[ingredientId] = image;
+                        }
+                    });
+
+                    if (items.length === 0) {
+                        break;
+                    }
+
+                    page += 1;
+                }
+
+                setIngredientCatalogImageById(nextMap);
+            } catch {
+                // Ignore ingredient catalog lookup failures.
+            }
+        };
+
+        fetchIngredientCatalogImages();
+    }, []);
 
     const safeParseJson = (value?: string) => {
         if (!value) return null;
@@ -454,11 +510,15 @@ export default function RecipeDetailScreen() {
             if (Number.isFinite(resolvedRecipeId) && resolvedRecipeId > 0) {
                 const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${resolvedRecipeId}`);
                 const raw = await response.json();
+                console.log('[RecipeDetail] ShopRecipe response:', raw);
+                
                 const data = unwrapPayload<RecipeData>(raw);
+
                 if (data) {
                     setRecipes([data]);
                     setRecipeData(data);
                     setActiveRecipeIndex(0);
+                                    
                 } else {
                     setRecipes([]);
                     setRecipeData(null);
@@ -470,6 +530,7 @@ export default function RecipeDetailScreen() {
             if (Number.isFinite(resolvedMenuItemId) && resolvedMenuItemId > 0) {
                 const menuItemResponse = await authorizedFetch(`${AUTH_BASE_URL}/MenuItem/${resolvedMenuItemId}`);
                 const menuItemRaw = await menuItemResponse.json();
+                console.log('[RecipeDetail] MenuItem response:', menuItemRaw);
                 const menuItemData = unwrapPayload<any>(menuItemRaw) ?? menuItemRaw;
                 const menuItemRecipe = menuItemData?.shopRecipe ?? null;
                 const menuItemRecipeId = Number(menuItemRecipe?.recipeId ?? 0);
@@ -477,6 +538,7 @@ export default function RecipeDetailScreen() {
                 if (menuItemRecipeId > 0) {
                     const recipeResponse = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/${menuItemRecipeId}`);
                     const recipeRaw = await recipeResponse.json();
+                    console.log('[RecipeDetail] ShopRecipe (from MenuItem) response:', recipeRaw);
                     const recipeDataFromApi = unwrapPayload<RecipeData>(recipeRaw);
                     if (recipeDataFromApi) {
                         setRecipes([recipeDataFromApi]);
@@ -509,6 +571,7 @@ export default function RecipeDetailScreen() {
 
             const response = await authorizedFetch(`${AUTH_BASE_URL}/ShopRecipe/by-beverage/${fallbackId}`);
             const raw = await response.json();
+            console.log('[RecipeDetail] ShopRecipe by beverage response:', raw);
             const unwrapped = unwrapPayload<any>(raw);
             const data = Array.isArray(unwrapped) ? unwrapped : unwrapped;
 
@@ -703,8 +766,10 @@ export default function RecipeDetailScreen() {
         const tags = [];
         if (recipeData.flavorStylePrimary) tags.push(recipeData.flavorStylePrimary);
         if (recipeData.flavorStyleSecondary) tags.push(recipeData.flavorStyleSecondary);
-        if (recipeData.hasIce) tags.push('Có Đá');
-        if (recipeData.containsMilk) tags.push('Có Sữa');
+        if (recipeData.hasIce) tags.push('Has Ice');
+        if (recipeData.containsMilk) tags.push('Contains Milk');
+        if (recipeData.isHot) tags.push('Hot');
+        if (recipeData.isCold) tags.push('Cold');
 
         return {
             name: recipeData.recipeName || '',
@@ -960,9 +1025,11 @@ export default function RecipeDetailScreen() {
         );
         const inventoryImage =
             Number.isFinite(ingredientId) && ingredientId > 0 ? ingredientImageById[ingredientId] : null;
+        const catalogImage =
+            Number.isFinite(ingredientId) && ingredientId > 0 ? ingredientCatalogImageById[ingredientId] : null;
         const resolved =
             resolveRemoteImageUrl(
-                item?.image ?? item?.imageUrl ?? item?.ingredient?.image ?? inventoryImage ?? null
+                item?.image ?? item?.imageUrl ?? item?.ingredient?.image ?? catalogImage ?? inventoryImage ?? null
             ) ??
             fallbackIngredientImage;
 
